@@ -1,0 +1,15237 @@
+#Requires AutoHotkey v2.0
+#SingleInstance Force
+InstallKeybdHook(true, true)
+InstallMouseHook(true, true)
+#MaxThreads 255                    ; (the default of 10 can make a hotkey get ignored while many timers are running)
+ProcessSetPriority("High")
+A_MaxHotkeysPerInterval := 99000000
+; No log files are written. (To help find a problem, an empty file called debug.on next to the script switches the logs on: configs\hotkeys.log and configs\lagswitch.log.)
+; the folder the macro keeps its files in: a folder called M0MENT4M (with configs, tools, companion inside) next to this script
+Global AppBase := IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir
+Global AppDir := AppBase "\M0MENT4M"                ; everything the macro creates lives in this one folder next to the script
+try DirCreate(AppDir)
+for _d in ["configs", "tools", "companion"] {         ; files from an older version (next to the script) move into it once
+    if (DirExist(AppBase "\" _d) && !DirExist(AppDir "\" _d))
+        try DirMove(AppBase "\" _d, AppDir "\" _d)
+}
+Global DebugLogOn := (FileExist(AppDir "\debug.on") || FileExist(AppBase "\debug.on")) ? true : false
+SetKeyDelay(-1, -1)
+SetWinDelay(-1)
+SetControlDelay(-1)
+SendMode("Input")
+
+Global RawMouseDeltaX := 0
+Global StrafeMouseThreshold := 1
+Global StrafeCurrentDir := "none"
+Global RawInputRegistered := false
+CoordMode("Mouse", "Screen")
+
+; --- Globals & Theme ---
+Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
+Global ConfigDir := AppDir "\configs"
+Global ConfigExt := ".json"
+
+Global AccentColor := "D98484"
+Global BgColor := "000000"
+Global IconBgColor := "000000"
+Global PanelColor := "111111"
+Global CurrentTab := 1
+Global ShowSidebarIndicators := false
+Global ShowStatusNotifs := true
+Global HudOpacity := 220
+Global HudPosition := "Top-Left"
+Global BlinkTimers := Map()
+Global AllTextControls := []
+Global AllBgControls := []
+Global RainbowSegCount := 40
+Global RainbowBarHeight := 4
+Global RainbowHueOffset := 0
+Global RainbowBarW := 480
+Global RainbowCanvas := "", RainbowMemDC := 0, RainbowBmp := 0, RainbowBmpW := 0
+Global RainbowBarSegments := []
+
+; --- Macro States & Keys ---
+JumpKey := "Space"
+CKey := "c"
+SKey := "s"
+TriggerKey := ""
+isMacroRunning := false
+
+BhopKey := ""
+isBhopRunning := false
+BhopHoldKey := ""
+IsBhopHoldChecked := false
+BhopHeld := false
+
+StrafeKey := ""
+isStrafeActive := false
+Global IsEDashStrafe := false
+StrafeDistance := 20
+StrafeDelay := 6
+StrafeTicks := 15
+
+ComboKey := ""
+isComboRunning := false
+
+CSpamKey := ""
+isCSpamRunning := false
+CSpamSpeed := 50
+
+ClickKey := ""
+isClickRunning := false
+ClickSpeed := 1
+
+
+SpinbotKey := ""
+isSpinbotRunning := false
+
+; --- System Binds ---
+Global ReloadKey := "Insert"
+Global MinimizeKey := "F8"
+Global MacroLockKey := "F5"
+Global ExitKey := "Delete"
+
+; --- Checkbox States ---
+Global IsSlideChecked := false
+Global IsSlideBehindChecked := false
+Global SlideTurnAmount := 1400
+Global SlideTurnedBehind := false
+Global TipMap := Map()
+Global TipLastCtl := 0
+Global TipHoverStart := 0
+Global TipShownCtl := 0
+Global CurrentDesign := "Classic", StartDesign := "M0MENT4M", SPSkin := ""
+Global VigSoundIdx := 1, VigSoundFile := "", VigVol := 100, VigMulti := [], VigMultiLast := 0, BurstSyncSound := false, BurstSyncPill := true
+Global SPCust := Map(), SPDesignApplying := false
+Global CompOn := false, CompScale := 100, CompX := 0, CompY := 0, CompCustom := false, CompHair := 1, CompHat := true
+Global CompFollow := true, CompBubbleOn := true, CompReactOn := true
+Global CompGui := "", CompDC := 0, CompBmp := 0, CompG := 0, CompThru := true, CompDrag := 0
+Global CompBubbleText := "", CompBubbleStart := 0, CompBubbleUntil := 0, CompNextChat := 0
+Global CompW := 240, CompH := 392, CompImg := 0, CompImgW := 0, CompImgH := 0, CompUseImg := false, CompSurfW := 0, CompSurfH := 0, CompChar := 1, CompStyle := 2, CompCache := 0, CompCacheKey := "", CompImgs := Map(), CompLastWho := ""
+Global CompHairCols := [[214, 220, 238], [255, 150, 192], [120, 170, 255], [64, 54, 104], [255, 214, 122], [176, 124, 232]]
+Global CompLinesElf := ["I'll be watching over you.", "Please don't push yourself too hard.", "You are doing wonderfully.", "Shall we keep going?"
+    , "Stay hydrated, alright?", "A calm mind moves faster.", "I believe in you.", "Take a breath. You've got this."
+    , "Please don't die out there.", "Bhop away from the nextbots, and you'll win.", "You're far too good to need a macro... but I'll cheer anyway."
+    , "Show those haters what you can do.", "Many thanks to Aimwhere for the design.", "My favourite nextbot is Scout, if you must know."
+    , "Run that macro, gang.", "Imagine using Delta... how unfortunate.", "Stilts and Hermes Shoes are the best perks."
+    , "Please use the lagswitch carefully.", "Yeko is the best.", "If you find any more bugs, please report them in the Discord."
+    , "Imagine using X-Mouse... truly.", "M0MENT4M is the best macro."]
+Global CompLines := ["Nya~ good luck out there!", "Don't forget to drink some water, nya~", "You're doing great, nya!", "Boo! Did I scare you? Hehe!"
+    , "Happy Halloween, nya~", "I'm keeping an eye on your macros.", "Take a little break soon, ok?", "Lagswitch on private servers only, remember!"
+    , "Nya~ this pumpkin is so comfy.", "Magic is better with you around."
+    , "Don't die out there, nya~!", "Bhop away from the nextbots to win, nya!", "You're too good to be using a macro, hehe!"
+    , "Flex on those haters, nya~!", "Thanks Aimwhere for the design, nya!", "My fav nextbot is Scout, hehe!"
+    , "Run that macro, gang! Nya~", "Imagine using Delta... boo!", "Stilts and Hermes Shoes are the best perks, nya!"
+    , "Use the lagswitch carefully, ok? Nya~", "Yeko is the best, nya!", "Report any further bugs in the Discord, nya~"
+    , "Imagine using X-Mouse, hehe!", "M0MENT4M is the best macro, nya~!"]
+
+Global CompHairSel := CompHairSelC()
+
+class CompCharSelC {
+    items := ["Automatic (follows the design)", "Elfaria", "Blair"]
+    Value => CompChar
+    Text => this.items[CompChar]
+    Choose(i) {
+        global CompChar
+        CompChar := i
+        SPSavePrefs()
+        CompSkinChanged()
+        NLRequest()
+    }
+}
+Global CompCharSel := CompCharSelC()
+
+class CompStyleSelC {
+    items := ["2D artwork", "3D animated"]
+    Value => CompStyle
+    Text => this.items[CompStyle]
+    Choose(i) {
+        global CompStyle
+        CompStyle := i
+        SPSavePrefs()
+        CompSkinChanged()
+        NLRequest()
+        if (i = 1 && !CompHaveArt())
+            SetTimer(CompGetArt, -80)
+    }
+}
+Global CompStyleSel := CompStyleSelC()
+Global PreDesignColors := ""
+Global PanelBorderPx := 2
+Global FadeAlpha := 255, FadeFrom := 255, FadeTo := 255, FadeStart := 0
+Global AnimMoves := Map()
+Global HoverMap := Map(), HoverAnim := Map(), HoverCur := 0
+Global Intro := ""
+Global LayoutMode := "classic"
+Global SkeetPages := [[], [], [], [], [], [], []]
+Global AdvRows := []
+Global SkeetGroups := []
+Global SkeetChrome := []
+Global SkeetTabs := []
+Global SkeetOnly := []
+Global OrigPos := Map()
+Global IsBhopChecked := false
+Global IsStrafeChecked := false
+Global IsComboChecked := false
+Global IsCSpamChecked := false
+Global IsClickChecked := false
+Global IsSpinbotChecked := false
+
+; --- Lagswitch ---
+Global FreezeDuration := 200
+Global LagKey := ""
+Global currentLagKey := ""
+Global TargetProcess := "RobloxPlayerBeta.exe"
+Global IsLagPrecisionChecked := false
+Global IsLagBurstChecked := false
+Global ConfigVersion := 2
+Global LagBurstCount := 3, LagBurstGap := 150, FzBurstResumed := false, LagHeldOK := false, LagLastFire := 0
+Global IsLagHoldChecked := false
+Global IsLagVignetteChecked := false
+Global VignetteColor := "FF0000"
+Global VignetteThickness := 8
+
+currentSlideKey := TriggerKey
+currentBhopKey := BhopKey
+currentBhopHoldKey := BhopHoldKey
+currentStrafeKey := StrafeKey
+currentComboKey := ComboKey
+currentCSpamKey := CSpamKey
+currentClickKey := ClickKey
+currentSpinbotKey := SpinbotKey
+
+currentReloadKey := ReloadKey
+currentMinimizeKey := MinimizeKey
+currentMacroLockKey := MacroLockKey
+currentExitKey := ExitKey
+
+; === F5 PANIC LOCK STATE ===
+SavedSlideChecked := 0
+SavedBhopChecked := 0
+SavedStrafeChecked := 0
+SavedComboChecked := 0
+SavedCSpamChecked := 0
+SavedClickChecked := 0
+SavedSpinbotChecked := 0
+IsMacrosLocked := false
+
+; --- GUI Build ---
+MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow -Theme +Resize +MinSize480x860", "M0MENT4M")
+MainGui.BackColor := "0x111111"
+
+; --- Skeet-only chrome: outer frame + group box pool. Created first so it sits behind every other control. ---
+FrameBrd1 := MainGui.Add("Text", "x0 y0 w10 h10 Background000000", "")
+FrameBrd2 := MainGui.Add("Text", "x1 y1 w10 h10 Background2E2E2E", "")
+FrameBrd3 := MainGui.Add("Text", "x2 y2 w10 h10 Background0D0D0D", "")
+FrameBg := MainGui.Add("Text", "x3 y3 w10 h10 Background" PanelColor, "")
+TabDivider := MainGui.Add("Text", "x78 y32 w1 h10 Background2A2A2A", "")
+SkeetChrome.Push(FrameBrd1, FrameBrd2, FrameBrd3, FrameBg, TabDivider)
+SkeetOnly.Push(FrameBrd1, FrameBrd2, FrameBrd3, FrameBg, TabDivider)
+_gbDefs := [[1, 1, "Movement"], [1, 2, "Movement Settings"], [2, 1, "Macro Keybinds"], [2, 2, "Keybind Tips"]
+          , [3, 1, "Lagswitch"], [3, 2, "Ticks && Vignette"], [4, 1, "Colors && Themes"], [4, 2, "HUD && Overlay"], [4, 2, "System Hotkeys"]
+          , [5, 1, "Information"], [5, 2, "Changelog && Notes"], [6, 1, "Config Manager"], [6, 2, "Storage && Config Info"]
+          , [3, 2, "Freeze Effect"], [4, 1, "HUD Style"], [7, 1, "Performance HUD"], [7, 2, "On-screen Widgets"]]
+Loop _gbDefs.Length {
+    _pg := _gbDefs[A_Index][1]
+    _gOb := MainGui.Add("Text", "x0 y0 w10 h10 Background2E2E2E", "")
+    _gFb := MainGui.Add("Text", "x0 y0 w10 h10 Background" PanelColor, "")
+    _gTt := MainGui.Add("Text", "x0 y0 w10 h15 c0xE0E0E0 Background" PanelColor, _gbDefs[A_Index][3])
+    _gTt.SetFont("s8 Bold", "Tahoma")
+    SkeetGroups.Push({ob: _gOb, fb: _gFb, tt: _gTt, page: _pg, col: _gbDefs[A_Index][2], title: _gbDefs[A_Index][3]})
+    SkeetPages[_pg].Push(_gOb, _gFb, _gTt)
+    SkeetOnly.Push(_gOb, _gFb, _gTt)
+}
+TitleShadow := MainGui.Add("Text", "x8 y6 w280 h30 c0x000000 BackgroundTrans", "M0MENT4M")
+TitleShadow.SetFont("s18 Bold", "Arial Black")
+
+TitleGlow := MainGui.Add("Text", "x7 y5 w280 h30 c0x2A0A0A BackgroundTrans", "M0MENT4M")
+TitleGlow.SetFont("s18 Bold", "Arial Black")
+
+TitleText := MainGui.Add("Text", "x6 y4 w280 h30 c0xD98484 BackgroundTrans", "M0MENT4M")
+TitleText.SetFont("s18 Bold", "Arial Black")
+
+BtnMin := MainGui.Add("Text", "x396 y8 w34 h22 Center +0x200", "_")
+BtnMin.SetFont("s8 Bold", "Consolas")
+BtnMin.Opt("Background" IconBgColor " c" AccentColor)
+BtnMin.OnEvent("Click", (*) => MinimizeApp())
+
+BtnClose := MainGui.Add("Text", "x434 y8 w34 h22 Center +0x200", "X")
+BtnClose.SetFont("s8 Bold", "Consolas")
+BtnClose.Opt("Background" IconBgColor " c" AccentColor)
+BtnClose.OnEvent("Click", (*) => ExitWithAnimation())
+
+; --- Sidebar + content panel backgrounds ---
+SidebarBg := MainGui.Add("Text", "x0 y38 w76 h602 Background0A0A0A", "")
+PanelBorderBg := MainGui.Add("Text", "x85 y47 w380 h593 Background2A2A2A", "")
+PanelFillBg := MainGui.Add("Text", "x87 y49 w376 h591 Background171717", "")
+MainGui.OnEvent("Size", GuiResize)
+
+; --- Rainbow top border strip based on skeet menu ---
+Loop RainbowSegCount {
+    seg := MainGui.Add("Text", "x0 y0 w10 h" RainbowBarHeight, "")
+    seg.Visible := false
+    RainbowBarSegments.Push(seg)
+}
+; The strip is one control painted from a pre-rendered bitmap (cheap to scroll, see RainbowTick).
+RainbowCanvas := MainGui.Add("Text", "x0 y0 w480 h" RainbowBarHeight " Background000000", "")
+PositionRainbowBar(480)
+
+; --- Sidebar icon nav  ---
+TabNames := ["MACROS", "KEYBINDS", "LAGSWITCH", "MISC", "INFO", "CONFIG", "PERFORMANCE"]
+TabGlyphs := ["⚡", "⌨", "⚠", "⚙", "ℹ", "💾", "⏱"]
+TabIconY := [58, 118, 178, 238, 298, 358, 418]
+
+SideBtns := []
+Loop 7 {
+    idx := A_Index
+    ib := MainGui.Add("Text", "x13 y" TabIconY[idx] " w50 h50 Center +0x200", TabGlyphs[idx])
+    ib.SetFont("s18 Bold", "Segoe UI Symbol")
+    ib.OnEvent("Click", SwitchTab.Bind(idx))
+    SideBtns.Push(ib)
+}
+AccentBar := MainGui.Add("Text", "x0 y58 w4 h50 BackgroundD98484", "")
+
+; --- fucking tiktok who gives a fucks ---
+TikTokBtn := MainGui.Add("Text", "x13 y482 w50 h50 Center +0x200", "♪")
+TikTokBtn.SetFont("s18 Bold", "Segoe UI Symbol")
+TikTokBtn.Opt("Background" IconBgColor " c" AccentColor)
+TikTokBtn.OnEvent("Click", (*) => Run("https://www.tiktok.com/@yoshimixu3"))
+
+; --- Skeet tab strip (6 tabs with glyph + label) ---
+_skNames := ["MACRO", "BINDS", "LG", "MISC", "INFO", "CONFIG", "PERF"]
+_skGlyphs := ["⚡", "⌨", "⌛", "⚙", "ℹ", "💾", "⏱"]
+_skY := [36, 102, 168, 234, 300, 366, 432]
+Loop 7 {
+    _i := A_Index
+    _ac := MainGui.Add("Text", "x10 y" _skY[_i] " w3 h62 Background111111", "")
+    _tb := MainGui.Add("Text", "x13 y" _skY[_i] " w60 h62 Background111111", "")
+    _tb.OnEvent("Click", SwitchTab.Bind(_i))
+    _tg := MainGui.Add("Text", "x13 y" (_skY[_i] + 8) " w60 h26 Center +0x200 Background111111 c0x8C8C8C", _skGlyphs[_i])
+    _tg.SetFont("s15 Bold", "Segoe UI Symbol")
+    _tg.OnEvent("Click", SwitchTab.Bind(_i))
+    _tl := MainGui.Add("Text", "x13 y" (_skY[_i] + 36) " w60 h20 Center +0x200 Background111111 c0x666666", _skNames[_i])
+    _tl.SetFont("s7 Bold", "Tahoma")
+    _tl.OnEvent("Click", SwitchTab.Bind(_i))
+    SkeetTabs.Push({ac: _ac, tb: _tb, tg: _tg, tl: _tl})
+    SkeetChrome.Push(_ac, _tb, _tg, _tl)
+    SkeetOnly.Push(_ac, _tb, _tg, _tl)
+}
+Global SkeetTabY := _skY
+SkSlideBar := MainGui.Add("Text", "x10 y36 w3 h62 Background" AccentColor, "")
+SkeetChrome.Push(SkSlideBar)
+SkeetOnly.Push(SkSlideBar)
+
+; --- Screen overlay HUD for macro indicators (always-on-top, click-through): see "Macro HUD" section below ---
+Global HudDots := []
+Global IndicatorHud := SPHudC()
+
+; Keep the HUD on top when tabbing back into the game
+SetTimer(KeepHudOnTop, 1000)
+
+GetHudShowStr() {
+    global HudPosition
+    global HudCustom, HudCX, HudCY, HudH
+    hudW := 156
+    hudH := HudH
+    if (HudCustom)
+        return {x: HudCX, y: HudCY}
+    sw := A_ScreenWidth
+    sh := A_ScreenHeight
+    switch HudPosition {
+        case "Top-Left":     return {x: 8, y: 80}
+        case "Top-Right":    return {x: sw - hudW - 8, y: 80}
+        case "Bottom-Left":  return {x: 8, y: sh - hudH - 8}
+        case "Bottom-Right": return {x: sw - hudW - 8, y: sh - hudH - 8}
+        default:             return {x: 8, y: 80}
+    }
+}
+
+KeepHudOnTop() {
+    global IndicatorHud, ShowSidebarIndicators
+    if (!ShowSidebarIndicators)
+        return
+    try {
+        WinSetAlwaysOnTop(1, "ahk_id " IndicatorHud.Hwnd)
+        if (!WinExist("ahk_id " IndicatorHud.Hwnd) || !DllCall("IsWindowVisible", "Ptr", IndicatorHud.Hwnd)) {
+            pos := GetHudShowStr()
+            IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
+        }
+    }
+}
+
+UpdateHudPosition(*) {
+    global HudPosition, HudPosDDL, IndicatorHud, ShowSidebarIndicators, HudCustom
+    HudPosition := HudPosDDL.Text
+    HudCustom := false
+    SPSavePrefs()
+    if (ShowSidebarIndicators) {
+        pos := GetHudShowStr()
+        IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
+    }
+}
+
+UpdateHudOpacity(*) {
+    global HudOpacity, HudOpacitySlider, LblHudOpacity, IndicatorHud
+    HudOpacity := Round(HudOpacitySlider.Value * 2.55)
+    pct := HudOpacitySlider.Value
+    LblSet(LblHudOpacity, pct "%")
+    HudRequest()
+}
+
+; --- Page title headers  ---
+PageTitles := []
+for idx, nm in TabNames {
+    t := MainGui.Add("Text", "x104 y58 w340 c0xD98484 BackgroundTrans", nm)
+    t.SetFont("s11 Bold", "Consolas")
+    PageTitles.Push(t)
+}
+MainGui.SetFont("s9 c0xD98484", "Consolas")
+
+PageControls := [[], [], [], [], [], [], []]
+
+; ===== PAGE 1: MACROS =====
+ChkSlide := MainGui.Add("Text", "x104 y112 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkSlide.SetFont("s10 Bold")
+LblSlide := MainGui.Add("Text", "x128 y114 w276 c0xD98484 BackgroundTrans", "INF SLIDE")
+ChkSlide.OnEvent("Click", ToggleSlideBox)
+LblSlide.OnEvent("Click", ToggleSlideBox)
+
+ChkSlideBehind := MainGui.Add("Text", "x128 y136 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkSlideBehind.SetFont("s10 Bold")
+LblSlideBehind := MainGui.Add("Text", "x152 y138 w250 c0xD98484 BackgroundTrans", "Slide turn camera")
+ChkSlideBehind.OnEvent("Click", ToggleSlideBehindBox)
+LblSlideBehind.OnEvent("Click", ToggleSlideBehindBox)
+LblSlideTurn := MainGui.Add("Text", "x128 y160 w248 c0xD98484 BackgroundTrans", "Turn Amount: 1400")
+SlideTurnSlider := MainGui.Add("Slider", "x128 y178 w248 Range200-4000", 1400)
+SlideTurnSlider.OnEvent("Change", UpdateSlideTurn)
+
+ChkBhop := MainGui.Add("Text", "x104 y218 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkBhop.SetFont("s10 Bold")
+LblBhop := MainGui.Add("Text", "x128 y220 w276 c0xD98484 BackgroundTrans", "AUTO BHOP")
+ChkBhop.OnEvent("Click", ToggleBhopBox)
+LblBhop.OnEvent("Click", ToggleBhopBox)
+
+ChkBhopHold := MainGui.Add("Text", "x128 y242 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkBhopHold.SetFont("s10 Bold")
+LblBhopHold := MainGui.Add("Text", "x152 y244 w250 c0xD98484 BackgroundTrans", "Bhop hold")
+ChkBhopHold.OnEvent("Click", ToggleBhopHoldBox)
+LblBhopHold.OnEvent("Click", ToggleBhopHoldBox)
+
+ChkStrafe := MainGui.Add("Text", "x104 y278 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkStrafe.SetFont("s10 Bold")
+LblStrafe := MainGui.Add("Text", "x128 y280 w276 c0xD98484 BackgroundTrans", "AUTO STRAFER")
+ChkStrafe.OnEvent("Click", ToggleStrafeBox)
+LblStrafe.OnEvent("Click", ToggleStrafeBox)
+
+ChkCombo := MainGui.Add("Text", "x104 y312 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkCombo.SetFont("s10 Bold")
+LblCombo := MainGui.Add("Text", "x128 y314 w276 c0xD98484 BackgroundTrans", "EDASH")
+ChkCombo.OnEvent("Click", ToggleComboBox)
+LblCombo.OnEvent("Click", ToggleComboBox)
+
+ChkCSpam := MainGui.Add("Text", "x104 y346 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkCSpam.SetFont("s10 Bold")
+LblCSpam := MainGui.Add("Text", "x128 y348 w276 c0xD98484 BackgroundTrans", "CROUCH SPAM")
+ChkCSpam.OnEvent("Click", ToggleCSpamBox)
+LblCSpam.OnEvent("Click", ToggleCSpamBox)
+LblCSpamSpeed := MainGui.Add("Text", "x128 y370 w160 c0xD98484 BackgroundTrans", "Crouch speed: 50ms")
+CSpamSlider := MainGui.Add("Slider", "x128 y388 w248 Range10-200", 50)
+CSpamSlider.OnEvent("Change", UpdateCSpamSpeed)
+
+ChkClick := MainGui.Add("Text", "x104 y428 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkClick.SetFont("s10 Bold")
+LblClick := MainGui.Add("Text", "x128 y430 w276 c0xD98484 BackgroundTrans", "AUTO CLICKER")
+ChkClick.OnEvent("Click", ToggleClickBox)
+LblClick.OnEvent("Click", ToggleClickBox)
+LblClickSpeed := MainGui.Add("Text", "x128 y452 w160 c0xD98484 BackgroundTrans", "Clicker speed: 1ms")
+ClickSlider := MainGui.Add("Slider", "x128 y470 w248 Range1-200", 1)
+ClickSlider.OnEvent("Change", UpdateClickSpeed)
+
+ChkSpinbot := MainGui.Add("Text", "x104 y510 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkSpinbot.SetFont("s10 Bold")
+LblSpinbot := MainGui.Add("Text", "x128 y512 w276 c0xD98484 BackgroundTrans", "SPINBOT")
+ChkSpinbot.OnEvent("Click", ToggleSpinbotBox)
+LblSpinbot.OnEvent("Click", ToggleSpinbotBox)
+
+PageControls[1].Push(ChkSlide, LblSlide, ChkSlideBehind, LblSlideBehind, LblSlideTurn, SlideTurnSlider, ChkBhop, LblBhop, ChkBhopHold, LblBhopHold, ChkStrafe, LblStrafe, ChkCombo, LblCombo, ChkCSpam, LblCSpam, LblCSpamSpeed, CSpamSlider, ChkClick, LblClick, LblClickSpeed, ClickSlider, ChkSpinbot, LblSpinbot)
+
+; --- Hover tooltips (macros page) ---
+AddTip2(ChkSlide, LblSlide, "Infinite slide. Turn on, then press the slide key in-game to start/stop it.")
+AddTip2(ChkSlideBehind, LblSlideBehind, "When infinite slide starts, snaps the camera 180 degrees behind you.`nTurns back when you stop the slide.")
+AddTip2(SlideTurnSlider, LblSlideTurn, "Mouse pixels used for the look-behind turn.`nTune it to your sensitivity until it turns exactly 180.")
+AddTip2(ChkBhop, LblBhop, "Auto bhop. Taps jump rapidly while active.`nPress the Bhop key to toggle it (or use Hold mode).")
+AddTip2(ChkBhopHold, LblBhopHold, "Auto bhops as long as you hold your Bhop Hold key.")
+AddTip2(ChkStrafe, LblStrafe, "Auto strafer. Holds W and presses A/D depending on which way you move your mouse.")
+AddTip2(ChkCombo, LblCombo, "Edash. Holds crouch and spams jump while active.")
+AddTip2(ChkCSpam, LblCSpam, "Spams the crouch key. Use the slider to set the speed.")
+AddTip2(CSpamSlider, LblCSpamSpeed, "Delay between crouch taps in ms. Lower = faster.")
+AddTip2(ChkClick, LblClick, "Auto clicker. Toggle with its key.")
+AddTip2(ClickSlider, LblClickSpeed, "Delay between clicks in ms. Lower = faster.")
+AddTip2(ChkSpinbot, LblSpinbot, "Continuously spins your camera while active.")
+SetTimer(TipPoll, 100)
+
+; ===== PAGE 2: CONFIG =====
+p2a := MainGui.Add("Text", "x104 y193 w300 c0xD98484 BackgroundTrans", " ")
+
+p2sys := MainGui.Add("Text", "x104 y218 w300 c0xD98484 BackgroundTrans", "── SYSTEM KEYBINDS ──")
+p2sys.SetFont("s9 Bold")
+
+p2b := MainGui.Add("Text", "x104 y245 w130 c0xD98484 BackgroundTrans", "Reload Key:")
+BtnReloadKey := MainGui.Add("Text", "x239 y240 w110 h25 Center +0x200 +Border", "INSERT")
+BtnReloadKey.Opt("Background000000 c0xD98484")
+BtnReloadKey.OnEvent("Click", StartBindReload)
+
+p2c := MainGui.Add("Text", "x104 y280 w130 c0xD98484 BackgroundTrans", "Minimize Key:")
+BtnMinimizeKey := MainGui.Add("Text", "x239 y275 w110 h25 Center +0x200 +Border", "F8")
+BtnMinimizeKey.Opt("Background000000 c0xD98484")
+BtnMinimizeKey.OnEvent("Click", StartBindMinimize)
+p2c2 := MainGui.Add("Text", "x104 y303 w300 c0xD98484 BackgroundTrans", "(Tray icon always works too)")
+
+p2d := MainGui.Add("Text", "x104 y333 w150 c0xD98484 BackgroundTrans", "Macro Lock Key:")
+BtnMacroLockKey := MainGui.Add("Text", "x239 y328 w110 h25 Center +0x200 +Border", "F5")
+BtnMacroLockKey.Opt("Background000000 c0xD98484")
+BtnMacroLockKey.OnEvent("Click", StartBindMacroLock)
+p2e := MainGui.Add("Text", "x104 y356 w300 c0xD98484 BackgroundTrans", "(press again to restore)")
+
+p2f := MainGui.Add("Text", "x104 y386 w130 c0xD98484 BackgroundTrans", "Exit Key:")
+BtnExitKey := MainGui.Add("Text", "x239 y381 w110 h25 Center +0x200 +Border", "DELETE")
+BtnExitKey.Opt("Background000000 c0xD98484")
+BtnExitKey.OnEvent("Click", StartBindExit)
+
+p2colHeader := MainGui.Add("Text", "x104 y414 w300 c0xD98484 BackgroundTrans", "── COLORS ──")
+p2colHeader.SetFont("s9 Bold")
+
+; --- COLOR PICKERS ---
+p2g := MainGui.Add("Text", "x104 y444 w150 c0xD98484 BackgroundTrans", "Text Color:")
+ColorSwatchBtn := MainGui.Add("Text", "x260 y439 w100 h24 Center +0x200 +Border", "")
+ColorSwatchBtn.Opt("BackgroundD98484")
+ColorSwatchBtn.OnEvent("Click", (*) => OpenColorPicker())
+
+p2h := MainGui.Add("Text", "x104 y474 w150 c0xD98484 BackgroundTrans", "Text Background:")
+BgSwatchBtn := MainGui.Add("Text", "x260 y469 w100 h24 Center +0x200 +Border", "")
+BgSwatchBtn.Opt("Background000000")
+BgSwatchBtn.OnEvent("Click", (*) => OpenBgColorPicker())
+
+p2i := MainGui.Add("Text", "x104 y504 w150 c0xD98484 BackgroundTrans", "Icon/Button Color:")
+IconBgSwatchBtn := MainGui.Add("Text", "x260 y499 w100 h24 Center +0x200 +Border", "")
+IconBgSwatchBtn.Opt("Background000000")
+IconBgSwatchBtn.OnEvent("Click", (*) => OpenIconBgColorPicker())
+
+p2j := MainGui.Add("Text", "x104 y534 w150 c0xD98484 BackgroundTrans", "Menu Background:")
+PanelSwatchBtn := MainGui.Add("Text", "x260 y529 w100 h24 Center +0x200 +Border", "")
+PanelSwatchBtn.Opt("Background111111")
+PanelSwatchBtn.OnEvent("Click", (*) => OpenPanelColorPicker())
+
+p2indic := MainGui.Add("Text", "x104 y566 w110 c0xD98484 BackgroundTrans", "Macro HUD:")
+ChkSidebarIndicators := MainGui.Add("Text", "x218 y563 w60 h22 Center +0x200 +Border", "OFF")
+ChkSidebarIndicators.Opt("Background000000 c0xD98484")
+ChkSidebarIndicators.OnEvent("Click", ToggleSidebarIndicators)
+p2notif := MainGui.Add("Text", "x290 y566 w90 c0xD98484 BackgroundTrans", "Status HUD:")
+ChkStatusNotifs := MainGui.Add("Text", "x390 y563 w68 h22 Center +0x200 +Border", "ON")
+ChkStatusNotifs.Opt("Background000000 c0xD98484")
+ChkStatusNotifs.OnEvent("Click", ToggleStatusNotifs)
+
+p2hudpos := MainGui.Add("Text", "x104 y596 w100 c0xD98484 BackgroundTrans", "HUD Position:")
+HudPosDDL := MainGui.Add("DropDownList", "x210 y593 w120", ["Top-Left","Top-Right","Bottom-Left","Bottom-Right"])
+HudPosDDL.Opt("Background000000")
+HudPosDDL.Value := 1
+HudPosDDL.OnEvent("Change", UpdateHudPosition)
+
+p2hudopacity := MainGui.Add("Text", "x104 y628 w100 c0xD98484 BackgroundTrans", "HUD Opacity:")
+LblHudOpacity := MainGui.Add("Text", "x210 y628 w80 c0xD98484 BackgroundTrans", "86%")
+HudOpacitySlider := MainGui.Add("Slider", "x104 y648 w250 h20 Range10-100 TickInterval10 NoTicks", 86)
+HudOpacitySlider.OnEvent("Change", UpdateHudOpacity)
+
+p2k := MainGui.Add("Text", "x104 y676 w300 c0xD98484 BackgroundTrans", "── THEME PRESETS ──")
+p2k.SetFont("s9 Bold")
+
+ThemeDDL := MainGui.Add("DropDownList", "x104 y701 w150", ["Default","Cyberpunk","Matrix","Blood Moon","Ocean","Royal","Monochrome","Vaporwave","Toxic","Sunset","GitHub","Anime","Catppuccin","Valve","October"])
+ThemeDDL.Opt("Background000000")
+ThemeDDL.Value := 1
+
+ThemeApplyBtn := MainGui.Add("Text", "x264 y701 w120 h23 Center +0x200", "APPLY THEME")
+ThemeApplyBtn.Opt("Background" BgColor " c0xD98484")
+ThemeApplyBtn.OnEvent("Click", ApplyThemePreset)
+
+DesignDDL := MainGui.Add("DropDownList", "x104 y730 w150", ["M0MENT4M","Classic","Skeet","Neverlose","Halloween","Fatality"])
+DesignDDL.Opt("Background000000")
+DesignDDL.Value := 1
+DesignApplyBtn := MainGui.Add("Text", "x264 y730 w120 h23 Center +0x200", "APPLY DESIGN")
+DesignApplyBtn.Opt("Background" BgColor " c0xD98484")
+DesignApplyBtn.OnEvent("Click", ApplyDesignPreset)
+PageControls[4].Push(DesignDDL, DesignApplyBtn)
+AllTextControls.Push(DesignDDL, DesignApplyBtn)
+AllBgControls.Push(DesignDDL, DesignApplyBtn)
+AddTip(DesignApplyBtn, "Changes how the whole menu looks (fonts, borders, checkboxes).`nClassic = original look, Skeet = flat gamesense style. Macros are unaffected.")
+
+PageControls[4].Push(p2g, ColorSwatchBtn, p2h, BgSwatchBtn, p2i, IconBgSwatchBtn, p2j, PanelSwatchBtn, p2k, ThemeDDL, ThemeApplyBtn, p2colHeader, p2indic, ChkSidebarIndicators, p2notif, ChkStatusNotifs, p2hudpos, HudPosDDL, p2hudopacity, LblHudOpacity, HudOpacitySlider)
+PageControls[4].Push(p2a, p2sys, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMacroLockKey, p2e, p2f, BtnExitKey)
+
+; ===== PAGE 3: KEYBINDS =====
+p3a := MainGui.Add("Text", "x104 y100 w130 c0xD98484 BackgroundTrans", "Slide Key:")
+BtnSlideKey := MainGui.Add("Text", "x239 y95 w150 h25 Center +0x200", "NONE")
+BtnSlideKey.Opt("Background000000 c0xD98484")
+BtnSlideKey.OnEvent("Click", StartBindSlide)
+
+p3b := MainGui.Add("Text", "x104 y135 w130 c0xD98484 BackgroundTrans", "BHOP Key:")
+BtnBhopKey := MainGui.Add("Text", "x239 y130 w150 h25 Center +0x200", "NONE")
+BtnBhopKey.Opt("Background000000 c0xD98484")
+BtnBhopKey.OnEvent("Click", StartBindBhop)
+
+p3hold := MainGui.Add("Text", "x104 y170 w130 c0xD98484 BackgroundTrans", "Bhop Hold Key:")
+BtnBhopHoldKey := MainGui.Add("Text", "x239 y165 w150 h25 Center +0x200", "NONE")
+BtnBhopHoldKey.Opt("Background000000 c0xD98484")
+BtnBhopHoldKey.OnEvent("Click", StartBindBhopHold)
+
+p3c := MainGui.Add("Text", "x104 y205 w130 c0xD98484 BackgroundTrans", "Strafe Key:")
+BtnStrafeKey := MainGui.Add("Text", "x239 y200 w150 h25 Center +0x200", "NONE")
+BtnStrafeKey.Opt("Background000000 c0xD98484")
+BtnStrafeKey.OnEvent("Click", StartBindStrafe)
+
+p3d := MainGui.Add("Text", "x104 y240 w130 c0xD98484 BackgroundTrans", "Edash Key:")
+BtnComboKey := MainGui.Add("Text", "x239 y235 w150 h25 Center +0x200", "NONE")
+BtnComboKey.Opt("Background000000 c0xD98484")
+BtnComboKey.OnEvent("Click", StartBindCombo)
+
+p3e := MainGui.Add("Text", "x104 y275 w130 c0xD98484 BackgroundTrans", "CROUCH SPAM Key:")
+BtnCSpamKey := MainGui.Add("Text", "x239 y270 w150 h25 Center +0x200", "NONE")
+BtnCSpamKey.Opt("Background000000 c0xD98484")
+BtnCSpamKey.OnEvent("Click", StartBindCSpam)
+
+p3f := MainGui.Add("Text", "x104 y310 w130 c0xD98484 BackgroundTrans", "Auto Clicker Key:")
+BtnClickKey := MainGui.Add("Text", "x239 y305 w150 h25 Center +0x200", "NONE")
+BtnClickKey.Opt("Background000000 c0xD98484")
+BtnClickKey.OnEvent("Click", StartBindClick)
+
+p3h := MainGui.Add("Text", "x104 y345 w130 c0xD98484 BackgroundTrans", "Spinbot Key:")
+BtnSpinbotKey := MainGui.Add("Text", "x239 y340 w150 h25 Center +0x200", "NONE")
+BtnSpinbotKey.Opt("Background000000 c0xD98484")
+BtnSpinbotKey.OnEvent("Click", StartBindSpinbot)
+
+PageControls[2].Push(p3a, BtnSlideKey, p3b, BtnBhopKey, p3hold, BtnBhopHoldKey, p3c, BtnStrafeKey, p3d, BtnComboKey, p3e, BtnCSpamKey, p3f, BtnClickKey, p3h, BtnSpinbotKey)
+
+p3note := MainGui.Add("Text", "x104 y388 w340 h34 c0xD98484 BackgroundTrans", "Click a [KEY], then press a key or mouse button to bind it.")
+PageControls[2].Push(p3note)
+AllTextControls.Push(p3note)
+
+; --- Hover tooltips (keybinds page) ---
+for _b in [BtnSlideKey, BtnBhopKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey]
+    AddTip(_b, "Click, then press a key or mouse button to bind it.`nESC clears the bind. Keys already in use are rejected.")
+AddTip(BtnBhopHoldKey, "The key you hold to bhop (default Space).`nClick, then press a key. ESC clears it.")
+AddTip2(p2b, BtnReloadKey, "Restarts the macro script.")
+AddTip2(p2c, BtnMinimizeKey, "Shows or hides this menu.")
+AddTip2(p2d, BtnMacroLockKey, "Panic key: turns every macro off.`nPress again to restore them.")
+AddTip2(p2f, BtnExitKey, "Closes the macro script completely.")
+
+; ===== PAGE 4: MISC =====
+p4a := MainGui.Add("Text", "x104 y95 w300 c0xD98484 BackgroundTrans", "LAGSWITCH (OP)")
+p4b := MainGui.Add("Text", "x104 y130 w200 c0xD98484 BackgroundTrans", "Freeze Duration (1-1000ms):")
+FreezeEdit := MainGui.Add("Edit", "x104 y155 w100", "")
+FreezeEdit.SetFont("c0xD98484")
+FreezeEdit.Opt("Background000000")
+ApplyBtn := MainGui.Add("Text", "x104 y190 w100 h23 Center +0x200", "Apply Settings")
+ApplyBtn.Opt("Background" BgColor " c0xD98484")
+ApplyBtn.OnEvent("Click", ApplyLagSettings)
+TestBtn := MainGui.Add("Text", "x214 y190 w100 h23 Center +0x200", "Test Freeze")
+TestBtn.Opt("Background" BgColor " c0xD98484")
+TestBtn.OnEvent("Click", TestFreeze)
+p4c := MainGui.Add("Text", "x104 y230 w120 c0xD98484 BackgroundTrans", "Trigger Key:")
+BtnLagKey := MainGui.Add("Text", "x224 y225 w130 h25 Center +0x200", "NONE")
+BtnLagKey.Opt("Background000000 c0xD98484")
+BtnLagKey.OnEvent("Click", StartBindLag)
+
+ChkLagPrecision := MainGui.Add("Text", "x104 y265 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkLagPrecision.SetFont("s10 Bold")
+LblLagPrecision := MainGui.Add("Text", "x128 y267 w276 c0xD98484 BackgroundTrans", "High-Precision Timing")
+ChkLagPrecision.OnEvent("Click", ToggleLagPrecisionBox)
+LblLagPrecision.OnEvent("Click", ToggleLagPrecisionBox)
+
+ChkLagBurst := MainGui.Add("Text", "x104 y300 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkLagBurst.SetFont("s10 Bold")
+LblLagBurst := MainGui.Add("Text", "x128 y302 w276 c0xD98484 BackgroundTrans", "Freeze Tick Mode")
+ChkLagBurst.OnEvent("Click", ToggleLagBurstBox)
+LblLagBurst.OnEvent("Click", ToggleLagBurstBox)
+
+LblLagBurstCount := MainGui.Add("Text", "x128 y326 w160 c0xD98484 BackgroundTrans", "Ticks: 3")
+LagBurstSlider := MainGui.Add("Slider", "x128 y346 w248 Range1-20", 3)
+LagBurstSlider.OnEvent("Change", UpdateLagBurstCount)
+
+ChkLagHold := MainGui.Add("Text", "x104 y385 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkLagHold.SetFont("s10 Bold")
+LblLagHold := MainGui.Add("Text", "x128 y387 w276 c0xD98484 BackgroundTrans", "Hold to Freeze (Release to Resume)")
+ChkLagHold.OnEvent("Click", ToggleLagHoldBox)
+LblLagHold.OnEvent("Click", ToggleLagHoldBox)
+
+ChkLagVignette := MainGui.Add("Text", "x104 y415 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+ChkLagVignette.SetFont("s10 Bold")
+LblLagVignette := MainGui.Add("Text", "x128 y417 w140 c0xD98484 BackgroundTrans", "Vignette on Freeze")
+ChkLagVignette.OnEvent("Click", ToggleLagVignetteBox)
+LblLagVignette.OnEvent("Click", ToggleLagVignetteBox)
+
+VignetteSwatchBtn := MainGui.Add("Text", "x275 y414 w100 h22 Center +Border", "")
+VignetteSwatchBtn.Opt("Background" VignetteColor)
+VignetteSwatchBtn.OnEvent("Click", (*) => OpenVignetteColorPicker())
+
+LblVignetteThickness := MainGui.Add("Text", "x128 y440 w160 c0xD98484 BackgroundTrans", "Thickness: 8px")
+VignetteThicknessSlider := MainGui.Add("Slider", "x128 y460 w248 Range2-30", 8)
+VignetteThicknessSlider.OnEvent("Change", UpdateVignetteThickness)
+
+p4d := MainGui.Add("Text", "x104 y500 w300 h40 c0xD98484 BackgroundTrans", "only use it in private servers!")
+StatusText := MainGui.Add("Text", "x104 y540 w300 c0xD98484 BackgroundTrans", "Status: Ready")
+PageControls[3].Push(p4a, p4b, FreezeEdit, ApplyBtn, TestBtn, p4c, BtnLagKey, ChkLagPrecision, LblLagPrecision, ChkLagBurst, LblLagBurst, LblLagBurstCount, LagBurstSlider, ChkLagHold, LblLagHold, ChkLagVignette, LblLagVignette, VignetteSwatchBtn, LblVignetteThickness, VignetteThicknessSlider, p4d, StatusText)
+
+; ===== PAGE 5: INFO =====
+p5a := MainGui.Add("Text", "x104 y95 w300 c0xD98484 BackgroundTrans", "SYSTEM INFO")
+p5b := MainGui.Add("Text", "x104 y120 w300 c0xD98484 BackgroundTrans", "Version: 2.0 M0MENT4M")
+p5d := MainGui.Add("Text", "x104 y150 w300 h66 c0xD98484 BackgroundTrans", "Full movement macro script for Evade. Not bannable, no executor. AutoHotkey v2. For further bugs, report them in the Discord server.")
+p5patchHeader := MainGui.Add("Text", "x104 y228 w300 c0xD98484 BackgroundTrans", "── PATCH NOTES ──")
+p5patchHeader.SetFont("s9 Bold")
+p5patch := MainGui.Add("Text", "x104 y252 w300 h230 c0xD98484 BackgroundTrans", "v2.0`n+ Reworked new design: M0MENT4M`n+ Hold-to-bhop mode (default Space)`n+ Look-behind option for INF slide`n+ Hotkey helper: never miss a key`n+ Lagswitch rebuilt, spam-friendly`n+ Freeze effects, sound, volume`n+ New designs: Skeet, Neverlose, Halloween, Fatality`n+ Waifus: Elfaria and Blair`n+ Performance HUD, FPS, widgets`n+ Theme presets incl. October`n+ Animations everywhere`n+ Changeable icon and macro name`n- Removed Grapple Bug")
+p5e := MainGui.Add("Text", "x104 y492 w300 c0xD98484 BackgroundTrans", "── SOCIALS ──")
+p5f := MainGui.Add("Text", "x104 y517 w300 c0xD98484 BackgroundTrans", "TikTok: yoshimixu3")
+p5g := MainGui.Add("Text", "x104 y542 w300 c0xD98484 BackgroundTrans", "DC Server: https://discord.gg/r95ZjED2js")
+p5f.Opt("+0x100")                                   ; (clickable: opens the TikTok page)
+p5f.SetFont("underline")
+p5f.OnEvent("Click", TikTokOpen)
+p5g.Opt("+0x100")                                   ; (clickable: opens the Discord server)
+p5g.SetFont("underline")
+p5g.OnEvent("Click", DiscordOpen)
+p5k := MainGui.Add("Text", "x104 y582 w300 c0xD98484 BackgroundTrans", "Ko-fi: https://ko-fi.com/yeko03")
+p5k.Opt("+0x100")                                   ; (clickable: opens the Ko-fi page)
+p5k.SetFont("underline")
+p5k.OnEvent("Click", KofiOpen)
+p5h := MainGui.Add("Text", "x104 y608 w300 c0xD98484 BackgroundTrans", "Main devs: Yeko, Aimwhere")
+p5diag := MainGui.Add("Text", "x104 y636 w300 c0xD98484 BackgroundTrans", "Copy diagnostics")
+p5diag.Opt("+0x100")
+p5diag.SetFont("underline")
+p5diag.OnEvent("Click", CopyDiagnostics)
+PageControls[5].Push(p5a, p5b, p5d, p5patchHeader, p5patch, p5e, p5f, p5g, p5k, p5h, p5diag)
+
+; --- Theme control lists ---
+AllTextControls.Push(TitleText, BtnMin, BtnClose, TikTokBtn)
+for t in PageTitles
+    AllTextControls.Push(t)
+for b in SideBtns
+    AllTextControls.Push(b)
+AllTextControls.Push(ChkSlide, ChkBhop, ChkStrafe, ChkCombo, ChkCSpam, ChkClick, ChkBhopHold, ChkSlideBehind, ChkSpinbot)
+AllTextControls.Push(LblSlide, LblBhop, LblStrafe, LblCombo, LblCSpam, LblCSpamSpeed, LblClick, LblClickSpeed, LblSpinbot, LblBhopHold, LblSlideBehind, LblSlideTurn)
+AllTextControls.Push(p2a, p2sys, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMacroLockKey, p2e, p2f, BtnExitKey, p2colHeader, p2g, p2h, p2i, p2j, p2k, ThemeDDL, ThemeApplyBtn, p2indic, ChkSidebarIndicators, p2notif, ChkStatusNotifs, p2hudpos, HudPosDDL, p2hudopacity, LblHudOpacity)
+AllTextControls.Push(p3a, BtnSlideKey, p3b, BtnBhopKey, p3hold, BtnBhopHoldKey, p3c, BtnStrafeKey, p3d, BtnComboKey, p3e, BtnCSpamKey, p3f, BtnClickKey, p3h, BtnSpinbotKey)
+AllTextControls.Push(p4a, p4b, FreezeEdit, ApplyBtn, TestBtn, p4c, BtnLagKey, ChkLagPrecision, LblLagPrecision, ChkLagBurst, LblLagBurst, LblLagBurstCount, ChkLagHold, LblLagHold, ChkLagVignette, LblLagVignette, VignetteSwatchBtn, LblVignetteThickness, p4d, StatusText)
+AllTextControls.Push(p5a, p5b, p5d, p5patchHeader, p5patch, p5e, p5f, p5g, p5k, p5h, p5diag)
+
+AllBgControls.Push(BtnSlideKey, BtnBhopKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnBhopHoldKey, BtnSpinbotKey, FreezeEdit, BtnLagKey, ApplyBtn, TestBtn, ThemeDDL, ThemeApplyBtn, BtnReloadKey, BtnMinimizeKey, BtnMacroLockKey, BtnExitKey, ChkSidebarIndicators, ChkStatusNotifs, ChkLagPrecision, ChkLagBurst, ChkLagHold, ChkLagVignette, HudPosDDL)
+AllBgControls.Push(ChkSlide, ChkBhop, ChkStrafe, ChkCombo, ChkCSpam, ChkClick, ChkBhopHold, ChkSlideBehind, ChkSpinbot)
+
+Global AllIconBgControls := []
+AllIconBgControls.Push(TikTokBtn, BtnMin, BtnClose)
+for b in SideBtns
+    AllIconBgControls.Push(b)
+
+; --- Presets UI ---
+ConfigTitleLbl := MainGui.Add("Text", "x104 y80 w300 c0xD98484 BackgroundTrans", "── PRESETS ──")
+ConfigTitleLbl.SetFont("s9 Bold")
+
+; Save section
+SaveLbl := MainGui.Add("Text", "x104 y105 w80 c0xD98484 BackgroundTrans", "Save Config:")
+SaveNameInput := MainGui.Add("Edit", "x195 y103 w150 h22", "MyConfig")
+SaveNameInput.SetFont("c0xD98484")
+SaveNameInput.Opt("Background000000")
+SaveBtn := MainGui.Add("Text", "x350 y103 w60 h22 Center +0x200", "SAVE")
+SaveBtn.Opt("Background" BgColor " c0xD98484")
+SaveBtn.OnEvent("Click", SaveConfig)
+
+; Load section
+LoadLbl := MainGui.Add("Text", "x104 y135 w80 c0xD98484 BackgroundTrans", "Load Config:")
+ConfigDDL := MainGui.Add("DropDownList", "x195 y133 w150", [])
+ConfigDDL.Opt("Background000000")
+RefreshConfigList() ; populate the dropdown
+LoadBtn := MainGui.Add("Text", "x350 y133 w60 h22 Center +0x200", "LOAD")
+LoadBtn.Opt("Background" BgColor " c0xD98484")
+LoadBtn.OnEvent("Click", LoadConfig)
+
+; Delete & Reset buttons
+DeleteBtn := MainGui.Add("Text", "x195 y163 w110 h22 Center +0x200", "DELETE")
+DeleteBtn.Opt("Background" BgColor " c0xD98484")
+DeleteBtn.OnEvent("Click", DeleteConfig)
+
+ResetBtn := MainGui.Add("Text", "x305 y163 w110 h22 Center +0x200", "RESET")
+ResetBtn.Opt("Background" BgColor " c0xD98484")
+ResetBtn.OnEvent("Click", ResetDefaults)
+
+
+PageControls[6].Push(ConfigTitleLbl, SaveLbl, SaveNameInput, SaveBtn, LoadLbl, ConfigDDL, LoadBtn, DeleteBtn, ResetBtn)
+
+
+AllTextControls.Push(ConfigTitleLbl, SaveLbl, LoadLbl, SaveNameInput, ConfigDDL, SaveBtn, LoadBtn, DeleteBtn, ResetBtn)
+AllBgControls.Push(SaveNameInput, ConfigDDL, SaveBtn, LoadBtn, DeleteBtn, ResetBtn)
+
+; Classic MISC page: the presets live on the CONFIG tab now, so pull the rest of the old page up.
+for _c in [p2a, p2sys, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMacroLockKey, p2e, p2f, BtnExitKey, p2colHeader
+         , p2g, ColorSwatchBtn, p2h, BgSwatchBtn, p2i, IconBgSwatchBtn, p2j, PanelSwatchBtn, p2indic, ChkSidebarIndicators
+         , p2notif, ChkStatusNotifs, p2hudpos, HudPosDDL, p2hudopacity, LblHudOpacity, HudOpacitySlider, p2k, ThemeDDL
+         , ThemeApplyBtn, DesignDDL, DesignApplyBtn] {
+    _c.GetPos(&_cx, &_cy)
+    _c.Move(_cx, _cy - 110)
+}
+
+; --- Skeet-only labels ---
+SkCfgInfoTitle := MainGui.Add("Text", "x0 y0 w200 h16 c0xE0E0E0 BackgroundTrans", "Active Configuration:")
+SkCfgInfoTitle.SetFont("s8 Bold", "Tahoma")
+SkCfgInfoText := MainGui.Add("Text", "x0 y0 w200 h200 c0x8C8C8C BackgroundTrans", "Configs are saved locally as JSON files in the configs folder.`n`nEvery setting is stored:`n- Macro toggles and options`n- Keybinds and mouse triggers`n- Colors, theme and design`n- Lagswitch and HUD setup`n`nLoading a config rebinds hotkeys and applies the design immediately.")
+SkCfgInfoText.SetFont("s7", "Tahoma")
+SkeetOnly.Push(SkCfgInfoTitle, SkCfgInfoText)
+
+SkBindsNote := MainGui.Add("Text", "x0 y0 w200 h100 c0x8C8C8C BackgroundTrans", "Click a [KEY], then press a key or mouse button to bind it.")
+SkBindsNote.SetFont("s8", "Tahoma")
+SkeetOnly.Push(SkBindsNote)
+
+SkeetPages[1].Push(ChkSlide, LblSlide, ChkSlideBehind, LblSlideBehind, LblSlideTurn, SlideTurnSlider, ChkBhop, LblBhop, ChkBhopHold, LblBhopHold, ChkStrafe, LblStrafe, ChkCombo, LblCombo, ChkCSpam, LblCSpam, LblCSpamSpeed, CSpamSlider, ChkClick, LblClick, LblClickSpeed, ClickSlider, ChkSpinbot, LblSpinbot)
+SkeetPages[2].Push(p3a, BtnSlideKey, p3b, BtnBhopKey, p3hold, BtnBhopHoldKey, p3c, BtnStrafeKey, p3d, BtnComboKey, p3e, BtnCSpamKey, p3f, BtnClickKey, p3h, BtnSpinbotKey, SkBindsNote)
+SkeetPages[3].Push(p4c, BtnLagKey, p4b, FreezeEdit, ApplyBtn, TestBtn, ChkLagPrecision, LblLagPrecision, ChkLagHold, LblLagHold, StatusText, p4d, ChkLagBurst, LblLagBurst, LblLagBurstCount, LagBurstSlider, ChkLagVignette, LblLagVignette, VignetteSwatchBtn, LblVignetteThickness, VignetteThicknessSlider)
+SkeetPages[4].Push(p2g, ColorSwatchBtn, p2h, BgSwatchBtn, p2i, IconBgSwatchBtn, p2j, PanelSwatchBtn, p2k, ThemeDDL, ThemeApplyBtn, DesignDDL, DesignApplyBtn, p2indic, ChkSidebarIndicators, p2notif, ChkStatusNotifs, p2hudpos, HudPosDDL, p2hudopacity, LblHudOpacity, HudOpacitySlider, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMacroLockKey, p2e, p2f, BtnExitKey)
+SkeetPages[5].Push(p5a, p5b, p5d, p5e, p5f, p5g, p5k, p5h, p5diag, p5patch)
+SkeetPages[6].Push(SaveLbl, SaveNameInput, SaveBtn, LoadLbl, ConfigDDL, LoadBtn, DeleteBtn, ResetBtn, SkCfgInfoTitle, SkCfgInfoText)
+
+; --- Smooth hover highlight on buttons ---
+for _hb in [BtnSlideKey, BtnBhopKey, BtnBhopHoldKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey, BtnLagKey
+          , BtnReloadKey, BtnMinimizeKey, BtnMacroLockKey, BtnExitKey, SaveBtn, LoadBtn, DeleteBtn, ResetBtn, ApplyBtn, TestBtn
+          , ThemeApplyBtn, DesignApplyBtn, ChkSidebarIndicators, ChkStatusNotifs]
+    RegisterHover([_hb], () => BgColor)
+for _hb in [BtnMin, BtnClose, TikTokBtn]
+    RegisterHover([_hb], () => IconBgColor)
+for _hb in SideBtns
+    RegisterHover([_hb], () => (LayoutMode = "classic") ? IconBgColor : "")
+for _idx, _t in SkeetTabs
+    RegisterHover([_t.tb, _t.tg, _t.tl], MakeTabBase(_idx))
+
+SwitchTab(1)
+OnMessage(0x0201, WM_LBUTTONDOWN)
+OnMessage(0x0200, HoverMouseMove)
+OnMessage(0x0214, SkeetOnSizing)     ; WM_SIZING: only sent while an edge/corner is being dragged
+OnMessage(0x0232, SkeetOnExitSize)   ; WM_EXITSIZEMOVE
+if (EnvGet("M0M_NOINTRO") = "1") {
+    EnvSet("M0M_NOINTRO", "")
+    ShowMenuStartup()
+} else {
+    PlayIntro()
+}
+try DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", MainGui.Hwnd, "Int", 34, "Int*", 0x000000, "Int", 4)
+; Hide the dotted keyboard-focus rectangle that Windows draws on controls (e.g. the slider)
+; when clicked. Normally hidden until Tab-navigation; -Theme disables the style that hides it.
+DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x127, "Ptr", 0x10001, "Ptr", 0) ; WM_CHANGEUISTATE, UIS_SET|UISF_HIDEFOCUS
+
+SwitchTab(tabIndex, *) {
+    global PageControls, PageTitles, SideBtns, AccentBar, TabIconY, AccentColor, CurrentTab, IconBgColor, LayoutMode, SkeetOnly
+    CurrentTab := tabIndex
+    if (LayoutMode = "nl")          ; the drawn designs have their own pages (and a tab 8) and need nothing from the control pages
+        return
+    if (LayoutMode = "skeet") {
+        SwitchTabSkeet(tabIndex)
+        return
+    }
+    for i, ctrls in PageControls {
+        vis := (i = tabIndex)
+        for c in ctrls
+            c.Visible := vis
+        PageTitles[i].Visible := vis
+    }
+    for c in SkeetOnly
+        c.Visible := false
+    for i, b in SideBtns {
+        b.Opt("Background" IconBgColor " c" AccentColor)
+        b.Redraw()
+    }
+    AnimMoveY(AccentBar, TabIconY[tabIndex])
+}
+
+; --- Config Persistence ---
+
+EnsureConfigDir() {
+    global ConfigDir
+    if !DirExist(ConfigDir) {
+        DirCreate(ConfigDir)
+    }
+}
+
+; The whole current setup as text (what a saved config contains).
+ConfigText() {
+    global ConfigDir, ConfigExt, AccentColor, BgColor, IconBgColor, PanelColor
+    global IsSlideChecked, IsBhopChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked
+    global TriggerKey, BhopKey, StrafeKey, ComboKey, CSpamKey, CSpamSpeed, ClickKey, ClickSpeed, SpinbotKey
+    global FreezeDuration, LagKey, StrafeDistance, StrafeDelay, StrafeTicks
+    global IsLagPrecisionChecked, IsLagBurstChecked, LagBurstCount, LagBurstGap, IsLagHoldChecked, IsLagVignetteChecked, VignetteColor, VignetteThickness
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    global ShowSidebarIndicators, ShowStatusNotifs, HudOpacity, HudPosition, HudOpacitySlider
+    global VigMulti, BurstSyncSound, BurstSyncPill
+    config := {
+        config_version: ConfigVersion,
+        app_version: "2.0",
+        design: CurrentDesign,
+        widgets: WHudStyleObj(),
+        lag_sound: {idx: VigSoundIdx, file: VigSoundFile, multi: VigMultiText(), sync: BurstSyncSound ? 1 : 0},
+        freeze_fx: {style: VigStyle, grad: VigGrad, intensity: VigIntensity, tint: VigTint, pill: VigPillOn ? 1 : 0, sound: VigSound ? 1 : 0, vol: VigVol, pill_always: PillAlways ? 1 : 0, pill_sync: BurstSyncPill ? 1 : 0, anim: VigAnim ? 1 : 0, animspd: VigAnimSpd, minshow: VigMinShow},
+        logo_grad: SPLogoIdx,
+        menu_fx: {blur: MenuBlurOn ? 1 : 0, dim: MenuBlurDim, fx: MenuFxIdx, amt: MenuFxAmt},
+        shake: {on: ShakeOn ? 1 : 0, style: ShakeStyle, amt: ShakeAmt, where: ShakeWhere, len: ShakeLen, sync: ShakeSyncLen ? 1 : 0},
+        hud_style: {border: HudBorderIdx, grad: HudGradIdx, compact: HudCompact ? 1 : 0, keys: HudShowKeys ? 1 : 0, style: HudStyleIdx},
+        macros: {
+            slide: IsSlideChecked,
+            bhop: IsBhopChecked,
+            strafe: IsStrafeChecked,
+            combo: IsComboChecked,
+            cspam: IsCSpamChecked,
+            click: IsClickChecked,
+            bhop_hold: IsBhopHoldChecked,
+            slide_behind: IsSlideBehindChecked,
+            spinbot: IsSpinbotChecked,
+            macro_hud: ShowSidebarIndicators,
+            status_hud: ShowStatusNotifs,
+            perf_hud: PHudOn ? 1 : 0,
+            edash_strafe: IsEDashStrafe ? 1 : 0,
+            companion_char: CompChar,
+            companion_style: CompStyle,
+            companion_on: CompOn ? 1 : 0,
+            companion_scale: CompScale,
+            companion_follow: CompFollow ? 1 : 0,
+            companion_bubble: CompBubbleOn ? 1 : 0,
+            companion_react: CompReactOn ? 1 : 0,
+            companion_custom: CompCustom ? 1 : 0,
+            companion_x: CompX,
+            companion_y: CompY,
+            keys_hud: WH["keys"].on ? 1 : 0,
+            mbtn_hud: WH["mbtn"].on ? 1 : 0,
+            mouse_hud: WH["mouse"].on ? 1 : 0,
+            strafer_hud: WH["strafer"].on ? 1 : 0,
+            fps_hud: WH["fps"].on ? 1 : 0,
+            fps_stats: FpsShowStats ? 1 : 0,
+            hud_position: HudPosition,
+            hud_opacity: HudOpacitySlider.Value
+        },
+        keybinds: {
+            slide_key: TriggerKey,
+            bhop_key: BhopKey,
+            strafe_key: StrafeKey,
+            combo_key: ComboKey,
+            cspam_key: CSpamKey,
+            click_key: ClickKey,
+            bhop_hold_key: BhopHoldKey,
+            spinbot_key: SpinbotKey
+        },
+        colors: {
+            accent: AccentColor,
+            background: BgColor,
+            icon_bg: IconBgColor,
+            panel_bg: PanelColor
+        },
+        lagswitch: {
+            freeze_duration: FreezeDuration,
+            lag_key: LagKey,
+            precision_timing: IsLagPrecisionChecked,
+            burst_mode: IsLagBurstChecked,
+            burst_count: LagBurstCount,
+            burst_gap: LagBurstGap,
+            hold_mode: IsLagHoldChecked,
+            vignette_mode: IsLagVignetteChecked,
+            vignette_color: VignetteColor,
+            vignette_thickness: VignetteThickness
+        },
+        system_keybinds: {
+            reload_key: ReloadKey,
+            minimize_key: MinimizeKey,
+            macro_lock_key: MacroLockKey,
+            exit_key: ExitKey
+        },
+        strafe_settings: {
+            distance: StrafeDistance,
+            delay: StrafeDelay,
+            ticks: StrafeTicks
+        },
+        cspam_settings: {
+            speed: CSpamSpeed
+        },
+        click_settings: {
+            speed: ClickSpeed
+        },
+        slide_settings: {
+            turn_amount: SlideTurnAmount
+        }
+    }
+    
+    return ObjToJson(config)
+}
+
+SaveConfig(*) {
+    global ConfigDir, ConfigExt, AccentColor, BgColor, IconBgColor, PanelColor
+    global IsSlideChecked, IsBhopChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked
+    global TriggerKey, BhopKey, StrafeKey, ComboKey, CSpamKey, CSpamSpeed, ClickKey, ClickSpeed, SpinbotKey
+    global FreezeDuration, LagKey, StrafeDistance, StrafeDelay, StrafeTicks
+    global IsLagPrecisionChecked, IsLagBurstChecked, LagBurstCount, LagBurstGap, IsLagHoldChecked, IsLagVignetteChecked, VignetteColor, VignetteThickness
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    global ShowSidebarIndicators, ShowStatusNotifs, HudOpacity, HudPosition, HudOpacitySlider
+    global VigMulti, BurstSyncSound, BurstSyncPill
+    
+    configName := SaveNameInput.Value
+    if (configName = "") {
+        ShowStatus("Enter config name!", "0x2A0808", 200)
+        return
+    }
+    
+    EnsureConfigDir()
+    
+    jsonStr := ConfigText()
+    
+    filePath := ConfigDir "\" configName ConfigExt
+    try {
+        FileDelete(filePath)
+    }
+    
+    File := FileOpen(filePath, "w")
+    if (!File) {
+        ShowStatus("Failed to save config!", "0x2A0808", 200)
+        return
+    }
+    File.Write(jsonStr)
+    File.Close()
+    
+    RefreshConfigList()
+    ShowStatus("Config saved: " configName, "0x082A13", 200)
+}
+
+; Makes an older (or incomplete) config safe to load: the parts the loader reads without asking get the current value when the file
+; does not have them. Returns 0 when the text is not a config at all.
+MigrateConfig(config) {
+    global ConfigVersion
+    if (!IsObject(config) || Type(config) != "Object")
+        return 0
+    cur := JsonToObj(ConfigText())
+    req := Map("macros", ["slide", "bhop", "strafe", "combo"], "keybinds", ["slide_key", "bhop_key", "strafe_key", "combo_key"]
+        , "colors", ["accent", "background", "icon_bg"], "lagswitch", ["freeze_duration"], "strafe_settings", ["distance", "delay", "ticks"])
+    for sec, keys in req {
+        if (!config.HasOwnProp(sec) || !IsObject(config.%sec%))
+            config.%sec% := {}
+        for k in keys {
+            if (!config.%sec%.HasOwnProp(k))
+                config.%sec%.%k% := (sec = "macros") ? 0 : cur.%sec%.%k%
+        }
+    }
+    ver := config.HasOwnProp("config_version") ? Integer(config.config_version) : 1
+    if (ver > ConfigVersion)
+        try SPToast("Newer config", 7603, "off", "Made by a newer version: some settings may be ignored")
+    config.config_version := ConfigVersion
+    return config
+}
+
+; copies the current setup to the clipboard (without file paths from this PC) so it can be pasted into a chat
+ExportConfig(*) {
+    global VigSoundIdx, VigSoundSel, SaveNameInput
+    obj := JsonToObj(ConfigText())
+    obj.lag_sound.file := ""
+    obj.lag_sound.multi := ""
+    if (obj.lag_sound.idx >= VigSoundSel.custom)
+        obj.lag_sound.idx := 1
+    obj.config_name := Trim(SaveNameInput.Value)               ; (so the one who imports it gets the same name)
+    A_Clipboard := "M0M2:" ObjToJson(obj)
+    ShowStatus("CONFIG COPIED", "0x082A13", 200, true)
+}
+
+; reads a setup from the clipboard, saves it as a new config and loads it
+ImportConfig(*) {
+    global ConfigDir, ConfigExt, ConfigDDL, SaveNameInput
+    txt := Trim(A_Clipboard)
+    if (SubStr(txt, 1, 5) = "M0M2:")
+        txt := SubStr(txt, 6)
+    obj := 0
+    if (StrLen(txt) > 3 && StrLen(txt) < 300000 && SubStr(txt, 1, 1) = "{") {
+        try obj := JsonToObj(txt)
+    }
+    obj := MigrateConfig(obj)
+    if (!IsObject(obj) || !obj.HasOwnProp("macros")) {
+        ShowStatus("NO CONFIG ON THE CLIPBOARD", "0x2A0808", 200, true)
+        return
+    }
+    EnsureConfigDir()
+    base := obj.HasOwnProp("config_name") ? Trim(RegExReplace(String(obj.config_name), "[\\/:*?" Chr(34) "<>|]")) : ""
+    base := SubStr(base, 1, 40)
+    if (base = "")
+        base := "imported"
+    name := base
+    n := 1
+    while (FileExist(ConfigDir "\" name ConfigExt)) {
+        n += 1
+        name := base " (" n ")"
+    }
+    if (obj.HasOwnProp("config_name"))
+        obj.DeleteProp("config_name")
+    try {
+        f := FileOpen(ConfigDir "\" name ConfigExt, "w")
+        f.Write(ObjToJson(obj))
+        f.Close()
+    } catch {
+        ShowStatus("COULD NOT SAVE THE CONFIG", "0x2A0808", 200, true)
+        return
+    }
+    RefreshConfigList()
+    ConfigDDL.Choose(name)
+    LoadConfig()
+    SaveNameInput.Value := name
+    ShowStatus("CONFIG IMPORTED: " name, "0x082A13", 200, true)
+}
+
+; Loads the selected config; a problem inside shows a card with the reason instead of stopping the script.
+LoadConfig(*) {
+    try
+        LoadConfigInner()
+    catch Error as e {
+        try SPToast("Config could not be loaded", 7605, "off", e.Message " (line " e.Line ")")
+    }
+}
+
+LoadConfigInner() {
+    global MenuBlurOn, MenuBlurDim, MenuFxIdx, MenuFxAmt, MFParts, MFDimDone, ShakeOn, ShakeStyle, ShakeAmt, ShakeWhere, ShakeLen, ShakeSyncLen
+    global BhopHoldKey, currentBhopHoldKey, IsBhopHoldChecked, IsSlideBehindChecked, SlideTurnAmount, StrafeMouseThreshold
+    global ConfigDir, ConfigExt, AccentColor, BgColor, IconBgColor, PanelColor
+    global IsSlideChecked, IsBhopChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked
+    global TriggerKey, BhopKey, StrafeKey, ComboKey, CSpamKey, CSpamSpeed, ClickKey, ClickSpeed, SpinbotKey
+    global FreezeDuration, LagKey, currentLagKey, StrafeDistance, StrafeDelay, StrafeTicks
+    global IsLagPrecisionChecked, IsLagBurstChecked, LagBurstCount, LagBurstGap, IsLagHoldChecked, IsLagVignetteChecked, VignetteColor, VignetteThickness
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey, currentReloadKey, currentMinimizeKey, currentMacroLockKey, currentExitKey
+    global ChkSlide, ChkBhop, ChkStrafe, ChkCombo, ChkCSpam, ChkClick, ChkSpinbot
+    global BtnSlideKey, BtnBhopKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey
+    global currentSlideKey, currentBhopKey, currentStrafeKey, currentComboKey, currentCSpamKey, currentClickKey, currentSpinbotKey
+    global ShowSidebarIndicators, ShowStatusNotifs, IndicatorHud, ChkSidebarIndicators, ChkStatusNotifs
+    global HudOpacity, HudPosition, HudPosDDL, HudOpacitySlider, LblHudOpacity, PHudOn, IsEDashStrafe, CompChar, CompStyle, CompOn, CompScale, CompFollow, CompBubbleOn, CompReactOn, FpsShowStats, HudBorderIdx, HudGradIdx, HudCompact, HudShowKeys, HudStyleIdx, VigSoundIdx, VigSoundFile, VigVol, VigSoundSel, SPLogoIdx, VigStyle, VigGrad, VigIntensity, VigTint, VigPillOn, VigSound, VigAnim, VigAnimSpd, VigMinShow, VigVol, PillAlways, CompScale, CompFollow, CompBubbleOn, CompReactOn, CompCustom, CompX, CompY
+    global VigMulti, BurstSyncSound, BurstSyncPill
+    
+    configName := ConfigDDL.Text
+    if (configName = "") {
+        ShowStatus("Select a config!", "0x2A0808", 200)
+        return
+    }
+    
+    filePath := ConfigDir "\" configName ConfigExt
+    if !FileExist(filePath) {
+        ShowStatus("Config not found!", "0x2A0808", 200)
+        return
+    }
+    
+    try {
+        content := FileRead(filePath)
+        config := JsonToObj(content)
+    } catch Error as e {
+        ShowStatus("Failed to load config!", "0x2A0808", 200)
+        return
+    }
+    config := MigrateConfig(config)
+    if (!IsObject(config)) {
+        ShowStatus("Not a valid config!", "0x2A0808", 200)
+        return
+    }
+    
+    IsSlideChecked := config.macros.slide
+    IsBhopChecked := config.macros.bhop
+    IsStrafeChecked := config.macros.strafe
+    IsComboChecked := config.macros.combo
+    ; HasOwnProp fallback so configs saved before the rename (cspam_custom) still load cleanly
+    IsCSpamChecked := config.macros.HasOwnProp("cspam") ? config.macros.cspam : (config.macros.HasOwnProp("cspam_custom") ? config.macros.cspam_custom : false)
+    ; HasOwnProp fallback so configs saved before Auto Clicker existed still load cleanly
+    IsClickChecked := config.macros.HasOwnProp("click") ? config.macros.click : false
+    ; HasOwnProp fallback so configs saved before Spinbot became its own macro still load cleanly
+    IsSpinbotChecked := config.macros.HasOwnProp("spinbot") ? config.macros.spinbot : false
+    IsBhopHoldChecked := config.macros.HasOwnProp("bhop_hold") ? config.macros.bhop_hold : false
+    IsSlideBehindChecked := config.macros.HasOwnProp("slide_behind") ? config.macros.slide_behind : false
+    
+    ShowSidebarIndicators := config.macros.HasOwnProp("macro_hud") ? config.macros.macro_hud : false
+    ChkSidebarIndicators.Text := ShowSidebarIndicators ? "ON" : "OFF"
+
+    HudPosition := config.macros.HasOwnProp("hud_position") ? config.macros.hud_position : "Top-Left"
+    switch HudPosition {
+        case "Top-Left":     HudPosDDL.Value := 1
+        case "Top-Right":    HudPosDDL.Value := 2
+        case "Bottom-Left":  HudPosDDL.Value := 3
+        case "Bottom-Right": HudPosDDL.Value := 4
+        default:             HudPosDDL.Value := 1
+    }
+
+    hudPct := config.macros.HasOwnProp("hud_opacity") ? config.macros.hud_opacity : 86
+    HudOpacity := Round(hudPct * 2.55)
+    HudOpacitySlider.Value := hudPct
+    LblSet(LblHudOpacity, hudPct "%")
+    HudRequest()
+
+    if (ShowSidebarIndicators) {
+        pos := GetHudShowStr()
+        IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
+        HudRequest()
+        UpdateSidebarIndicators()
+    } else {
+        IndicatorHud.Hide()
+    }
+
+    ShowStatusNotifs := config.macros.HasOwnProp("status_hud") ? config.macros.status_hud : true
+    ; the small performance HUD is part of a config too: on in the config means it comes on when you load it
+    IsEDashStrafe := config.macros.HasOwnProp("edash_strafe") ? (config.macros.edash_strafe ? true : false) : false
+    PHudOn := config.macros.HasOwnProp("perf_hud") ? (config.macros.perf_hud ? true : false) : false
+    CompChar := config.macros.HasOwnProp("companion_char") ? Max(1, Min(3, Integer(config.macros.companion_char))) : 1
+    CompStyle := config.macros.HasOwnProp("companion_style") ? Max(1, Min(2, Integer(config.macros.companion_style))) : 2
+    CompFollow := config.macros.HasOwnProp("companion_follow") ? (config.macros.companion_follow ? true : false) : true
+    CompBubbleOn := config.macros.HasOwnProp("companion_bubble") ? (config.macros.companion_bubble ? true : false) : true
+    CompReactOn := config.macros.HasOwnProp("companion_react") ? (config.macros.companion_react ? true : false) : true
+    WHudLoadStyles(config)
+    SPLogoIdx := config.HasOwnProp("logo_grad") ? Max(1, Min(10, Integer(config.logo_grad))) : 1
+    ShakeOn := false, ShakeStyle := 1, ShakeAmt := 40, ShakeWhere := 1, ShakeLen := 400, ShakeSyncLen := false
+    if (config.HasOwnProp("shake")) {
+        sk := config.shake
+        ShakeSyncLen := (sk.HasOwnProp("sync") && sk.sync) ? true : false
+        if (sk.HasOwnProp("len"))
+            ShakeLen := Max(0, Min(2000, Integer(sk.len)))
+        if (sk.HasOwnProp("where"))
+            ShakeWhere := Max(1, Min(2, Integer(sk.where) > 1 ? 2 : 1))
+        if (sk.HasOwnProp("on"))
+            ShakeOn := sk.on ? true : false
+        if (sk.HasOwnProp("style"))
+            ShakeStyle := Max(1, Min(13, Integer(sk.style)))
+        if (sk.HasOwnProp("amt"))
+            ShakeAmt := Max(1, Min(100, Integer(sk.amt)))
+    }
+    MenuBlurOn := false, MenuBlurDim := 30, MenuFxIdx := 1, MenuFxAmt := 50
+    if (config.HasOwnProp("menu_fx")) {
+        mf := config.menu_fx
+        if (mf.HasOwnProp("blur"))
+            MenuBlurOn := mf.blur ? true : false
+        if (mf.HasOwnProp("dim"))
+            MenuBlurDim := Max(0, Min(90, Integer(mf.dim)))
+        if (mf.HasOwnProp("fx"))
+            MenuFxIdx := Max(1, Min(7, Integer(mf.fx)))
+        if (mf.HasOwnProp("amt"))
+            MenuFxAmt := Max(10, Min(100, Integer(mf.amt)))
+    }
+    MFParts.Clear()
+    MFDimDone := -1
+    VigStyle := 1, VigGrad := 1, VigIntensity := 80, VigTint := 0, VigPillOn := true, VigSound := false, VigAnim := false, VigAnimSpd := 5, VigMinShow := 500, VigVol := 100, PillAlways := false
+    if (config.HasOwnProp("freeze_fx")) {
+        fx := config.freeze_fx
+        if (fx.HasOwnProp("style"))
+            VigStyle := Max(1, Min(14, Integer(fx.style)))
+        if (fx.HasOwnProp("grad"))
+            VigGrad := Max(1, Min(9, Integer(fx.grad)))
+        if (fx.HasOwnProp("intensity"))
+            VigIntensity := Max(10, Min(100, Integer(fx.intensity)))
+        if (fx.HasOwnProp("tint"))
+            VigTint := Max(0, Min(40, Integer(fx.tint)))
+        if (fx.HasOwnProp("pill"))
+            VigPillOn := fx.pill ? true : false
+        if (fx.HasOwnProp("sound"))
+            VigSound := fx.sound ? true : false
+        if (fx.HasOwnProp("vol"))
+            VigVol := Max(0, Min(100, Integer(fx.vol)))
+        if (fx.HasOwnProp("pill_always"))
+            PillAlways := fx.pill_always ? true : false
+        BurstSyncPill := (fx.HasOwnProp("pill_sync") && !fx.pill_sync) ? false : true
+        if (fx.HasOwnProp("anim"))
+            VigAnim := fx.anim ? true : false
+        if (fx.HasOwnProp("animspd"))
+            VigAnimSpd := Max(1, Min(10, Integer(fx.animspd)))
+        if (fx.HasOwnProp("minshow"))
+            VigMinShow := Max(200, Min(5000, Integer(fx.minshow)))
+    }
+    VigSoundIdx := 1, VigSoundFile := "", VigMulti := [], BurstSyncSound := false
+    if (config.HasOwnProp("lag_sound")) {
+        ls := config.lag_sound
+        if (ls.HasOwnProp("file") && ls.file != "" && FileExist(ls.file))
+            VigSoundFile := ls.file
+        if (ls.HasOwnProp("multi") && ls.multi != "") {
+            for f in StrSplit(ls.multi, "|") {
+                if (f != "" && FileExist(f) && VigMulti.Length < 10)
+                    VigMulti.Push(f)
+            }
+        }
+        BurstSyncSound := (ls.HasOwnProp("sync") && ls.sync) ? true : false
+        if (ls.HasOwnProp("idx"))
+            VigSoundIdx := Max(1, Min(VigSoundSel.multi, Integer(ls.idx)))
+        if (VigSoundIdx = VigSoundSel.custom && VigSoundFile = "")
+            VigSoundIdx := 1
+        if (VigSoundIdx = VigSoundSel.multi && VigMulti.Length = 0)
+            VigSoundIdx := 1
+    }
+    NLRequest()
+    if (config.HasOwnProp("hud_style")) {
+        hs := config.hud_style
+        HudBorderIdx := hs.HasOwnProp("border") ? Max(1, Min(4, Integer(hs.border))) : 3
+        HudGradIdx := hs.HasOwnProp("grad") ? Max(1, Min(9, Integer(hs.grad))) : 1
+        HudCompact := hs.HasOwnProp("compact") ? (hs.compact ? true : false) : false
+        HudShowKeys := hs.HasOwnProp("keys") ? (hs.keys ? true : false) : false
+        HudStyleIdx := hs.HasOwnProp("style") ? Max(1, Min(3, Integer(hs.style))) : 1
+    } else
+        HudBorderIdx := 3, HudGradIdx := 1, HudCompact := false, HudShowKeys := false, HudStyleIdx := 1
+    HudRequest()
+    PHudRequest()
+    WHudRenderAll()
+    FpsShowStats := config.macros.HasOwnProp("fps_stats") ? (config.macros.fps_stats ? true : false) : true
+    wantComp := config.macros.HasOwnProp("companion_on") ? (config.macros.companion_on ? true : false) : false
+    CompCustom := (config.macros.HasOwnProp("companion_custom") && config.macros.companion_custom && config.macros.HasOwnProp("companion_x") && config.macros.HasOwnProp("companion_y")) ? true : false
+    if (CompCustom)
+        CompX := Integer(config.macros.companion_x), CompY := Integer(config.macros.companion_y)
+    CompScale := config.macros.HasOwnProp("companion_scale") ? Max(60, Min(200, Integer(config.macros.companion_scale))) : 100
+    if (wantComp && !CompOn) {
+        CompOn := true
+        CompShow(true)
+    } else if (!wantComp && CompOn) {
+        CompOn := false
+        CompHide()
+    } else
+        try CompSkinChanged()
+    if (PHudOn)
+        PHudShow()
+    else
+        PHudHide()
+    for wid in ["keys", "mbtn", "mouse", "strafer", "fps"]
+        WHudSet(wid, config.macros.HasOwnProp(wid "_hud") ? (config.macros.%wid "_hud"% ? true : false) : false)
+    ChkStatusNotifs.Text := ShowStatusNotifs ? "ON" : "OFF"
+    
+    SetChk(ChkSlide, IsSlideChecked)
+    SetChk(ChkBhop, IsBhopChecked)
+    SetChk(ChkStrafe, IsStrafeChecked)
+    SetChk(ChkCombo, IsComboChecked)
+    SetChk(ChkCSpam, IsCSpamChecked)
+    SetChk(ChkClick, IsClickChecked)
+    SetChk(ChkSpinbot, IsSpinbotChecked)
+    SetChk(ChkBhopHold, IsBhopHoldChecked)
+    SetChk(ChkSlideBehind, IsSlideBehindChecked)
+    
+    ; Turn off whatever keys are currently bound BEFORE switching to the loaded ones,
+    ; otherwise the old key (e.g. the default V for bhop) stays active alongside the new one.
+    UnregisterSlideKey(currentSlideKey)
+    UnregisterBhopKey(currentBhopKey)
+    UnregisterStrafeKey(currentStrafeKey)
+    UnregisterComboKey(currentComboKey)
+    UnregisterCSpamKey(currentCSpamKey)
+    UnregisterClickKey(currentClickKey)
+    UnregisterSpinbotKey(currentSpinbotKey)
+    UnregisterBhopHoldKey(currentBhopHoldKey)
+
+    TriggerKey := config.keybinds.slide_key
+    BhopKey := config.keybinds.bhop_key
+    StrafeKey := config.keybinds.strafe_key
+    ComboKey := config.keybinds.combo_key
+    CSpamKey := config.keybinds.HasOwnProp("cspam_key") ? config.keybinds.cspam_key : (config.keybinds.HasOwnProp("cspam_custom_key") ? config.keybinds.cspam_custom_key : "u")
+    ClickKey := config.keybinds.HasOwnProp("click_key") ? config.keybinds.click_key : "F6"
+    SpinbotKey := config.keybinds.HasOwnProp("spinbot_key") ? config.keybinds.spinbot_key : "t"
+    BhopHoldKey := config.keybinds.HasOwnProp("bhop_hold_key") ? config.keybinds.bhop_hold_key : "Space"
+
+    currentSlideKey := TriggerKey
+    currentBhopKey := BhopKey
+    currentStrafeKey := StrafeKey
+    currentComboKey := ComboKey
+    currentCSpamKey := CSpamKey
+    currentClickKey := ClickKey
+    currentSpinbotKey := SpinbotKey
+    currentBhopHoldKey := BhopHoldKey
+    
+    BtnSlideKey.Text := FormatKeyName(TriggerKey)
+    BtnBhopKey.Text := FormatKeyName(BhopKey)
+    BtnStrafeKey.Text := FormatKeyName(StrafeKey)
+    BtnComboKey.Text := FormatKeyName(ComboKey)
+    BtnCSpamKey.Text := FormatKeyName(CSpamKey)
+    BtnClickKey.Text := FormatKeyName(ClickKey)
+    BtnSpinbotKey.Text := FormatKeyName(SpinbotKey)
+    BtnBhopHoldKey.Text := FormatKeyName(BhopHoldKey)
+    
+    ApplyAccentColor(config.colors.accent)
+    ApplyBgColor(config.colors.background)
+    ApplyIconBgColor(config.colors.icon_bg)
+    if (config.colors.HasOwnProp("panel_bg"))
+        ApplyPanelColor(config.colors.panel_bg)
+    ApplyDesign(config.HasOwnProp("design") ? config.design : "M0MENT4M", false)
+    try DesignDDL.Choose(CurrentDesign)
+    
+    FreezeDuration := config.lagswitch.freeze_duration
+    LagKey := config.lagswitch.HasOwnProp("lag_key") ? config.lagswitch.lag_key : (config.lagswitch.HasOwnProp("mouse_button") ? config.lagswitch.mouse_button : "LButton")
+    IsLagPrecisionChecked := config.lagswitch.HasOwnProp("precision_timing") ? config.lagswitch.precision_timing : false
+    IsLagBurstChecked := config.lagswitch.HasOwnProp("burst_mode") ? config.lagswitch.burst_mode : false
+    LagBurstCount := config.lagswitch.HasOwnProp("burst_count") ? config.lagswitch.burst_count : 3
+    LagBurstGap := config.lagswitch.HasOwnProp("burst_gap") ? Max(20, Min(1000, Integer(config.lagswitch.burst_gap))) : 150
+    IsLagHoldChecked := config.lagswitch.HasOwnProp("hold_mode") ? config.lagswitch.hold_mode : false
+    IsLagVignetteChecked := config.lagswitch.HasOwnProp("vignette_mode") ? config.lagswitch.vignette_mode : false
+    vColor := config.lagswitch.HasOwnProp("vignette_color") ? config.lagswitch.vignette_color : "FF0000"
+    VignetteThickness := config.lagswitch.HasOwnProp("vignette_thickness") ? config.lagswitch.vignette_thickness : 8
+    VignetteThicknessSlider.Value := VignetteThickness
+    LblSet(LblVignetteThickness, "Thickness: " VignetteThickness "px")
+    ApplyVignetteColor(vColor)
+    SetChk(ChkLagPrecision, IsLagPrecisionChecked)
+    SetChk(ChkLagBurst, IsLagBurstChecked)
+    LagBurstSlider.Value := LagBurstCount
+    LblSet(LblLagBurstCount, "Ticks: " LagBurstCount)
+    SetChk(ChkLagHold, IsLagHoldChecked)
+    SetChk(ChkLagVignette, IsLagVignetteChecked)
+    UnregisterLagKey(currentLagKey)
+    currentLagKey := LagKey
+    FreezeEdit.Value := FreezeDuration
+    BtnLagKey.Text := FormatKeyName(LagKey)
+    RegisterLagKey()
+    
+    StrafeDistance := config.strafe_settings.distance
+    StrafeDelay := config.strafe_settings.delay
+    StrafeTicks := config.strafe_settings.ticks
+    SlideTurnAmount := (config.HasOwnProp("slide_settings") && config.slide_settings.HasOwnProp("turn_amount")) ? config.slide_settings.turn_amount : 1400
+    SlideTurnSlider.Value := SlideTurnAmount
+    LblSet(LblSlideTurn, "Turn Amount: " SlideTurnAmount)
+    
+    CSpamSpeed := config.HasOwnProp("cspam_settings") ? config.cspam_settings.speed : (config.HasOwnProp("cspam_custom_settings") ? config.cspam_custom_settings.speed : 50)
+    CSpamSlider.Value := CSpamSpeed
+    LblSet(LblCSpamSpeed, SpeedText("Crouch", CSpamSpeed))
+    
+    ClickSpeed := config.HasOwnProp("click_settings") ? config.click_settings.speed : 1
+    ClickSlider.Value := ClickSpeed
+    LblSet(LblClickSpeed, SpeedText("Clicker", ClickSpeed))
+
+    
+    RegisterHotkeys()
+
+    if (config.HasOwnProp("system_keybinds")) {
+        sk := config.system_keybinds
+        UnregisterReloadKey(currentReloadKey)
+        UnregisterMinimizeKey(currentMinimizeKey)
+        UnregisterMacroLockKey(currentMacroLockKey)
+        UnregisterExitKey(currentExitKey)
+        ReloadKey    := sk.HasOwnProp("reload_key")     ? sk.reload_key     : ReloadKey
+        MinimizeKey  := sk.HasOwnProp("minimize_key")   ? sk.minimize_key   : MinimizeKey
+        MacroLockKey := sk.HasOwnProp("macro_lock_key") ? sk.macro_lock_key : MacroLockKey
+        ExitKey      := sk.HasOwnProp("exit_key")       ? sk.exit_key       : ExitKey
+        currentReloadKey    := ReloadKey
+        currentMinimizeKey  := MinimizeKey
+        currentMacroLockKey := MacroLockKey
+        currentExitKey      := ExitKey
+        BtnReloadKey.Text    := FormatKeyName(ReloadKey)
+        BtnMinimizeKey.Text  := FormatKeyName(MinimizeKey)
+        BtnMacroLockKey.Text := FormatKeyName(MacroLockKey)
+        BtnExitKey.Text      := FormatKeyName(ExitKey)
+        RegisterSystemHotkeys()
+    }
+    UpdateSidebarIndicators()
+
+    AdvRefresh()
+    ShowStatus("Config loaded: " configName, "0x082A13", 200)
+    KeyConflictWarn()
+}
+
+
+
+DeleteConfig(*) {
+    global ConfigDir, ConfigExt
+    
+    configName := ConfigDDL.Text
+    if (configName = "") {
+        ShowStatus("Select a config!", "0x2A0808", 200)
+        return
+    }
+    
+    filePath := ConfigDir "\" configName ConfigExt
+    try {
+        FileDelete(filePath)
+        RefreshConfigList()
+        ShowStatus("Config deleted!", "0x2A0808", 200)
+    } catch Error as e {
+        ShowStatus("Delete failed!", "0x2A0808", 200)
+    }
+}
+
+ResetDefaults(*) {
+    global MenuBlurOn, MenuBlurDim, MenuFxIdx, MenuFxAmt, MFParts, MFDimDone, ShakeOn, ShakeStyle, ShakeAmt, ShakeWhere, ShakeLen, ShakeSyncLen
+    global BhopHoldKey, currentBhopHoldKey, IsBhopHoldChecked, IsSlideBehindChecked, SlideTurnAmount, StrafeMouseThreshold
+    global IsSlideChecked, IsBhopChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked
+    global TriggerKey, BhopKey, StrafeKey, ComboKey, CSpamKey, CSpamSpeed, ClickKey, ClickSpeed, SpinbotKey
+    global AccentColor, BgColor, IconBgColor, PanelColor, FreezeDuration, LagKey, currentLagKey
+    global StrafeDistance, StrafeDelay, StrafeTicks
+    global ChkSlide, ChkBhop, ChkStrafe, ChkCombo, ChkCSpam, ChkClick, ChkSpinbot
+    global BtnSlideKey, BtnBhopKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey
+    global currentSlideKey, currentBhopKey, currentStrafeKey, currentComboKey, currentCSpamKey, currentClickKey, currentSpinbotKey
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    global currentReloadKey, currentMinimizeKey, currentMacroLockKey, currentExitKey
+    global isSpinbotRunning
+    global IsLagPrecisionChecked, IsLagBurstChecked, LagBurstCount, LagBurstGap, IsLagHoldChecked, IsLagVignetteChecked, VignetteThickness
+    global ShowSidebarIndicators, ShowStatusNotifs, HudPosition, HudOpacity, IndicatorHud, PHudOn, IsEDashStrafe, CompChar, CompStyle, CompOn, FpsShowStats, HudBorderIdx, HudGradIdx, HudCompact, HudShowKeys, HudStyleIdx, VigSoundIdx, VigSoundFile, VigVol, VigSoundSel, SPLogoIdx, VigStyle, VigGrad, VigIntensity, VigTint, VigPillOn, VigSound, VigAnim, VigAnimSpd, VigMinShow, VigVol, PillAlways, CompScale, CompFollow, CompBubbleOn, CompReactOn, CompCustom, CompX, CompY
+    global VigMulti, BurstSyncSound, BurstSyncPill
+    
+    IsSlideChecked := false
+    IsBhopChecked := false
+    IsStrafeChecked := false
+    IsComboChecked := false
+    IsCSpamChecked := false
+    IsClickChecked := false
+    IsSpinbotChecked := false
+    IsLagPrecisionChecked := false
+    IsLagBurstChecked := false
+    LagBurstCount := 3
+    LagBurstGap := 150
+    IsLagHoldChecked := false
+    IsLagVignetteChecked := false
+    VignetteThickness := 8
+    VignetteThicknessSlider.Value := 8
+    LblSet(LblVignetteThickness, "Thickness: 8px")
+    ApplyVignetteColor("FF0000")
+    SetChk(ChkLagPrecision, false)
+    SetChk(ChkLagBurst, false)
+    LagBurstSlider.Value := 3
+    LblSet(LblLagBurstCount, "Ticks: 3")
+    SetChk(ChkLagHold, false)
+    SetChk(ChkLagVignette, false)
+    
+    SetChk(ChkSlide, false)
+    SetChk(ChkBhop, false)
+    SetChk(ChkStrafe, false)
+    SetChk(ChkCombo, false)
+    SetChk(ChkCSpam, false)
+    SetChk(ChkClick, false)
+    SetChk(ChkSpinbot, false)
+    IsBhopHoldChecked := false
+    IsSlideBehindChecked := false
+    SetChk(ChkBhopHold, false)
+    SetChk(ChkSlideBehind, false)
+    SlideTurnAmount := 1400
+    SlideTurnSlider.Value := 1400
+    LblSet(LblSlideTurn, "Turn Amount: 1400")
+    
+    ShowSidebarIndicators := false
+    ChkSidebarIndicators.Text := "OFF"
+    IndicatorHud.Hide()
+
+    ShowStatusNotifs := true
+    PHudOn := false
+    IsEDashStrafe := false
+    WHudResetStyles()
+    HudBorderIdx := 3, HudGradIdx := 1, HudCompact := false, HudShowKeys := false, HudStyleIdx := 1
+    VigSoundIdx := 1, VigSoundFile := "", VigMulti := [], BurstSyncSound := false, BurstSyncPill := true
+    SPLogoIdx := 1
+    MenuBlurOn := false, MenuBlurDim := 30, MenuFxIdx := 1, MenuFxAmt := 50
+    ShakeOn := false, ShakeStyle := 1, ShakeAmt := 40, ShakeWhere := 1, ShakeLen := 400, ShakeSyncLen := false
+    MFParts.Clear()
+    MFDimDone := -1
+    VigStyle := 1, VigGrad := 1, VigIntensity := 80, VigTint := 0, VigPillOn := true, VigSound := false, VigAnim := false, VigAnimSpd := 5, VigMinShow := 500, VigVol := 100, PillAlways := false
+    HudRequest()
+    FpsShowStats := true
+    CompChar := 1
+    CompStyle := 2
+    CompScale := 100, CompFollow := true, CompBubbleOn := true, CompReactOn := true, CompCustom := false
+    if (CompOn) {
+        CompOn := false
+        CompHide()
+    }
+    PHudHide()
+    for wid in ["keys", "mbtn", "mouse", "strafer", "fps"]
+        WHudSet(wid, false)
+    ChkStatusNotifs.Text := "ON"
+
+    HudPosition := "Top-Left"
+    HudPosDDL.Value := 1
+    HudOpacity := 220
+    HudOpacitySlider.Value := 86
+    LblSet(LblHudOpacity, "86%")
+    HudRequest()
+    
+    ; Turn off whatever keys are currently bound BEFORE switching back to the defaults,
+    ; otherwise a custom key you'd bound (e.g. MButton) stays active alongside the default.
+    UnregisterSlideKey(currentSlideKey)
+    UnregisterBhopKey(currentBhopKey)
+    UnregisterStrafeKey(currentStrafeKey)
+    UnregisterComboKey(currentComboKey)
+    UnregisterCSpamKey(currentCSpamKey)
+    UnregisterClickKey(currentClickKey)
+    UnregisterSpinbotKey(currentSpinbotKey)
+    UnregisterBhopHoldKey(currentBhopHoldKey)
+
+    TriggerKey := ""
+    BhopKey := ""
+    StrafeKey := ""
+    ComboKey := ""
+    CSpamKey := ""
+    ClickKey := ""
+    SpinbotKey := ""
+    BhopHoldKey := ""
+
+    currentSlideKey := TriggerKey
+    currentBhopKey := BhopKey
+    currentStrafeKey := StrafeKey
+    currentComboKey := ComboKey
+    currentCSpamKey := CSpamKey
+    currentClickKey := ClickKey
+    currentSpinbotKey := SpinbotKey
+    currentBhopHoldKey := BhopHoldKey
+    
+    BtnSlideKey.Text := "NONE"
+    BtnBhopKey.Text := "NONE"
+    BtnBhopHoldKey.Text := "NONE"
+    BtnStrafeKey.Text := "NONE"
+    BtnComboKey.Text := "NONE"
+    BtnCSpamKey.Text := "NONE"
+    BtnClickKey.Text := "NONE"
+    BtnSpinbotKey.Text := "NONE"
+    
+    ApplyAccentColor("D98484")
+    ApplyBgColor("000000")
+    ApplyIconBgColor("000000")
+    ApplyPanelColor("111111")
+    ApplyDesign("M0MENT4M")
+    try DesignDDL.Choose("M0MENT4M")
+    
+    FreezeDuration := 200
+    UnregisterLagKey(currentLagKey)
+    LagKey := "LButton"
+    currentLagKey := "LButton"
+    FreezeEdit.Value := "200"
+    BtnLagKey.Text := "Left Mouse"
+    RegisterLagKey()
+    
+    StrafeDistance := 20
+    StrafeDelay := 6
+    StrafeTicks := 15
+    
+    CSpamSpeed := 50
+    CSpamSlider.Value := 50
+    LblSet(LblCSpamSpeed, SpeedText("Crouch", 50))
+    
+    ClickSpeed := 1
+    ClickSlider.Value := 1
+    LblSet(LblClickSpeed, SpeedText("Clicker", 1))
+
+    if (isSpinbotRunning) {
+        isSpinbotRunning := false
+        SetTimer(SpinbotLoop, 0)
+        Send("{Blind}")
+    }
+    
+    UnregisterReloadKey(currentReloadKey)
+    UnregisterMinimizeKey(currentMinimizeKey)
+    UnregisterMacroLockKey(currentMacroLockKey)
+    UnregisterExitKey(currentExitKey)
+
+    ReloadKey := "Insert"
+    MinimizeKey := "F8"
+    MacroLockKey := "F5"
+    ExitKey := "Delete"
+
+    currentReloadKey := ReloadKey
+    currentMinimizeKey := MinimizeKey
+    currentMacroLockKey := MacroLockKey
+    currentExitKey := ExitKey
+
+    BtnReloadKey.Text := FormatKeyName(ReloadKey)
+    BtnMinimizeKey.Text := FormatKeyName(MinimizeKey)
+    BtnMacroLockKey.Text := FormatKeyName(MacroLockKey)
+    BtnExitKey.Text := FormatKeyName(ExitKey)
+
+    RegisterSystemHotkeys()
+    RegisterHotkeys()
+    AdvRefresh()
+    ShowStatus("Reset to defaults!", "0x2A0808", 200)
+}
+
+RefreshConfigList() {
+    global ConfigDir, ConfigExt
+    
+    EnsureConfigDir()
+    
+    ConfigDDL.Delete()
+    
+    Loop Files, ConfigDir "\" "*" ConfigExt {
+        configName := SubStr(A_LoopFileName, 1, -5)
+        ConfigDDL.Add([configName])
+    }
+}
+
+ObjToJson(obj, indent := 0) {
+    Q := Chr(34)
+    if (obj is String)
+        return Q EscapeJsonString(obj) Q
+    if (obj is Number)
+        return obj
+    if (obj is Array) {
+        result := "["
+        Loop obj.Length {
+            if (A_Index > 1)
+                result .= ","
+            result .= ObjToJson(obj[A_Index], indent + 1)
+        }
+        return result "]"
+    }
+    if (obj is Object) {
+        result := "{"
+        first := true
+        for key, value in obj.OwnProps() {
+            if (!first)
+                result .= ","
+            result .= Q key Q ":" ObjToJson(value, indent + 1)
+            first := false
+        }
+        return result "}"
+    }
+    return obj
+}
+
+EscapeJsonString(str) {
+    Q := Chr(34)
+    str := StrReplace(str, "\", "\\")
+    str := StrReplace(str, Q, "\" Q)
+    str := StrReplace(str, "`n", "\n")
+    str := StrReplace(str, "`r", "\r")
+    str := StrReplace(str, "`t", "\t")
+    return str
+}
+
+JsonToObj(jsonStr) {
+    static obj := {}
+    pos := 1
+    return ParseJsonValue(jsonStr, &pos)
+}
+
+ParseJsonValue(jsonStr, &pos) {
+    Q := Chr(34)
+    SkipWhitespace(jsonStr, &pos)
+    
+    if (SubStr(jsonStr, pos, 1) = "{") {
+        return ParseJsonObject(jsonStr, &pos)
+    } else if (SubStr(jsonStr, pos, 1) = "[") {
+        return ParseJsonArray(jsonStr, &pos)
+    } else if (SubStr(jsonStr, pos, 1) = Q) {
+        return ParseJsonString(jsonStr, &pos)
+    } else if (SubStr(jsonStr, pos, 4) = "true") {
+        pos += 4
+        return true
+    } else if (SubStr(jsonStr, pos, 5) = "false") {
+        pos += 5
+        return false
+    } else if (SubStr(jsonStr, pos, 4) = "null") {
+        pos += 4
+        return ""
+    } else {
+        return ParseJsonNumber(jsonStr, &pos)
+    }
+}
+
+ParseJsonObject(jsonStr, &pos) {
+    obj := {}
+    pos++
+    SkipWhitespace(jsonStr, &pos)
+    
+    if (SubStr(jsonStr, pos, 1) = "}") {
+        pos++
+        return obj
+    }
+    
+    Loop {
+        SkipWhitespace(jsonStr, &pos)
+        key := ParseJsonString(jsonStr, &pos)
+        SkipWhitespace(jsonStr, &pos)
+        pos++
+        SkipWhitespace(jsonStr, &pos)
+        value := ParseJsonValue(jsonStr, &pos)
+        obj.%key% := value
+        SkipWhitespace(jsonStr, &pos)
+        
+        if (SubStr(jsonStr, pos, 1) = ",") {
+            pos++
+        } else {
+            break
+        }
+    }
+    
+    SkipWhitespace(jsonStr, &pos)
+    pos++
+    return obj
+}
+
+ParseJsonArray(jsonStr, &pos) {
+    arr := []
+    pos++
+    SkipWhitespace(jsonStr, &pos)
+    
+    if (SubStr(jsonStr, pos, 1) = "]") {
+        pos++
+        return arr
+    }
+    
+    Loop {
+        value := ParseJsonValue(jsonStr, &pos)
+        arr.Push(value)
+        SkipWhitespace(jsonStr, &pos)
+        
+        if (SubStr(jsonStr, pos, 1) = ",") {
+            pos++
+        } else {
+            break
+        }
+    }
+    
+    SkipWhitespace(jsonStr, &pos)
+    pos++
+    return arr
+}
+
+ParseJsonString(jsonStr, &pos) {
+    Q := Chr(34)
+    pos++
+    result := ""
+    
+    Loop {
+        char := SubStr(jsonStr, pos, 1)
+        
+        if (char = Q) {
+            pos++
+            break
+        } else if (char = "\") {
+            pos++
+            nextChar := SubStr(jsonStr, pos, 1)
+            if (nextChar = "n") {
+                result .= "`n"
+            } else if (nextChar = "r") {
+                result .= "`r"
+            } else if (nextChar = "t") {
+                result .= "`t"
+            } else if (nextChar = Q) {
+                result .= Q
+            } else if (nextChar = "\") {
+                result .= "\"
+            } else {
+                result .= nextChar
+            }
+            pos++
+        } else {
+            result .= char
+            pos++
+        }
+    }
+    
+    return result
+}
+
+ParseJsonNumber(jsonStr, &pos) {
+    num := ""
+    
+    while (pos <= StrLen(jsonStr)) {
+        char := SubStr(jsonStr, pos, 1)
+        if (char ~= "[0-9.\-+e]") {
+            num .= char
+            pos++
+        } else {
+            break
+        }
+    }
+    
+    return Number(num)
+}
+
+SkipWhitespace(jsonStr, &pos) {
+    while (pos <= StrLen(jsonStr) && SubStr(jsonStr, pos, 1) ~= "[\s]") {
+        pos++
+    }
+}
+
+; --- Slide / Bhop hold / Strafer / Tooltip helpers ---
+ToggleSlideBehindBox(*)
+{
+    global IsSlideBehindChecked, ChkSlideBehind
+    IsSlideBehindChecked := !IsSlideBehindChecked
+    SetChk(ChkSlideBehind, IsSlideBehindChecked)
+}
+
+UpdateSlideTurn(*)
+{
+    global SlideTurnAmount
+    SlideTurnAmount := SlideTurnSlider.Value
+    LblSet(LblSlideTurn, "Turn Amount: " SlideTurnAmount)
+}
+
+; Fires 300ms after the slide starts. Skipped if the slide was stopped or the game lost focus.
+SlideLookBehind()
+{
+    global isMacroRunning, SlideTurnedBehind, SlideTurnAmount
+    if (!isMacroRunning || !IsSlideChecked || !IsSlideBehindChecked || !GameActiveFast())
+        return
+    SlideTurnedBehind := true
+    TurnCamera(SlideTurnAmount)
+}
+
+; Relative mouse-X turn spread over 25 steps. Positive = right, negative = left.
+TurnCamera(total)
+{
+    steps := 25
+    step := Round(total / steps)
+    Loop steps {
+        if (!GameActiveFast())
+            break
+        DllCall("mouse_event", "UInt", 0x0001, "Int", step, "Int", 0, "UInt", 0, "UPtr", 0)
+    }
+}
+
+ToggleBhopHoldBox(*)
+{
+    global IsBhopHoldChecked, ChkBhopHold, isBhopRunning, BhopHeld
+    IsBhopHoldChecked := !IsBhopHoldChecked
+    SetChk(ChkBhopHold, IsBhopHoldChecked)
+    if (isBhopRunning && BhopHeld) {
+        BhopHeld := false
+        isBhopRunning := false
+        SetTimer(UltraSpam, 0)
+        SetBhopHoldHotkey(true)
+        DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 2, "UPtr", 0) ; Space UP
+        UpdateSidebarIndicators()
+    }
+}
+
+; Runs when the hold key goes down. UltraSpam stops itself once the key is physically released.
+StartBhopHold(*)
+{
+    global isBhopRunning, BhopHeld, isStrafeActive, isComboRunning
+    ; (the jumps that the auto strafer and E-Dash send themselves are no "hold": they must not start the bhop macro)
+    if (isBhopRunning || !IsBhopChecked || !IsBhopHoldChecked || isStrafeActive || isComboRunning)
+        return
+    isBhopRunning := true
+    BhopHeld := true
+    SetBhopHoldHotkey(false)
+    SetTimer(UltraSpam, 15)
+    UpdateSidebarIndicators()
+    BlinkIndicator(2)
+}
+
+; Cheap "is Roblox in front" check for the 10-15ms timers: compares the foreground window handle with a
+; cached one and only falls back to the slower WinActive(ahk_exe ...) lookup when the handle changes.
+GameActiveFast()
+{
+    global FreezeActive
+    static cached := 0, lastGame := 0
+    fg := DllCall("GetForegroundWindow", "Ptr")
+    if (cached && (fg = cached || FreezeActive)) {   ; while the game is frozen the answer cannot change: no need to ask Windows about a suspended process
+        lastGame := A_TickCount
+        return true
+    }
+    cached := WinActive(GAME_EXE)
+    if (cached) {
+        lastGame := A_TickCount
+        return true
+    }
+    ; the game window can lose the focus for a moment (an overlay appearing, a freeze, a dialog): for two seconds after it was last in front it still counts
+    ok := (A_TickCount - lastGame < 2000)
+    static lastNote := 0
+    if (DebugLogOn && lastGame && A_TickCount - lastNote > 700) {              ; (written to configs\hotkeys.log, to see which window had the focus instead of the game)
+        lastNote := A_TickCount
+        try {
+            h := WinExist("A")
+            HkLog("game not in front (" (ok ? "still counted: left it " (A_TickCount - lastGame) " ms ago" : "NOT counted") "); front window: " (h ? WinGetProcessName("ahk_id " h) " / " WinGetClass("ahk_id " h) " / " WinGetTitle("ahk_id " h) : "none"))
+        }
+    }
+    return ok
+}
+Global FreezeActive := false
+
+; While bhop is spamming Space, the hold hotkey is switched off so our own fake Space presses don't
+; fire it ~60 times a second. It is switched back on whenever bhop stops.
+SetBhopHoldHotkey(on)
+{
+    global BhopHoldKey
+    if (BhopHoldKey == "")
+        return
+    SyncMacroHotkeys()                      ; (the hold hotkey follows "bhop is running": it must not fire on the Space presses of the macro itself)
+}
+
+AddTip(ctrl, text)
+{
+    global TipMap
+    TipMap[ctrl.Hwnd] := text
+}
+
+AddTip2(ctrlA, ctrlB, text)
+{
+    AddTip(ctrlA, text)
+    AddTip(ctrlB, text)
+}
+
+TipPoll()
+{
+    global MainGui, TipMap, TipLastCtl, TipHoverStart, TipShownCtl
+    MouseGetPos(, , &win, &ctl, 2)
+    if (win != MainGui.Hwnd || !ctl || !TipMap.Has(ctl)) {
+        if (TipShownCtl)
+            ToolTip()
+        TipLastCtl := 0
+        TipShownCtl := 0
+        return
+    }
+    if (ctl != TipLastCtl) {
+        if (TipShownCtl)
+            ToolTip()
+        TipLastCtl := ctl
+        TipHoverStart := A_TickCount
+        TipShownCtl := 0
+        return
+    }
+    if (TipShownCtl != ctl && A_TickCount - TipHoverStart > 450) {
+        ToolTip(TipMap[ctl])
+        TipShownCtl := ctl
+    }
+}
+
+; --- Lagswitch Functions ---
+ApplyLagSettings(*) {
+    global FreezeDuration
+    FreezeDuration := IsInteger(FreezeEdit.Value) ? Integer(FreezeEdit.Value) : 0
+    if (FreezeDuration < 1 || FreezeDuration > 1000) {
+        FreezeDuration := 200
+        FreezeEdit.Value := "200"
+    }
+    LblSet(StatusText, "Status: Applied (" FreezeDuration "ms)")
+}
+
+TestFreeze(*) {
+    LblSet(StatusText, "Status: Testing Freeze...")
+    FreezeRoblox()
+}
+
+ToggleLagPrecisionBox(*) {
+    global IsLagPrecisionChecked, ChkLagPrecision
+    IsLagPrecisionChecked := !IsLagPrecisionChecked
+    SetChk(ChkLagPrecision, IsLagPrecisionChecked)
+}
+
+ToggleLagBurstBox(*) {
+    global IsLagBurstChecked, ChkLagBurst
+    IsLagBurstChecked := !IsLagBurstChecked
+    SetChk(ChkLagBurst, IsLagBurstChecked)
+}
+
+UpdateLagBurstCount(*) {
+    global LagBurstCount, LagBurstSlider, LblLagBurstCount
+    LagBurstCount := LagBurstSlider.Value
+    LblSet(LblLagBurstCount, "Ticks: " LagBurstCount)
+}
+
+ToggleLagHoldBox(*) {
+    global IsLagHoldChecked, ChkLagHold
+    IsLagHoldChecked := !IsLagHoldChecked
+    SetChk(ChkLagHold, IsLagHoldChecked)
+}
+
+ToggleLagVignetteBox(*) {
+    global IsLagVignetteChecked, ChkLagVignette
+    IsLagVignetteChecked := !IsLagVignetteChecked
+    SetChk(ChkLagVignette, IsLagVignetteChecked)
+}
+
+UpdateVignetteThickness(*) {
+    global VignetteThickness, VignetteThicknessSlider, LblVignetteThickness, VignetteGuis
+    VignetteThickness := VignetteThicknessSlider.Value
+    LblSet(LblVignetteThickness, "Thickness: " VignetteThickness "px")
+    if (VignetteGuis.Length > 0) {
+        for item in VignetteGuis
+            item.gui.Destroy()
+        VignetteGuis := []
+    }
+}
+
+Global VignetteGuis := []
+
+; ===== Lagswitch =====
+; The freeze is a small state machine driven by timers instead of one long Sleep: a hotkey thread that sleeps for the whole
+; freeze stops every other hotkey from firing. The game is paused with the smallest right Windows needs (suspend / resume);
+; if Windows refuses that on the whole process, the threads are paused one by one. Whatever happens, it is reported.
+Global FzTimer := 0, FzThreads := [], FzEndTick := 0
+Global FzH := 0, FzMode := "", FzIdx := 0, FzCount := 0, FzBase := 0, FzDur := 0, FzKey := "", FzPrecise := false
+
+; every attempt is written to configs\lagswitch.log, so a freeze that "does nothing" can be explained
+FzLog(msg)
+{
+    if (!DebugLogOn)
+        return
+    try {
+        DirCreate(AppDir "\configs")
+        f := AppDir "\configs\lagswitch.log"
+        if (FileExist(f) && FileGetSize(f) > 150000)
+            FileDelete(f)
+        FileAppend(FormatTime(, "HH:mm:ss") "." Format("{:03}", A_MSec) "  " msg "`n", f, "UTF-8")
+    }
+}
+
+FzReport(text, sub := "")
+{
+    global FzLastFail
+    LblSet(StatusText, "Status: " text)
+    if (A_TickCount - FzLastFail > 2500) {                  ; one card at a time
+        FzLastFail := A_TickCount
+        try SPToast("Lagswitch: " text, 7501, "off", sub)
+    }
+}
+Global FzLastFail := -99999
+
+; the process to freeze: the game window you are in, or else the first Roblox process
+FzFindPid()
+{
+    global TargetProcess
+    try {
+        fg := WinExist("A")
+        if (fg) {
+            exe := WinGetProcessName("ahk_id " fg)
+            if (exe = TargetProcess || exe = "Windows10Universal.exe")
+                return WinGetPID("ahk_id " fg)
+        }
+    }
+    pid := ProcessExist(TargetProcess)
+    return pid
+}
+
+; pauses the game: returns "" when it worked, otherwise a readable reason
+FzSuspend(pid)
+{
+    global FzH, FzThreads
+    if (FzH) {                                       ; (burst mode comes back here for every burst)
+        DllCall("CloseHandle", "Ptr", FzH)
+        FzH := 0
+    }
+    for th in FzThreads
+        DllCall("CloseHandle", "Ptr", th)
+    FzThreads := []
+    ; 1) the smallest right that is enough, then the broad one
+    for acc in [0x0800, 0x1F0FFF] {
+        h := DllCall("OpenProcess", "UInt", acc, "Int", 0, "UInt", pid, "Ptr")
+        FzLog("OpenProcess access " Format("0x{:X}", acc) " -> handle " h "  error " A_LastError)
+        if (h) {
+            st := DllCall("ntdll\NtSuspendProcess", "Ptr", h)
+            FzLog("NtSuspendProcess -> status " Format("0x{:X}", st & 0xFFFFFFFF))
+            if (st = 0) {
+                FzH := h
+                return ""
+            }
+            DllCall("CloseHandle", "Ptr", h)
+        }
+    }
+    err1 := A_LastError
+    ; 2) thread by thread
+    snap := DllCall("CreateToolhelp32Snapshot", "UInt", 0x4, "UInt", 0, "Ptr")
+    if (snap = -1 || !snap)
+        return "Windows refused access to Roblox (error " err1 ")"
+    te := Buffer(28, 0)
+    NumPut("UInt", 28, te, 0)
+    FzThreads := []
+    ok := DllCall("Thread32First", "Ptr", snap, "Ptr", te)
+    while (ok) {
+        if (NumGet(te, 12, "UInt") = pid) {
+            th := DllCall("OpenThread", "UInt", 0x2, "Int", 0, "UInt", NumGet(te, 8, "UInt"), "Ptr")
+            if (th) {
+                if (DllCall("SuspendThread", "Ptr", th) != -1)
+                    FzThreads.Push(th)
+                else
+                    DllCall("CloseHandle", "Ptr", th)
+            }
+        }
+        ok := DllCall("Thread32Next", "Ptr", snap, "Ptr", te)
+    }
+    DllCall("CloseHandle", "Ptr", snap)
+    FzLog("thread fallback: paused " FzThreads.Length " threads")
+    if (FzThreads.Length = 0)
+        return "Windows refused access to Roblox (error " err1 "). Try running the macro as administrator"
+    return ""
+}
+
+FzResume()
+{
+    global FzH, FzThreads
+    if (FzH) {
+        st := DllCall("ntdll\NtResumeProcess", "Ptr", FzH)
+        FzLog("NtResumeProcess -> status " Format("0x{:X}", st & 0xFFFFFFFF))
+    }
+    for th in FzThreads
+        DllCall("ResumeThread", "Ptr", th)
+}
+
+FreezeRoblox(*) {
+    global FreezeDuration, LagKey
+    global IsLagPrecisionChecked, IsLagBurstChecked, LagBurstCount, LagBurstGap, IsLagHoldChecked
+    global IsLagVignetteChecked, FreezeActive, BurstSyncPill
+    global FzH, FzMode, FzIdx, FzCount, FzBase, FzDur, FzKey, FzPrecise, FzTimer, FzEndTick, FzBurstResumed
+
+    FzLog("--- freeze requested by " (A_ThisHotkey != "" ? A_ThisHotkey : "button") "  active=" FreezeActive "  effect=" IsLagVignetteChecked "  ms=" FreezeDuration "  hold=" IsLagHoldChecked "  burst=" IsLagBurstChecked)
+    if (FreezeActive) {
+        if (FzMode != "single") {
+            FzLog("ignored: a freeze is still running")
+            return
+        }
+        if (A_TickCount < FzEndTick) {
+            ; pressed again while the game is still frozen: the freeze is simply prolonged (spamming keeps it frozen)
+            if (FzTimer) {
+                DllCall("DeleteTimerQueueTimer", "Ptr", 0, "Ptr", FzTimer, "Ptr", 0)
+                FzTimer := 0
+                ntres := DllCall("GetProcAddress", "Ptr", DllCall("GetModuleHandle", "Str", "ntdll", "Ptr"), "AStr", "NtResumeProcess", "Ptr")
+                if (!DllCall("CreateTimerQueueTimer", "Ptr*", &FzTimer, "Ptr", 0, "Ptr", ntres, "Ptr", FzH, "UInt", FreezeDuration, "UInt", 0, "UInt", 0x20))
+                    FzTimer := 0
+            }
+            FzEndTick := A_TickCount + FreezeDuration
+            SetTimer(FreezeSingleDone, -(FreezeDuration + (FzTimer ? 30 : 0)), 100)
+            FzLog("prolonged: pressed again during the freeze")
+            return
+        }
+        ; the game is already running again and only the clean-up is left: finish it now and start a new freeze at once
+        SetTimer(FreezeSingleDone, 0)
+        FreezeEnd(true)
+    }
+    pid := FzFindPid()
+    FzLog("target pid=" pid)
+    if (!pid) {
+        FzReport("Roblox not found")
+        return
+    }
+    FzPrecise := IsLagPrecisionChecked ? true : false
+    if (FzPrecise)
+        DllCall("winmm\timeBeginPeriod", "UInt", 1)
+    FzDur := FreezeDuration
+    FzMode := (IsLagHoldChecked && LagKey != "") ? "hold" : (IsLagBurstChecked ? "burst" : "single")
+    ; pause first, show the effect right after: the freeze itself must not wait for any drawing
+    err := FzSuspend(pid)
+    if (err != "") {
+        FzReport(err)
+        FreezeEnd(false)
+        return
+    }
+    FreezeActive := true
+    FzLog("game paused, mode " FzMode)
+    if (FzMode = "burst") {                                           ; the end of the first freeze is scheduled before anything is drawn or played
+        FzCount := LagBurstCount
+        FzBase := Max(10, FreezeDuration)                             ; every freeze of the burst lasts as long as the freeze setting
+        FzIdx := 1
+        FzBurstResumed := false
+        SetTimer(FreezeBurstStep, -FzBase, 100)
+    }
+    ShakeStart(false, (FzMode = "burst") ? 0 : -1)                   ; (in a burst the shake follows each freeze, so it must not be held on)
+    fzTotal := (FzMode = "burst") ? Max(10, FreezeDuration) * LagBurstCount + LagBurstGap * (LagBurstCount - 1) : FzDur
+    if (IsLagVignetteChecked)
+        ShowFreezeVignette(FzMode = "hold" ? 0 : ((FzMode = "burst" && BurstSyncPill) ? Max(10, FreezeDuration) : fzTotal))             ; (it plays the sound cue too)
+    else if (VigSound)
+        VigSoundPlay(true)                                          ; the sound cue does not need the screen effect
+    if (FzMode = "hold") {
+        FzKey := RegExReplace(LagKey, "^[~*$&<>]", "")
+        LblSet(StatusText, "Status: Freezing (Hold Mode)...")
+        SetTimer(FreezeHoldPoll, 10)
+    } else if (FzMode = "burst") {
+        LblSet(StatusText, "Status: Freezing (" LagBurstCount "x Tick)...")
+    } else {
+        LblSet(StatusText, "Status: Freezing...")
+        ; With a process handle the resume is handed to a Windows timer that calls NtResumeProcess itself, so it lands on time even
+        ; when the script is busy drawing. The script only cleans up afterwards.
+        if (FzH) {
+            ntres := DllCall("GetProcAddress", "Ptr", DllCall("GetModuleHandle", "Str", "ntdll", "Ptr"), "AStr", "NtResumeProcess", "Ptr")
+            FzTimer := 0
+            if (!DllCall("CreateTimerQueueTimer", "Ptr*", &FzTimer, "Ptr", 0, "Ptr", ntres, "Ptr", FzH, "UInt", FzDur, "UInt", 0, "UInt", 0x20))
+                FzTimer := 0
+        }
+        FzEndTick := A_TickCount + FzDur
+        SetTimer(FreezeSingleDone, -(FzDur + (FzTimer ? 30 : 0)), 100)
+    }
+}
+
+FreezeHoldPoll()
+{
+    global FzKey
+    if (GetKeyState(FzKey, "P"))
+        return
+    SetTimer(FreezeHoldPoll, 0)
+    LblSet(StatusText, "Status: Resumed (Hold Mode)")
+    FreezeEnd(true)
+}
+
+FreezeSingleDone()
+{
+    global FzDur
+    LblSet(StatusText, "Status: Frozen for " FzDur "ms")
+    FreezeEnd(true)
+}
+
+; resumes after each freeze of the burst, lets the game run for the gap, then freezes again
+FreezeBurstStep()
+{
+    global FzIdx, FzCount, FzBase, LagBurstGap, FzBurstResumed, BurstSyncSound, BurstSyncPill, VigSound, IsLagVignetteChecked, VigState
+    if (!FzBurstResumed) {
+        FzResume()
+        ShakeStop()                                               ; (each freeze of the burst has its own shake)
+        if (FzIdx < FzCount && BurstSyncSound && VigSound)
+            VigSoundPlay(false)
+        if (FzIdx >= FzCount) {
+            LblSet(StatusText, "Status: Frozen (" FzCount "x Tick)")
+            FzBurstResumed := false
+            FreezeEnd(true, true)
+            return
+        }
+        FzBurstResumed := true
+        SetTimer(FreezeBurstStep, -Max(15, LagBurstGap), 100)
+    } else {
+        FzBurstResumed := false
+        FzIdx += 1
+        pid := FzFindPid()
+        err := pid ? FzSuspend(pid) : "Roblox not found"
+        if (err != "") {
+            FzReport(err)
+            FreezeEnd(false, true)
+            return
+        }
+        SetTimer(FreezeBurstStep, -FzBase, 100)                   ; (the end of this freeze first, then the effects)
+        ShakeStart(false, 0)
+        if (BurstSyncPill && IsLagVignetteChecked && IsObject(VigState) && !VigState.hideAt) {
+            VigState.t0 := A_TickCount                            ; the pill counts down again for every freeze
+            VigState.dur := FzBase
+        }
+        if (BurstSyncSound && VigSound)
+            VigSoundPlay(true)
+    }
+}
+
+; One press of the trigger key = one freeze. The same press can arrive twice (this script's hotkey and the helper), and holding the key makes
+; Windows repeat it: both are ignored until the key has been let go.
+LagFire(*)
+{
+    global LagKey, LagHeldOK, LagLastFire
+    if (LagHeldOK || A_TickCount - LagLastFire < 25)
+        return
+    LagHeldOK := true
+    LagLastFire := A_TickCount
+    SetTimer(LagReleaseWatch, 5)
+    FreezeRoblox()
+}
+
+LagReleaseWatch()
+{
+    global LagKey, LagHeldOK
+    key := RegExReplace(LagKey, "^[~*$&<>]", "")
+    if (key != "" && GetKeyState(key))
+        return
+    LagHeldOK := false
+    SetTimer(LagReleaseWatch, 0)
+}
+
+; always leaves the game running: resumes (again, harmlessly) and releases everything
+FreezeEnd(ran := true, alreadyResumed := false)
+{
+    global FzH, FzThreads, FzTimer, FzPrecise, FreezeActive, IsLagVignetteChecked
+    if (!alreadyResumed)
+        FzResume()
+    if (FzTimer) {
+        DllCall("DeleteTimerQueueTimer", "Ptr", 0, "Ptr", FzTimer, "Ptr", 0)
+        FzTimer := 0
+    }
+    if (FzH) {
+        DllCall("CloseHandle", "Ptr", FzH)
+        FzH := 0
+    }
+    for th in FzThreads
+        DllCall("CloseHandle", "Ptr", th)
+    FzThreads := []
+    FreezeActive := false
+    FzLog("freeze finished (ran=" ran ")")
+    if (FzPrecise) {
+        DllCall("winmm\timeEndPeriod", "UInt", 1)
+        FzPrecise := false
+    }
+    ShakeStop()
+    if (ran && IsLagVignetteChecked)
+        HideFreezeVignette()
+    else if (ran && VigSound)
+        VigSoundPlay(false)
+    SetTimer(() => LblSet(StatusText, "Status: Ready"), -3000)
+}
+
+; === LAGSWITCH DYNAMIC KEYBIND ===
+LagCond(*) {
+    return GameActiveFast()
+}
+
+RegisterLagKey() {
+    global LagKey
+    if (LagKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey("~*" LagKey, LagFire, "On")
+        HotIf()
+        HkFallbackOn(LagKey, "lagswitch", () => true, LagFire)      ; the safety net (see the macro hotkeys)
+    }
+}
+
+UnregisterLagKey(key) {
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey("~*" key, "Off")
+    HotIf()
+}
+
+StartBindLag(*)
+{
+    global LagKey, currentLagKey
+    BindKey(&LagKey, &currentLagKey, BtnLagKey, UnregisterLagKey, RegisterLagKey)
+}
+
+RegisterLagKey()
+
+; --- Window & App Controls ---
+isAppMinimized := false
+MinimizeApp(*)
+{
+    global isAppMinimized
+    FadeWindow(false)
+    isAppMinimized := true
+}
+
+ToggleMainGui(*)
+{
+    global isAppMinimized
+    if (isAppMinimized) {
+        FadeWindow(true)
+        isAppMinimized := false
+    } else {
+        FadeWindow(false)
+        isAppMinimized := true
+    }
+}
+
+A_TrayMenu.Add("Show / Hide M0MENT4M", ToggleMainGui)
+A_TrayMenu.Add("Reload", ReloadAction)
+A_TrayMenu.Add("Exit", ExitWithAnimation)
+A_TrayMenu.Default := "Show / Hide M0MENT4M"
+A_TrayMenu.ClickCount := 1
+
+WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
+    if (hwnd == MainGui.Hwnd)
+        PostMessage(0xA1, 2, 0, MainGui.Hwnd)
+}
+
+PositionRainbowBar(width) {
+    global RainbowCanvas, RainbowBarHeight, RainbowBarW
+    RainbowBarW := width
+    RainbowCanvas.Move(0, 0, width, RainbowBarHeight)
+    RainbowTick()
+}
+
+; One rainbow cycle at a fixed size (stored twice side by side so it scrolls seamlessly). It is stretched to
+; the bar width when drawn, so resizing the window never has to rebuild it.
+BuildRainbowBitmap() {
+    global RainbowMemDC, RainbowBmp, RainbowBmpW
+    if (RainbowBmp)
+        return
+    w := 720
+    RainbowMemDC := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+    bi := Buffer(40, 0)
+    NumPut("int", 40, bi, 0)
+    NumPut("int", w * 2, bi, 4)
+    NumPut("int", -4, bi, 8)
+    NumPut("short", 1, bi, 12)
+    NumPut("short", 32, bi, 14)
+    pBits := 0
+    hBmp := DllCall("CreateDIBSection", "Ptr", RainbowMemDC, "Ptr", bi, "UInt", 0, "Ptr*", &pBits, "Ptr", 0, "UInt", 0, "Ptr")
+    Loop w * 2 {
+        x := A_Index - 1
+        HSVtoRGBValues(Mod(x / w * 360, 360), 1, 1, &R, &G, &B)
+        px := B | (G << 8) | (R << 16) | (255 << 24)
+        Loop 4
+            NumPut("UInt", px, pBits, ((A_Index - 1) * w * 2 + x) * 4)
+    }
+    DllCall("SelectObject", "Ptr", RainbowMemDC, "Ptr", hBmp, "Ptr")
+    RainbowBmp := hBmp
+    RainbowBmpW := w
+}
+
+; Scrolls the menu's rainbow strip (same speed as the intro). Runs only while the menu is visible.
+RainbowTick() {
+    global RainbowCanvas, RainbowMemDC, RainbowBarHeight, RainbowBmpW, RainbowBarW
+    if (LayoutMode = "nl")
+        return
+    if (!RainbowBmpW) {
+        BuildRainbowBitmap()
+        if (!RainbowBmpW)
+            return
+    }
+    shift := Floor(Mod(A_TickCount * 0.25, 360) / 360 * RainbowBmpW)
+    hdc := DllCall("GetDC", "Ptr", RainbowCanvas.Hwnd, "Ptr")
+    DllCall("SetStretchBltMode", "Ptr", hdc, "Int", 3)
+    DllCall("StretchBlt", "Ptr", hdc, "Int", 0, "Int", 0, "Int", RainbowBarW, "Int", RainbowBarHeight
+        , "Ptr", RainbowMemDC, "Int", shift, "Int", 0, "Int", RainbowBmpW, "Int", RainbowBarHeight, "UInt", 0x00CC0020)
+    DllCall("ReleaseDC", "Ptr", RainbowCanvas.Hwnd, "Ptr", hdc)
+}
+
+HSVtoHex(h) {
+    h := Mod(h, 360)
+    c := 255
+    x := c * (1 - Abs(Mod(h / 60, 2) - 1))
+    if (h < 60)
+        r := c, g := x, b := 0
+    else if (h < 120)
+        r := x, g := c, b := 0
+    else if (h < 180)
+        r := 0, g := c, b := x
+    else if (h < 240)
+        r := 0, g := x, b := c
+    else if (h < 300)
+        r := x, g := 0, b := c
+    else
+        r := c, g := 0, b := x
+    return Format("{:02X}{:02X}{:02X}", Round(r), Round(g), Round(b))
+}
+
+GuiResize(GuiObj, MinMax, Width, Height) {
+    global SidebarBg, PanelBorderBg, PanelFillBg, BtnMin, BtnClose
+    if (MinMax = -1)
+        return
+    if (LayoutMode = "skeet") {
+        SkeetResizeThrottled(Width, Height)
+        return
+    }
+    SidebarBg.Move(, , 76, Height - 38 - 10)
+    LayoutPanel(Width, Height)
+
+    closeX := Width - 34 - 12
+    minX := closeX - 34 - 4
+    BtnClose.Move(closeX)
+    BtnMin.Move(minX)
+
+    PositionRainbowBar(Width)
+}
+
+; --- Macro Loops & Hotkeys ---
+
+SlideCond(*) {
+    return IsSlideChecked == 1 && GameActiveFast()
+}
+BhopCond(*) {
+    return IsBhopChecked == 1 && GameActiveFast()
+}
+BhopHoldCond(*) {
+    return !isBhopRunning && !isStrafeActive && !isComboRunning && IsBhopChecked == 1 && IsBhopHoldChecked == 1 && GameActiveFast()
+}
+StrafeCond(*) {
+    return IsStrafeChecked == 1 && GameActiveFast()
+}
+ComboCond(*) {
+    return IsComboChecked == 1 && GameActiveFast()
+}
+CSpamCond(*) {
+    return IsCSpamChecked == 1 && GameActiveFast()
+}
+ClickCond(*) {
+    return IsClickChecked == 1 && GameActiveFast()
+}
+SpinbotCond(*) {
+    return IsSpinbotChecked == 1 && GameActiveFast()
+}
+
+; ===== Safety net for the macro hotkeys =====
+; Every macro key is registered twice: the normal one (only active when the macro is on and the game is the active window), and a second,
+; passive one that works everywhere. When the normal one does not fire (for whatever reason: the "is the game active" answer came a moment
+; too late, the key came while the script was busy ...) the passive one fires instead, checks everything again with a fresh look at the
+; window, and runs the macro itself. So a key press is never lost. Every rescue is written to configs\hotkeys.log.
+HkLog(msg)
+{
+    if (!DebugLogOn)
+        return
+    try {
+        DirCreate(AppDir "\configs")
+        f := AppDir "\configs\hotkeys.log"
+        if (FileExist(f) && FileGetSize(f) > 100000)
+            FileDelete(f)
+        FileAppend(FormatTime(, "HH:mm:ss") "." Format("{:03}", A_MSec) "  " msg "`n", f, "UTF-8")
+    }
+}
+
+; (the safety-net hotkeys of an earlier version: the hotkey helper program does this job now)
+HkFallbackOn(key, label, isOnFn, fn)
+{
+}
+
+HkFallbackOff(key)
+{
+}
+
+RegisterHotkeys()
+{
+    global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey
+
+    if (TriggerKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey(TriggerKey, ToggleGlitch, "On")
+        HotIf()
+        HkFallbackOn(TriggerKey, "slide", () => IsSlideChecked == 1, ToggleGlitch)
+    }
+    if (BhopKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey("*" BhopKey, ToggleBhop, "On")
+        HotIf()
+        HkFallbackOn(BhopKey, "bhop", () => IsBhopChecked == 1, ToggleBhop)
+    }
+    if (StrafeKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey("*" StrafeKey, ToggleWStrafeBhop, "On")
+        HotIf()
+        HkFallbackOn(StrafeKey, "strafer", () => IsStrafeChecked == 1, ToggleWStrafeBhop)
+    }
+    if (ComboKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey(ComboKey, ToggleCombo, "On")
+        HotIf()
+        HkFallbackOn(ComboKey, "edash", () => IsComboChecked == 1, ToggleCombo)
+    }
+    if (CSpamKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey(CSpamKey, ToggleCSpam, "On")
+        HotIf()
+        HkFallbackOn(CSpamKey, "crouch spam", () => IsCSpamChecked == 1, ToggleCSpam)
+    }
+    if (ClickKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey(ClickKey, ToggleClick, "On")
+        HotIf()
+        HkFallbackOn(ClickKey, "clicker", () => IsClickChecked == 1, ToggleClick)
+    }
+    if (BhopHoldKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey("~*" BhopHoldKey, StartBhopHold, "On")
+        HotIf()
+    }
+    if (SpinbotKey != "") {
+        HotIfWinActive(GAME_EXE)
+        try Hotkey("*" SpinbotKey, ToggleSpinbot, "On")
+        HotIf()
+        HkFallbackOn(SpinbotKey, "spinbot", () => IsSpinbotChecked == 1, ToggleSpinbot)
+    }
+    ; registering switched every macro key on: put each one back to what it should be (a macro that is off must not hold its key)
+    try SyncMacroHotkeys(true)
+}
+
+RegisterHotkeys()
+
+; ===== The hotkeys live in a small helper program of their own =====
+; The macro hotkeys used to be handled by this script's own keyboard / mouse hook. That hook is only as quick as the script: when the script was
+; busy (drawing, a freeze, the menu) a key press, or the release of a key, could be missed, and the next press then looked like a repeat of a key
+; that was still held (that is the "I have to press twice"). Now a tiny second program (tools\hkhelper.ahk), which has nothing else to do,
+; owns the hooks. It checks natively whether Roblox is the active window and only posts a message ("macro 2 was pressed") to this script, so
+; nothing is lost however busy the script is; the message simply waits its turn. If the helper cannot run, this script falls back to its own
+; hotkeys (below), so the macros always work.
+Global HkHelperHwnd := 0, HkHelperOK := false, HkHelperPid := 0, HkHelperStartedAt := 0
+
+HkHelperSrc()
+{
+    return "
+    (
+#Requires AutoHotkey v2.0
+#SingleInstance Off
+#NoTrayIcon
+#MaxThreads 255
+Persistent
+InstallKeybdHook(true, true)
+InstallMouseHook(true, true)
+ProcessSetPriority('High')
+A_MaxHotkeysPerInterval := 99000000
+mainHwnd := Integer(A_Args[1])
+mainPid := Integer(A_Args[2])
+target := 'ahk_exe RobloxPlayerBeta.exe'
+reg := Map()
+f := FileOpen(A_ScriptDir '\hk.hwnd', 'w')
+f.Write(A_ScriptHwnd)
+f.Close()
+OnMessage(0x4A, OnCfg)
+SetTimer(Watch, 1500)
+fired := 0
+hMap := DllCall('OpenFileMappingW', 'UInt', 2, 'Int', 0, 'Str', 'M0M_HK_' mainPid, 'Ptr')
+pView := hMap ? DllCall('MapViewOfFile', 'Ptr', hMap, 'UInt', 2, 'UInt', 0, 'UInt', 0, 'UPtr', 256, 'Ptr') : 0
+hMain := DllCall('OpenProcess', 'UInt', 0x100000, 'Int', 0, 'UInt', mainPid, 'Ptr')
+Watch() {
+    global fired
+    static hung := 0
+    if (hMain ? (DllCall('WaitForSingleObject', 'Ptr', hMain, 'UInt', 0) = 0) : !ProcessExist(mainPid))
+        ExitApp
+    ; the main script does not answer any more: this helper closes itself, so its keyboard / mouse hooks cannot slow the PC down
+    r := 0
+    ok := DllCall('SendMessageTimeoutW', 'Ptr', mainHwnd, 'UInt', 0, 'Ptr', 0, 'Ptr', 0, 'UInt', 0x2, 'UInt', 1000, 'Ptr*', &r)
+    hung := ok ? 0 : hung + 1
+    if (FileExist(A_ScriptDir '\hk.debug'))
+        try FileAppend(A_TickCount ' watch ok=' ok ' hung=' hung ' hwnd=' mainHwnd Chr(10), A_ScriptDir '\hk.watch')
+    if (hung >= 3) {
+        try {
+            lf := A_ScriptDir '\..\configs\hang.log'
+            if (FileExist(lf) && FileGetSize(lf) > 50000)
+                FileDelete(lf)
+            FileAppend(FormatTime(, 'yyyy-MM-dd HH:mm:ss') '  the main script stopped responding; the hotkey helper closed itself' Chr(10), lf)
+        }
+        ExitApp
+    }
+    if (fired > 0 && FileExist(A_ScriptDir '\hk.debug')) {
+        f := FileOpen(A_ScriptDir '\hk.count', 'w')
+        f.Write(fired)
+        f.Close()
+    }
+}
+Fire(id, *) {
+    global fired, pView
+    fired += 1
+    if (pView)
+        NumPut('UInt', NumGet(pView, id * 4, 'UInt') + 1, pView, id * 4)
+}
+OnCfg(wParam, lParam, msg, hwnd) {
+    Apply(StrGet(NumGet(lParam, 2 * A_PtrSize, 'Ptr'), 'UTF-16'))
+    return 1
+}
+Apply(s) {
+    global target, reg
+    for part in StrSplit(s, ';') {
+        fl := StrSplit(part, '|')
+        if (fl.Length < 2)
+            continue
+        if (fl[1] = 'Q')
+            ExitApp
+        if (fl[1] = 'T') {
+            if (fl[2] != target) {
+                HotIfWinActive(target)
+                for id, sig in reg {
+                    old := StrSplit(sig, '|')
+                    try Hotkey(old[1], 'Off')
+                }
+                HotIf()
+                reg := Map()
+                target := fl[2]
+            }
+            continue
+        }
+        id := Integer(fl[1])
+        sig := fl[2] '|' fl[3]
+        if (reg.Has(id) && reg[id] = sig)
+            continue
+        HotIfWinActive(target)
+        if (reg.Has(id)) {
+            old := StrSplit(reg[id], '|')
+            try Hotkey(old[1], 'Off')
+        }
+        if (fl[3] = '1')
+            try Hotkey(fl[2], Fire.Bind(id), 'On')
+        HotIf()
+        reg[id] := sig
+    }
+}
+    )"
+}
+
+HkHelperStart()
+{
+    global HkHelperHwnd, HkHelperOK, HkHelperPid
+    dir := AppDir "\tools"
+    try DirCreate(dir)
+    ; a helper left over from an earlier run is closed first
+    try {
+        old := Integer(FileRead(dir "\hk.hwnd"))
+        prevDHW := A_DetectHiddenWindows
+        DetectHiddenWindows(true)
+        if (old && WinExist("ahk_id " old) && InStr(WinGetTitle("ahk_id " old), "hkhelper.ahk"))
+            ProcessClose(WinGetPID("ahk_id " old))
+        DetectHiddenWindows(prevDHW)
+    }
+    try FileDelete(dir "\hk.hwnd")
+    try {
+        f := FileOpen(dir "\hkhelper.ahk", "w", "UTF-8")
+        f.Write(HkHelperSrc())
+        f.Close()
+        pid := 0
+        Run('"' A_AhkPath '" "' dir '\hkhelper.ahk" ' A_ScriptHwnd " " DllCall("GetCurrentProcessId"), dir, "Hide", &pid)
+        HkHelperPid := pid
+        HkHelperStartedAt := A_TickCount
+    } catch as e {
+        HkHelperPid := 0
+        HkLog("hotkey helper could not start: " e.Message " (" e.What ")")
+    }
+    HkHelperHwnd := 0
+    HkHelperOK := false
+}
+
+; a short note in configs\hang.log (always on, kept small)
+HangNote(msg)
+{
+    try {
+        DirCreate(AppDir "\configs")
+        lf := AppDir "\configs\hang.log"
+        if (FileExist(lf) && FileGetSize(lf) > 50000)
+            FileDelete(lf)
+        FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") "  " msg "`n", lf)
+    }
+}
+
+HkHelperStop(*)
+{
+    global HkHelperHwnd, HkHelperPid
+    try HkSend("Q|x")
+    if (HkHelperPid)
+        try ProcessClose(HkHelperPid)
+}
+
+; one string to the helper (WM_COPYDATA); returns true when the helper took it
+HkSend(text)
+{
+    global HkHelperHwnd
+    if (!HkHelperHwnd) {
+        try HkHelperHwnd := Integer(FileRead(AppDir "\tools\hk.hwnd"))
+        if (!HkHelperHwnd)
+            return false
+    }
+    size := (StrLen(text) + 1) * 2
+    data := Buffer(size, 0)
+    StrPut(text, data, "UTF-16")
+    cds := Buffer(3 * A_PtrSize, 0)
+    NumPut("Ptr", 1, cds, 0)
+    NumPut("UInt", size, cds, A_PtrSize)
+    NumPut("Ptr", data.Ptr, cds, 2 * A_PtrSize)
+    res := 0
+    ok := DllCall("SendMessageTimeoutW", "Ptr", HkHelperHwnd, "UInt", 0x4A, "Ptr", A_ScriptHwnd, "Ptr", cds, "UInt", 2, "UInt", 250, "Ptr*", &res)
+    if (!ok || res != 1) {
+        HkHelperHwnd := 0                     ; (read the window handle again next time)
+        return false
+    }
+    return true
+}
+
+; The helper counts every press in a small block of shared memory (one counter per macro); this script looks at the counters every few
+; milliseconds and runs the macro once for every press it has not seen yet. Nothing can be lost on the way: Windows messages can be dropped when
+; the script is busy, a counter cannot.
+Global HkMapH := 0, HkView := 0, HkSeen := Map(), HkFns := Map(), HkHandled := 0
+
+HkShmCreate()
+{
+    global HkMapH, HkView
+    if (HkView)
+        return
+    HkMapH := DllCall("CreateFileMappingW", "Ptr", -1, "Ptr", 0, "UInt", 4, "UInt", 0, "UInt", 256, "Str", "M0M_HK_" DllCall("GetCurrentProcessId"), "Ptr")
+    if (HkMapH)
+        HkView := DllCall("MapViewOfFile", "Ptr", HkMapH, "UInt", 0xF001F, "UInt", 0, "UInt", 0, "UPtr", 256, "Ptr")
+}
+
+HkPoll()
+{
+    global HkView, HkSeen, HkFns, HkHandled
+    if (!HkView)
+        return
+    for id, fn in HkFns {
+        cur := NumGet(HkView, id * 4, "UInt")
+        seen := HkSeen.Get(id, 0)
+        while (seen != cur) {
+            seen := (seen + 1) & 0xFFFFFFFF
+            HkSeen[id] := seen
+            HkHandled += 1
+            try fn()
+            cur := NumGet(HkView, id * 4, "UInt")
+        }
+    }
+}
+
+; the helper's messages: 1 slide, 2 bhop, 3 bhop hold, 4 strafer, 5 edash, 6 crouch spam, 7 clicker, 8 spinbot, 9 lagswitch
+for pair in [[1, ToggleGlitch], [2, ToggleBhop], [3, StartBhopHold], [4, ToggleWStrafeBhop], [5, ToggleCombo], [6, ToggleCSpam], [7, ToggleClick], [8, ToggleSpinbot], [9, LagFire]]
+    HkFns[pair[1]] := pair[2]
+
+; which hotkeys should exist right now (the macro has to be switched on) and who handles them: the helper, or this script as the fallback
+SyncMacroHotkeys(force := false)
+{
+    global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey, LagKey
+    global IsSlideChecked, IsBhopChecked, IsBhopHoldChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked, isBhopRunning, isStrafeActive, isComboRunning
+    global HkHelperOK, HkHelperPid, HkHelperStartedAt
+    static last := Map(), lastSig := "", lastSent := 0
+    items := [[1, TriggerKey, "", IsSlideChecked == 1, "slide"]
+        , [2, BhopKey, "*", IsBhopChecked == 1, "bhop"]
+        , [3, BhopHoldKey, "~*", IsBhopChecked == 1 && IsBhopHoldChecked == 1 && !isBhopRunning && !isStrafeActive && !isComboRunning, "hold"]
+        , [4, StrafeKey, "*", IsStrafeChecked == 1, "strafe"]
+        , [5, ComboKey, "", IsComboChecked == 1, "combo"]
+        , [6, CSpamKey, "", IsCSpamChecked == 1, "cspam"]
+        , [7, ClickKey, "", IsClickChecked == 1, "click"]
+        , [8, SpinbotKey, "*", IsSpinbotChecked == 1, "spinbot"]
+        , [9, LagKey, "~*", true, "lag"]]
+    text := "T|" GAME_EXE
+    for it in items
+        text .= ";" it[1] "|" (it[2] == "" ? "" : it[3] it[2]) "|" ((it[4] && it[2] != "") ? 1 : 0)
+    ; tell the helper (when something changed, and once in a while as a check that it is still there)
+    static noAnswer := 0
+    if (force || text != lastSig || A_TickCount - lastSent > 1500) {
+        HkHelperOK := HkSend(text)
+        lastSig := text
+        lastSent := A_TickCount
+        ; a helper that is gone or stuck is replaced (a stuck one would slow the keyboard and mouse of the whole PC)
+        static lastOK := A_TickCount
+        if (HkHelperOK)
+            lastOK := A_TickCount
+        ; (only when it has been running a while and has not answered for 6 s: a helper that is still starting is left alone)
+        if (!HkHelperOK && A_TickCount - lastOK > 6000 && A_TickCount - HkHelperStartedAt > 8000) {
+            lastOK := A_TickCount
+            HangNote("the hotkey helper did not answer; it was restarted")
+            if (HkHelperPid)
+                try ProcessClose(HkHelperPid)
+            HkHelperStart()
+        }
+    }
+    ; this script's own hotkeys: only when the helper is not doing it
+    for it in items {
+        key := it[2]
+        if (key == "")
+            continue
+        want := (it[4] && !HkHelperOK)
+        sig := key "|" (want ? 1 : 0)
+        if (!force && last.Has(it[1]) && last[it[1]] = sig)
+            continue
+        last[it[1]] := sig
+        HotIfWinActive(GAME_EXE)
+        try Hotkey(it[3] key, want ? "On" : "Off")
+        HotIf()
+    }
+}
+SetTimer(SyncMacroHotkeys, 100)
+HkShmCreate()
+SetTimer(HkPoll, 4)
+HkHelperStart()
+OnExit(HkHelperStop)
+SetTimer(() => SyncMacroHotkeys(true), -600)
+
+UnregisterSlideKey(key)
+{
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey(key, "Off")
+    HotIf()
+}
+
+UnregisterBhopKey(key)
+{
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+
+UnregisterBhopHoldKey(key)
+{
+    if (key == "")
+        return
+    HotIfWinActive(GAME_EXE)
+    try Hotkey("~*" key, "Off")
+    HotIf()
+}
+
+UnregisterStrafeKey(key)
+{
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+
+UnregisterComboKey(key)
+{
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey(key, "Off")
+    HotIf()
+}
+
+UnregisterCSpamKey(key)
+{
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey(key, "Off")
+    HotIf()
+}
+
+UnregisterClickKey(key)
+{
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey(key, "Off")
+    HotIf()
+}
+
+UnregisterSpinbotKey(key)
+{
+    if (key == "")
+        return
+    HkFallbackOff(key)
+    HotIfWinActive(GAME_EXE)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+
+; Generic key-bind routine. Waits for a key, rejects it if another bind already uses it,
+; ESC clears the bind. keyVar/curVar are the live + registered key globals.
+BindKey(&keyVar, &curVar, btn, unregFn, regFn)
+{
+    KeyWait("LButton")
+    old := keyVar
+    btn.Text := "[ Press Key... ]"
+    NLShowListening()                                 ; draw "press a key" right now, and keep drawing it until a key arrives
+    Key := InputKeyOrMouse()
+    if (Key != "Escape") {
+        conflict := FindKeyConflict(Key, old)
+        if (conflict != "") {
+            btn.Text := FormatKeyName(old)
+            ShowStatus(StrUpper(Key) " ALREADY USED: " conflict, "0x2A0808", 500, true)
+            return
+        }
+    }
+    unregFn(curVar)
+    if (Key != "Escape") {
+        keyVar := Key
+        curVar := Key
+        btn.Text := FormatKeyName(Key)
+    } else {
+        keyVar := ""
+        curVar := ""
+        btn.Text := "NONE"
+    }
+    regFn()
+    if (CurrentDesign = "M0MENT4M" || CurrentDesign = "Halloween")
+        SPToast(KeyBtnLabel(btn), 5000 + (btn.Hwnd & 0xFFF), "key", (Key = "Escape") ? "Bind cleared" : "Rebound to " FormatKeyName(Key))
+}
+
+; The menu draws from the button's text; make sure the "press a key" state really reaches the screen (a redraw
+; request can be swallowed by a render that was already running), so draw directly and once more shortly after.
+NLShowListening()
+{
+    global NLShown
+    if (!NLShown)
+        return
+    NLRenderNow()
+    try NLRequest()
+    SetTimer(NLRenderNow, -60)
+}
+
+NLRenderNow()
+{
+    global NLShown
+    if (!NLShown)
+        return
+    pc := A_IsCritical
+    Critical                                         ; (the drawing handle is shared with the overlays' timers)
+    try NLRender()
+    Critical(pc ? "On" : "Off")
+}
+
+; Name shown in the rebind card for a key button.
+KeyBtnLabel(btn)
+{
+    global BtnSlideKey, BtnBhopKey, BtnBhopHoldKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey
+    global BtnLagKey, BtnReloadKey, BtnMinimizeKey, BtnMacroLockKey, BtnExitKey
+    for pair in [[BtnSlideKey, "Slide"], [BtnBhopKey, "Bunnyhop"], [BtnBhopHoldKey, "Bhop hold"], [BtnStrafeKey, "Strafer"]
+        , [BtnComboKey, "EDash"], [BtnCSpamKey, "Crouch spam"], [BtnClickKey, "Auto clicker"], [BtnSpinbotKey, "Spinbot"]
+        , [BtnLagKey, "Lagswitch"], [BtnReloadKey, "Reload"], [BtnMinimizeKey, "Hide menu"], [BtnMacroLockKey, "Macro lock"]
+        , [BtnExitKey, "Exit"]] {
+        if (pair[1].Hwnd = btn.Hwnd)
+            return pair[2]
+    }
+    return "Key"
+}
+
+; Returns the name of the bind already using `key`, or "" if free (or if it is the same key being re-bound).
+; every pair of binds that use the same key (empty when all is fine)
+KeyConflictList()
+{
+    global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey
+    global LagKey, ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    pairs := [["Slide", TriggerKey], ["Bhop", BhopKey], ["Bhop hold", BhopHoldKey], ["Strafer", StrafeKey], ["EDash", ComboKey]
+        , ["Crouch spam", CSpamKey], ["Auto clicker", ClickKey], ["Spinbot", SpinbotKey], ["Lagswitch", LagKey]
+        , ["Reload", ReloadKey], ["Hide menu", MinimizeKey], ["Macro lock", MacroLockKey], ["Exit", ExitKey]]
+    seen := Map()
+    out := []
+    for pr in pairs {
+        k := pr[2]
+        if (k = "")
+            continue
+        if (seen.Has(k))
+            out.Push(seen[k] " + " pr[1] " (" FormatKeyName(k) ")")
+        else
+            seen[k] := pr[1]
+    }
+    return out
+}
+
+KeyConflictWarn()
+{
+    cf := KeyConflictList()
+    if (cf.Length = 0)
+        return
+    more := (cf.Length > 1) ? "  (+" (cf.Length - 1) " more)" : ""
+    try SPToast("Key conflict", 7604, "off", cf[1] " use the same key" more)
+}
+
+FindKeyConflict(key, own)
+{
+    global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey
+    global LagKey, ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    if (key = own)
+        return ""
+    names := Map("Slide", TriggerKey, "Bhop", BhopKey, "Bhop Hold", BhopHoldKey, "Strafe", StrafeKey, "Edash", ComboKey,
+                 "Crouch Spam", CSpamKey, "Auto Clicker", ClickKey,
+                 "Spinbot", SpinbotKey, "Lagswitch", LagKey, "Reload", ReloadKey,
+                 "Minimize", MinimizeKey, "Macro Lock", MacroLockKey, "Exit", ExitKey)
+    for name, k in names {
+        if (k != "" && k = key)
+            return name
+    }
+    return ""
+}
+
+StartBindSlide(*)
+{
+    global TriggerKey, currentSlideKey
+    BindKey(&TriggerKey, &currentSlideKey, BtnSlideKey, UnregisterSlideKey, RegisterHotkeys)
+}
+
+StartBindBhop(*)
+{
+    global BhopKey, currentBhopKey
+    BindKey(&BhopKey, &currentBhopKey, BtnBhopKey, UnregisterBhopKey, RegisterHotkeys)
+}
+
+StartBindBhopHold(*)
+{
+    global BhopHoldKey, currentBhopHoldKey
+    BindKey(&BhopHoldKey, &currentBhopHoldKey, BtnBhopHoldKey, UnregisterBhopHoldKey, RegisterHotkeys)
+}
+
+StartBindStrafe(*)
+{
+    global StrafeKey, currentStrafeKey
+    BindKey(&StrafeKey, &currentStrafeKey, BtnStrafeKey, UnregisterStrafeKey, RegisterHotkeys)
+}
+
+StartBindCombo(*)
+{
+    global ComboKey, currentComboKey
+    BindKey(&ComboKey, &currentComboKey, BtnComboKey, UnregisterComboKey, RegisterHotkeys)
+}
+
+StartBindCSpam(*)
+{
+    global CSpamKey, currentCSpamKey
+    BindKey(&CSpamKey, &currentCSpamKey, BtnCSpamKey, UnregisterCSpamKey, RegisterHotkeys)
+}
+
+StartBindClick(*)
+{
+    global ClickKey, currentClickKey
+    BindKey(&ClickKey, &currentClickKey, BtnClickKey, UnregisterClickKey, RegisterHotkeys)
+}
+
+StartBindSpinbot(*)
+{
+    global SpinbotKey, currentSpinbotKey
+    BindKey(&SpinbotKey, &currentSpinbotKey, BtnSpinbotKey, UnregisterSpinbotKey, RegisterHotkeys)
+}
+
+InputKeyOrMouse()
+{
+    KeyList := ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z",
+                "1","2","3","4","5","6","7","8","9","0","Space","Tab","Enter","Shift","Ctrl","Alt",
+                "LButton","RButton","MButton","XButton1","XButton2","F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"]
+    
+    Loop {
+        Sleep(10)
+        if GetKeyState("Escape", "P")
+            return "Escape"
+            
+        for k in KeyList {
+            if GetKeyState(k, "P") {
+                KeyWait(k)
+                return k
+            }
+        }
+    }
+}
+
+FormatKeyName(key)
+{
+    r := KeyNameCore(key)
+    return (LayoutMode = "skeet") ? "[" r "]" : r
+}
+
+KeyNameCore(key)
+{
+    if (key == "")
+        return "NONE"
+    if (key == "MButton")
+        return "Mid Mouse"
+    if (key == "LButton")
+        return "Left Mouse"
+    if (key == "RButton")
+        return "Right Mouse"
+    if (key == "XButton1")
+        return "Mouse 4"
+    if (key == "XButton2")
+        return "Mouse 5"
+    return StrUpper(key)
+}
+
+ToggleSlideBox(*)
+{
+    global IsSlideChecked, isMacroRunning, ChkSlide
+    IsSlideChecked := !IsSlideChecked
+    SetChk(ChkSlide, IsSlideChecked)
+    if (!IsSlideChecked && isMacroRunning) {
+        StopMacro()
+        ShowStatus("SLIDE: OFF", "0x2A0808", 20)
+    }
+    UpdateSidebarIndicators()
+}
+
+ToggleBhopBox(*)
+{
+    global IsBhopChecked, isBhopRunning, ChkBhop
+    IsBhopChecked := !IsBhopChecked
+    SetChk(ChkBhop, IsBhopChecked)
+    if (!IsBhopChecked && isBhopRunning) {
+        isBhopRunning := false
+        SetTimer(UltraSpam, 0)
+        SetBhopHoldHotkey(true)
+        Send("{Space up}")
+        ShowStatus("BHOP: OFF", "0x2A0808", 160)
+    }
+    UpdateSidebarIndicators()
+}
+
+ToggleStrafeBox(*)
+{
+    global IsStrafeChecked, isStrafeActive, ChkStrafe
+    IsStrafeChecked := !IsStrafeChecked
+    SetChk(ChkStrafe, IsStrafeChecked)
+    if (!IsStrafeChecked && isStrafeActive) {
+        StopStrafeBhop()
+    }
+    UpdateSidebarIndicators()
+}
+
+ToggleComboBox(*)
+{
+    global IsComboChecked, isComboRunning, ChkCombo
+    IsComboChecked := !IsComboChecked
+    SetChk(ChkCombo, IsComboChecked)
+    if (!IsComboChecked && isComboRunning) {
+        StopCombo()
+    }
+    UpdateSidebarIndicators()
+}
+
+ToggleCSpamBox(*)
+{
+    global IsCSpamChecked, isCSpamRunning, ChkCSpam
+    IsCSpamChecked := !IsCSpamChecked
+    SetChk(ChkCSpam, IsCSpamChecked)
+    if (!IsCSpamChecked && isCSpamRunning) {
+        isCSpamRunning := false
+        SetTimer(CSpamUltraSpam, 0)
+        Send("{Blind}{c up}")
+        ShowStatus("CROUCH SPAM: OFF", "0x2A0808", 240)
+    }
+    UpdateSidebarIndicators()
+}
+
+ToggleClickBox(*)
+{
+    global IsClickChecked, isClickRunning, ChkClick
+    IsClickChecked := !IsClickChecked
+    SetChk(ChkClick, IsClickChecked)
+    if (!IsClickChecked && isClickRunning) {
+        isClickRunning := false
+        SetTimer(ClickUltraSpam, 0)
+        ShowStatus("AUTO CLICKER: OFF", "0x2A0808", 460)
+    }
+    UpdateSidebarIndicators()
+}
+
+ToggleSpinbotBox(*)
+{
+    global IsSpinbotChecked, ChkSpinbot, isSpinbotRunning
+    IsSpinbotChecked := !IsSpinbotChecked
+    SetChk(ChkSpinbot, IsSpinbotChecked)
+    if (!IsSpinbotChecked && isSpinbotRunning) {
+        isSpinbotRunning := false
+        SetTimer(SpinbotLoop, 0)
+        Send("{Blind}")
+        ShowStatus("SPINBOT: OFF", "0x2A0808", 340)
+    }
+    UpdateSidebarIndicators()
+}
+
+; --- HUD Indicator Functions ---
+UpdateSidebarIndicators()
+{
+    global ShowSidebarIndicators
+    if (!ShowSidebarIndicators)
+        return
+    HudRequest()
+}
+
+ToggleSidebarIndicators(*)
+{
+    global ShowSidebarIndicators, IndicatorHud, HudOpacity
+    ShowSidebarIndicators := !ShowSidebarIndicators
+    ChkSidebarIndicators.Text := ShowSidebarIndicators ? "ON" : "OFF"
+    if (ShowSidebarIndicators) {
+        pos := GetHudShowStr()
+        IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
+        HudRequest()
+        UpdateSidebarIndicators()
+    } else {
+        IndicatorHud.Hide()
+    }
+}
+
+ToggleStatusNotifs(*)
+{
+    global ShowStatusNotifs
+    ShowStatusNotifs := !ShowStatusNotifs
+    ChkStatusNotifs.Text := ShowStatusNotifs ? "ON" : "OFF"
+}
+
+BlinkIndicator(dotIndex) {
+    global ShowSidebarIndicators
+    if (!ShowSidebarIndicators || dotIndex < 1 || dotIndex > 7)
+        return
+    HudFlash(dotIndex)
+}
+
+; Called live as the slider is dragged. Updates the speed value/label immediately, and if
+; the macro is currently running, re-arms the timer at the new period so the change takes
+; effect right away instead of waiting for the next toggle.
+UpdateCSpamSpeed(*)
+{
+    global CSpamSpeed, isCSpamRunning
+    CSpamSpeed := CSpamSlider.Value
+    LblSet(LblCSpamSpeed, SpeedText("Crouch", CSpamSpeed))
+    if (isCSpamRunning)
+        SetTimer(CSpamUltraSpam, CSpamSpeed)
+}
+
+; Same live-update behavior as the crouch spam slider above, but for the auto clicker.
+UpdateClickSpeed(*)
+{
+    global ClickSpeed, isClickRunning
+    ClickSpeed := ClickSlider.Value
+    LblSet(LblClickSpeed, SpeedText("Clicker", ClickSpeed))
+    if (isClickRunning)
+        SetTimer(ClickUltraSpam, ClickSpeed)
+}
+
+ToggleGlitch(*)
+{
+    global isMacroRunning, SlideTurnedBehind
+    if (!IsSlideChecked || TriggerKey == "")
+        return
+    
+    if (isMacroRunning) {
+        StopMacro()
+        ShowStatus("INF SLIDE: OFF", "0x2A0808", 20)
+        UpdateSidebarIndicators()
+    } else {
+        isMacroRunning := true
+        if (IsSlideBehindChecked)
+            SetTimer(SlideLookBehind, -300)
+        SetTimer(RunGlitchLoop, 10)
+        ShowStatus("INF SLIDE: ON", "0x082A13", 20)
+        UpdateSidebarIndicators()
+        BlinkIndicator(1)
+    }
+}
+
+RunGlitchLoop()
+{
+    global isMacroRunning
+    if (!isMacroRunning || !IsSlideChecked || !GameActiveFast()) {
+        StopMacroInternal()
+        isMacroRunning := false
+        SetTimer(RunGlitchLoop, 0)
+        return
+    }
+
+    Send("{" JumpKey " down}")
+    Send("{" CKey " down}")
+    Sleep(50)
+    
+    if (!isMacroRunning || !IsSlideChecked || !GameActiveFast()) {
+        StopMacroInternal()
+        isMacroRunning := false
+        return
+    }
+    Send("{" JumpKey " up}")
+    
+    Loop 20 {
+        if (!isMacroRunning || !IsSlideChecked || !GameActiveFast()) {
+            StopMacroInternal()
+            isMacroRunning := false
+            return
+        }
+        Sleep(50)
+    }
+    
+    if (!isMacroRunning || !IsSlideChecked || !GameActiveFast()) {
+        StopMacroInternal()
+        isMacroRunning := false
+        return
+    }
+    Send("{" SKey " down}")
+    
+    SetTimer(RunGlitchLoop, 0)
+}
+
+StopMacro()
+{
+    global isMacroRunning
+    isMacroRunning := false
+    StopMacroInternal()
+}
+
+StopMacroInternal()
+{
+    global SlideTurnedBehind, SlideTurnAmount
+    SetTimer(SlideLookBehind, 0)
+    Send("{" JumpKey " up}")
+    Send("{" CKey " up}")
+    Send("{" SKey " up}")
+    if (SlideTurnedBehind) {
+        SlideTurnedBehind := false
+        if (WinActive(GAME_EXE))
+            TurnCamera(-SlideTurnAmount)
+    }
+}
+
+ToggleBhop(*)
+{
+    global isBhopRunning, BhopHeld
+    HkLog("bhop key pressed (checked=" IsBhopChecked ", running=" isBhopRunning ")")
+    if (!IsBhopChecked || BhopKey == "")
+        return
+
+    ; Pressed while a hold-run is active: keep bhopping after the hold key is released.
+    if (isBhopRunning && BhopHeld) {
+        BhopHeld := false
+        ShowStatus("BHOP: ON (TOGGLED)", "0x082A13", 160)
+        return
+    }
+
+    BhopHeld := false
+    isBhopRunning := !isBhopRunning
+
+    if (isBhopRunning) {
+        SetBhopHoldHotkey(false)
+        SetTimer(UltraSpam, 15)
+        ShowStatus("BHOP: ON", "0x082A13", 160)
+        UpdateSidebarIndicators()
+        BlinkIndicator(2)
+    } else {
+        SetTimer(UltraSpam, 0)
+        SetBhopHoldHotkey(true)
+        DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 2, "UPtr", 0) ; Space UP
+        ShowStatus("BHOP: OFF", "0x2A0808", 160)
+        UpdateSidebarIndicators()
+    }
+}
+
+UltraSpam()
+{
+    global isBhopRunning, BhopHoldKey, BhopHeld
+    static isSpaceDown := false
+    if (!isBhopRunning || !IsBhopChecked || !GameActiveFast() || (BhopHeld && !GetKeyState(BhopHoldKey, "P"))) {
+        HkLog("bhop stopped itself: running=" isBhopRunning " checked=" IsBhopChecked " holdReleased=" (BhopHeld && !GetKeyState(BhopHoldKey, "P")))
+        BhopHeld := false
+        SetTimer(UltraSpam, 0)
+        SetBhopHoldHotkey(true)
+        if (isSpaceDown) {
+            DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 2, "UPtr", 0) ; Space UP
+            isSpaceDown := false
+        }
+        if (isBhopRunning) {
+            isBhopRunning := false
+            UpdateSidebarIndicators()
+        }
+        return
+    }
+
+    if (isSpaceDown) {
+        DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 2, "UPtr", 0) ; Space UP
+        isSpaceDown := false
+    } else {
+        DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 0, "UPtr", 0) ; Space DOWN
+        isSpaceDown := true
+    }
+}
+
+; E-Dash autostrafer: the strafer does not hold W any more; it only spams jump, strafes with the mouse and holds Ctrl.
+ToggleEDashStrafe(*)
+{
+    global IsEDashStrafe, isStrafeActive
+    IsEDashStrafe := !IsEDashStrafe
+    if (isStrafeActive)                       ; switch over while it is running: let go of the key it no longer uses
+        Send(IsEDashStrafe ? "{Blind}{w up}" : "{Blind}{LControl up}")
+}
+
+ToggleWStrafeBhop(*)
+{
+    global isStrafeActive
+    if (!IsStrafeChecked || StrafeKey == "")
+        return
+
+    isStrafeActive := !isStrafeActive
+
+    if (isStrafeActive) {
+        StartStrafeBhop()
+        UpdateSidebarIndicators()
+        BlinkIndicator(3)
+    } else {
+        StopStrafeBhop()
+        UpdateSidebarIndicators()
+    }
+}
+
+StartStrafeBhop()
+{
+    global RawMouseDeltaX, StrafeCurrentDir, IsEDashStrafe
+    RawMouseDeltaX := 0
+    StrafeCurrentDir := "none"
+    RegisterRawMouseInput()
+    Send(IsEDashStrafe ? "{Blind}{LControl down}" : "{Blind}{w down}")
+    SetTimer(StrafeUltraSpam, 15)
+    SetTimer(StrafeMainLoop, 10)
+    ShowStatus("AUTO STRAFER: ON", "0x082A13", 300)
+}
+
+StopStrafeBhop()
+{
+    global isStrafeActive, StrafeCurrentDir
+    isStrafeActive := false
+    StrafeCurrentDir := "none"
+
+    SetTimer(StrafeMainLoop, 0)
+    SetTimer(StrafeUltraSpam, 0)
+    UnregisterRawMouseInput()
+    Send("{Blind}{w up}{a up}{d up}{LControl up}")
+    DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 2, "UPtr", 0)
+    ShowStatus("AUTO STRAFER: OFF", "0x2A0808", 300)
+}
+
+StrafeUltraSpam()
+{
+    global isStrafeActive
+    static isStrafeSpaceDown := false
+    if (!isStrafeActive || !IsStrafeChecked || !GameActiveFast()) {
+        SetTimer(StrafeUltraSpam, 0)
+        if (isStrafeSpaceDown) {
+            DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 2, "UPtr", 0)
+            isStrafeSpaceDown := false
+        }
+        return
+    }
+    
+    if (isStrafeSpaceDown) {
+        DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 2, "UPtr", 0)
+        isStrafeSpaceDown := false
+    } else {
+        DllCall("keybd_event", "UChar", 0x20, "UChar", 0x39, "UInt", 0, "UPtr", 0)
+        isStrafeSpaceDown := true
+    }
+}
+
+; Real-mouse-reactive strafer: this shit was hell to code !!!
+StrafeMainLoop() {
+    global isStrafeActive, RawMouseDeltaX, StrafeMouseThreshold, StrafeCurrentDir, IsEDashStrafe
+
+    if (!isStrafeActive || !IsStrafeChecked || !GameActiveFast()) {
+        SetTimer(StrafeMainLoop, 0)
+        UnregisterRawMouseInput()
+        return
+    }
+
+    ; Resend W every tick (not just once at start) - if you were already physically holding
+    ; W yourself and then let go, your real key-up would otherwise silently cancel the hold
+    ; since the macro never notices and never resends it. This keeps it truly held regardless.
+    Send(IsEDashStrafe ? "{Blind}{LControl down}" : "{Blind}{w down}")
+
+    delta := RawMouseDeltaX
+    RawMouseDeltaX := 0 ; consume this tick's movement so the next tick starts fresh
+
+    if (delta > StrafeMouseThreshold) {
+        if (StrafeCurrentDir != "right") {
+            SendInput("{Blind}{a up}{d down}")
+            StrafeCurrentDir := "right"
+        }
+    } else if (delta < -StrafeMouseThreshold) {
+        if (StrafeCurrentDir != "left") {
+            SendInput("{Blind}{d up}{a down}")
+            StrafeCurrentDir := "left"
+        }
+    } else {
+        if (StrafeCurrentDir != "none") {
+            SendInput("{Blind}{a up}{d up}")
+            StrafeCurrentDir := "none"
+        }
+    }
+}
+
+
+; --- Raw Mouse Input ---
+; Roblox (and most games) lock or hide the cursor while you're looking around, so polling
+; GetCursorPos/MouseGetPos would just read a frozen center-of-screen position. Raw Input
+; (WM_INPUT) reports true relative mouse deltas regardless of cursor lock, which is what
+; the strafer above needs to know which way you're actually turning.
+
+RegisterRawMouseInput() {
+    global RawInputRegistered, MainGui
+    if (RawInputRegistered)
+        return
+    ridSize := 8 + A_PtrSize ; usUsagePage(2) usUsage(2) dwFlags(4) hwndTarget(ptr)
+    rid := Buffer(ridSize, 0)
+    NumPut("UShort", 0x01, rid, 0)       ; usUsagePage: Generic Desktop Controls
+    NumPut("UShort", 0x02, rid, 2)       ; usUsage: Mouse
+    NumPut("UInt", 0x00000100, rid, 4)   ; RIDEV_INPUTSINK - keep receiving even if window loses focus
+    NumPut("Ptr", MainGui.Hwnd, rid, 8)
+    if DllCall("RegisterRawInputDevices", "Ptr", rid, "UInt", 1, "UInt", ridSize)
+        RawInputRegistered := true
+}
+
+; Stops WM_INPUT delivery so the script does no per-mouse-movement work while the strafer is off.
+UnregisterRawMouseInput() {
+    global RawInputRegistered, LiveWanted
+    if (!RawInputRegistered || LiveWanted)
+        return
+    ridSize := 8 + A_PtrSize
+    rid := Buffer(ridSize, 0)
+    NumPut("UShort", 0x01, rid, 0)
+    NumPut("UShort", 0x02, rid, 2)
+    NumPut("UInt", 0x00000001, rid, 4)   ; RIDEV_REMOVE
+    NumPut("Ptr", 0, rid, 8)
+    DllCall("RegisterRawInputDevices", "Ptr", rid, "UInt", 1, "UInt", ridSize)
+    RawInputRegistered := false
+}
+
+WM_INPUT_Handler(wParam, lParam, msg, hwnd) {
+    global RawMouseDeltaX, LiveWanted, LiveMag, LiveWheelAt, LiveWheelDir
+    Critical                                         ; (one message at a time: the buffer below is shared)
+    static buf := Buffer(128, 0)                    ; reused: this runs up to 1000 times a second
+    headerSize := 8 + 2 * A_PtrSize ; RAWINPUTHEADER size: 24 on 64-bit AHK, 16 on 32-bit - NOT a fixed 8
+    size := 128
+    got := DllCall("GetRawInputData", "Ptr", lParam, "UInt", 0x10000003, "Ptr", buf, "UInt*", &size, "UInt", headerSize, "UInt")
+    if (got = 0xFFFFFFFF || got < headerSize + 24)
+        return
+    if (NumGet(buf, 0, "UInt") != 0) ; dwType: 0 = RIM_TYPEMOUSE
+        return
+    lLastX := NumGet(buf, headerSize + 12, "Int") ; RAWMOUSE.lLastX sits at offset 12 within the mouse union
+    RawMouseDeltaX += lLastX
+    if (LiveWanted) {
+        LiveMag += Sqrt(lLastX * lLastX + NumGet(buf, headerSize + 16, "Int") ** 2)
+        if (NumGet(buf, headerSize + 4, "UShort") & 0x0400) {          ; RI_MOUSE_WHEEL
+            LiveWheelAt := A_TickCount
+            LiveWheelDir := NumGet(buf, headerSize + 6, "Short") > 0 ? 1 : -1
+        }
+    }
+}
+OnMessage(0x00FF, WM_INPUT_Handler) ; WM_INPUT
+
+MacroLockToggle(*)
+{
+    global isBhopRunning, isStrafeActive, isComboRunning, isCSpamRunning, isClickRunning, isSpinbotRunning
+    global SavedSlideChecked, SavedBhopChecked, SavedStrafeChecked, SavedComboChecked, SavedCSpamChecked, SavedClickChecked, SavedSpinbotChecked
+    global IsMacrosLocked, LagKey, currentLagKey
+    global IsSlideChecked, IsBhopChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked
+    global ChkSlide, ChkBhop, ChkStrafe, ChkCombo, ChkCSpam, ChkClick, ChkSpinbot
+
+    if (IsMacrosLocked) {
+        IsSlideChecked   := SavedSlideChecked
+        IsBhopChecked    := SavedBhopChecked
+        IsStrafeChecked  := SavedStrafeChecked
+        IsComboChecked   := SavedComboChecked
+        IsCSpamChecked   := SavedCSpamChecked
+        IsClickChecked   := SavedClickChecked
+        IsSpinbotChecked := SavedSpinbotChecked
+        SetChk(ChkSlide, IsSlideChecked)
+        SetChk(ChkBhop, IsBhopChecked)
+        SetChk(ChkStrafe, IsStrafeChecked)
+        SetChk(ChkCombo, IsComboChecked)
+        SetChk(ChkCSpam, IsCSpamChecked)
+        SetChk(ChkClick, IsClickChecked)
+        SetChk(ChkSpinbot, IsSpinbotChecked)
+        IsMacrosLocked   := false
+        RegisterLagKey()
+        UpdateSidebarIndicators()
+        ShowStatus("MACROS: RESTORED", "0x082A13", 380, true)
+        return
+    }
+
+    SavedSlideChecked   := IsSlideChecked
+    SavedBhopChecked    := IsBhopChecked
+    SavedStrafeChecked  := IsStrafeChecked
+    SavedComboChecked   := IsComboChecked
+    SavedCSpamChecked   := IsCSpamChecked
+    SavedClickChecked   := IsClickChecked
+    SavedSpinbotChecked := IsSpinbotChecked
+    IsMacrosLocked := true
+
+    if (isMacroRunning) {
+        StopMacro()
+        ShowStatus("SLIDE: OFF", "0x2A0808", 20)
+    }
+    IsSlideChecked := 0
+    SetChk(ChkSlide, false)
+
+    if (isBhopRunning) {
+        isBhopRunning := false
+        SetTimer(UltraSpam, 0)
+        SetBhopHoldHotkey(true)
+        Send("{Space up}")
+        ShowStatus("BHOP: OFF", "0x2A0808", 160)
+    }
+    IsBhopChecked := 0
+    SetChk(ChkBhop, false)
+
+    if (isStrafeActive) {
+        StopStrafeBhop()
+    }
+    IsStrafeChecked := 0
+    SetChk(ChkStrafe, false)
+
+    if (isComboRunning) {
+        StopCombo()
+    }
+    IsComboChecked := 0
+    SetChk(ChkCombo, false)
+
+    if (isCSpamRunning) {
+        isCSpamRunning := false
+        SetTimer(CSpamUltraSpam, 0)
+        Send("{Blind}{c up}")
+        ShowStatus("CROUCH SPAM: OFF", "0x2A0808", 240)
+    }
+    IsCSpamChecked := 0
+    SetChk(ChkCSpam, false)
+
+    if (isClickRunning) {
+        isClickRunning := false
+        SetTimer(ClickUltraSpam, 0)
+        ShowStatus("AUTO CLICKER: OFF", "0x2A0808", 460)
+    }
+    IsClickChecked := 0
+    SetChk(ChkClick, false)
+
+
+    if (isSpinbotRunning) {
+        isSpinbotRunning := false
+        SetTimer(SpinbotLoop, 0)
+        Send("{Blind}")
+        ShowStatus("SPINBOT: OFF", "0x2A0808", 340)
+    }
+    IsSpinbotChecked := 0
+    SetChk(ChkSpinbot, false)
+
+    UnregisterLagKey(currentLagKey)
+    UpdateSidebarIndicators()
+    ShowStatus("ALL MACROS: LOCKED", "0x2A0808", 380, true)
+}
+
+ToggleCombo(*)
+{
+    global isComboRunning
+    if (!IsComboChecked || ComboKey == "")
+        return
+
+    isComboRunning := !isComboRunning
+
+    if (isComboRunning) {
+        StartCombo()
+        UpdateSidebarIndicators()
+        BlinkIndicator(4)
+    } else {
+        StopCombo()
+        UpdateSidebarIndicators()
+    }
+}
+
+StartCombo()
+{
+    Send("{Blind}{c down}")
+    SetTimer(ComboSpam, 25)
+    ShowStatus("EDASH: ON", "0x082A13", 440)
+}
+
+StopCombo()
+{
+    global isComboRunning
+    isComboRunning := false
+
+    SetTimer(ComboSpam, 0)
+    Send("{Blind}{c up}{Space up}")
+    ShowStatus("EDASH: OFF", "0x2A0808", 440)
+}
+
+ComboSpam()
+{
+    global isComboRunning
+    if (!isComboRunning || !IsComboChecked || !GameActiveFast()) {
+        SetTimer(ComboSpam, 0)
+        Send("{Blind}{Space up}")
+        return
+    }
+    Send("{Blind}{Space down}")
+    Sleep(10)
+    Send("{Blind}{Space up}")
+}
+
+ToggleCSpam(*)
+{
+    global isCSpamRunning, CSpamSpeed
+    if (!IsCSpamChecked || CSpamKey == "")
+        return
+
+    isCSpamRunning := !isCSpamRunning
+
+    if (isCSpamRunning) {
+        SetTimer(CSpamUltraSpam, CSpamSpeed)
+        ShowStatus("CROUCH SPAM: ON", "0x082A13", 240)
+        UpdateSidebarIndicators()
+        BlinkIndicator(5)
+    } else {
+        SetTimer(CSpamUltraSpam, 0)
+        Send("{Blind}{c up}")
+        ShowStatus("CROUCH SPAM: OFF", "0x2A0808", 240)
+        UpdateSidebarIndicators()
+    }
+}
+
+CSpamUltraSpam()
+{
+    global isCSpamRunning, CSpamSpeed
+    if (!isCSpamRunning || !IsCSpamChecked || !GameActiveFast()) {
+        SetTimer(CSpamUltraSpam, 0)
+        Send("{Blind}{c up}")
+        return
+    }
+    Send("{Blind}{c down}")
+    ; Hold roughly a third of the tap interval (minimum 5ms) so faster speeds still
+    ; register as a clean press-release instead of the up/down overlapping.
+    Sleep(Max(5, CSpamSpeed // 3))
+    Send("{Blind}{c up}")
+}
+
+ToggleClick(*)
+{
+    global isClickRunning, ClickSpeed
+    if (!IsClickChecked || ClickKey == "")
+        return
+
+    isClickRunning := !isClickRunning
+
+    if (isClickRunning) {
+        SetTimer(ClickUltraSpam, ClickSpeed)
+        ShowStatus("AUTO CLICKER: ON", "0x082A13", 460)
+        UpdateSidebarIndicators()
+        BlinkIndicator(6)
+    } else {
+        SetTimer(ClickUltraSpam, 0)
+        ShowStatus("AUTO CLICKER: OFF", "0x2A0808", 460)
+        UpdateSidebarIndicators()
+    }
+}
+
+ClickUltraSpam()
+{
+    global isClickRunning
+    if (!isClickRunning || !IsClickChecked || !GameActiveFast()) {
+        SetTimer(ClickUltraSpam, 0)
+        return
+    }
+    Click()
+}
+
+; SPINBOT: standalone macro 
+ToggleSpinbot(*)
+{
+    global isSpinbotRunning
+    if (!IsSpinbotChecked || SpinbotKey == "")
+        return
+
+    isSpinbotRunning := !isSpinbotRunning
+    if (isSpinbotRunning) {
+        SetTimer(SpinbotLoop, 10)
+        ShowStatus("SPINBOT: ON", "0x082A13", 340)
+        UpdateSidebarIndicators()
+        BlinkIndicator(7)
+    } else {
+        SetTimer(SpinbotLoop, 0)
+        Send("{Blind}")
+        ShowStatus("SPINBOT: OFF", "0x2A0808", 340)
+        UpdateSidebarIndicators()
+    }
+}
+
+SpinbotLoop()
+{
+    global isSpinbotRunning
+    if (!isSpinbotRunning || !IsSpinbotChecked || !GameActiveFast()) {
+        SetTimer(SpinbotLoop, 0)
+        isSpinbotRunning := false
+        return
+    }
+    DllCall("mouse_event", "UInt", 0x0001, "Int", 60, "Int", 0, "UInt", 0, "UPtr", 0)
+}
+
+; === STATUS HUD POPUPS ===
+ShowStatus(text, colorHex, xPos, force := false)
+{
+    global CurrentDesign, ShowStatusNotifs, SPMenuAction, SPQuiet, LayoutMode, MainGui
+    CompReact(text)
+    ; every design only shows cards for what you do in the menu, plus a few important hotkey events (nothing while you play)
+    inMenu := SPMenuAction || (LayoutMode != "nl" && WinActive("ahk_id " MainGui.Hwnd))   ; a click inside the Classic / Skeet window counts too
+    if ((inMenu && !(SPQuiet && InStr(text, "UPDATED"))) || InStr(text, "ALREADY USED") || InStr(text, "MACROS: LOCKED") || InStr(text, "MACROS: RESTORED"))
+        SPToast(text, xPos)
+}
+
+; --- Color Pickers ---
+
+HSVtoRGBValues(h, s, v, &R, &G, &B)
+{
+    c := v * s
+    x := c * (1 - Abs(Mod(h / 60, 2) - 1))
+    m := v - c
+    if (h < 60)
+        r := c, g := x, b := 0
+    else if (h < 120)
+        r := x, g := c, b := 0
+    else if (h < 180)
+        r := 0, g := c, b := x
+    else if (h < 240)
+        r := 0, g := x, b := c
+    else if (h < 300)
+        r := x, g := 0, b := c
+    else
+        r := c, g := 0, b := x
+    R := Round((r + m) * 255)
+    G := Round((g + m) * 255)
+    B := Round((b + m) * 255)
+}
+
+HSVtoRGBHex(h, s, v)
+{
+    HSVtoRGBValues(h, s, v, &R, &G, &B)
+    return Format("{:02X}{:02X}{:02X}", R, G, B)
+}
+
+RGBHexToHSV(hex, &h, &s, &v)
+{
+    r := Integer("0x" SubStr(hex, 1, 2)) / 255
+    g := Integer("0x" SubStr(hex, 3, 2)) / 255
+    b := Integer("0x" SubStr(hex, 5, 2)) / 255
+    cmax := Max(r, g, b)
+    cmin := Min(r, g, b)
+    delta := cmax - cmin
+
+    if (delta = 0)
+        h := 0
+    else if (cmax = r)
+        h := Mod(60 * (((g - b) / delta)) + 360, 360)
+    else if (cmax = g)
+        h := 60 * (((b - r) / delta) + 2)
+    else
+        h := 60 * (((r - g) / delta) + 4)
+
+    s := (cmax = 0) ? 0 : delta / cmax
+    v := cmax
+}
+
+CreateSVBitmapGdi(hue, size)
+{
+    hdcScreen := DllCall("GetDC", "ptr", 0, "ptr")
+    bi := Buffer(40, 0)
+    NumPut("int", 40, bi, 0)
+    NumPut("int", size, bi, 4)
+    NumPut("int", -size, bi, 8)
+    NumPut("short", 1, bi, 12)
+    NumPut("short", 32, bi, 14)
+    NumPut("int", 0, bi, 16)
+    pBits := 0
+    hBitmap := DllCall("CreateDIBSection", "ptr", hdcScreen, "ptr", bi, "uint", 0, "ptr*", &pBits, "ptr", 0, "uint", 0, "ptr")
+    DllCall("ReleaseDC", "ptr", 0, "ptr", hdcScreen)
+
+    Loop size {
+        yy := A_Index - 1
+        val := 1 - (yy / (size - 1))
+        Loop size {
+            xx := A_Index - 1
+            sat := xx / (size - 1)
+            HSVtoRGBValues(hue, sat, val, &R, &G, &B)
+            off := (yy * size + xx) * 4
+            NumPut("uchar", B, pBits, off)
+            NumPut("uchar", G, pBits, off + 1)
+            NumPut("uchar", R, pBits, off + 2)
+            NumPut("uchar", 255, pBits, off + 3)
+        }
+    }
+    return hBitmap
+}
+
+CreateHueBarBitmapGdi(width, height)
+{
+    hdcScreen := DllCall("GetDC", "ptr", 0, "ptr")
+    bi := Buffer(40, 0)
+    NumPut("int", 40, bi, 0)
+    NumPut("int", width, bi, 4)
+    NumPut("int", -height, bi, 8)
+    NumPut("short", 1, bi, 12)
+    NumPut("short", 32, bi, 14)
+    NumPut("int", 0, bi, 16)
+    pBits := 0
+    hBitmap := DllCall("CreateDIBSection", "ptr", hdcScreen, "ptr", bi, "uint", 0, "ptr*", &pBits, "ptr", 0, "uint", 0, "ptr")
+    DllCall("ReleaseDC", "ptr", 0, "ptr", hdcScreen)
+
+    Loop height {
+        yy := A_Index - 1
+        hue := (yy / (height - 1)) * 360
+        HSVtoRGBValues(hue, 1, 1, &R, &G, &B)
+        Loop width {
+            xx := A_Index - 1
+            off := (yy * width + xx) * 4
+            NumPut("uchar", B, pBits, off)
+            NumPut("uchar", G, pBits, off + 1)
+            NumPut("uchar", R, pBits, off + 2)
+            NumPut("uchar", 255, pBits, off + 3)
+        }
+    }
+    return hBitmap
+}
+
+OpenAdvancedColorPicker(pickerTitle, currentHex, applyCallback)
+{
+    global MainGui
+    SVSize := 200
+    HueW := 24
+    Gap := 16
+
+    RGBHexToHSV(currentHex, &h0, &s0, &v0)
+    state := {hue: h0, sat: s0, val: v0, svBmp: 0, dragMode: 0}
+
+    pickGui := Gui("+AlwaysOnTop +Owner" (LayoutMode = "nl" ? NLGui.Hwnd : MainGui.Hwnd), pickerTitle)
+    pickHwnd := pickGui.Hwnd
+    pickGui.BackColor := "0x111111"
+    pickGui.SetFont("s9 c0xC8C8C8", "Consolas")
+
+    svX := 12, svY := 12
+    hueX := svX + SVSize + Gap
+    hueY := svY
+
+    state.svBmp := CreateSVBitmapGdi(state.hue, SVSize)
+    svPic := pickGui.Add("Picture", "x" svX " y" svY " w" SVSize " h" SVSize, "HBITMAP:*" state.svBmp)
+
+    hueBmp := CreateHueBarBitmapGdi(HueW, SVSize)
+    huePic := pickGui.Add("Picture", "x" hueX " y" hueY " w" HueW " h" SVSize, "HBITMAP:*" hueBmp)
+
+    svMarker := pickGui.Add("Text", "x0 y0 w10 h10 +Border Background000000", "")
+    hueMarker := pickGui.Add("Text", "x" (hueX - 3) " y0 w" (HueW + 6) " h2 BackgroundFFFFFF", "")
+
+    prevX := hueX + HueW + 20
+    preview := pickGui.Add("Text", "x" prevX " y" svY " w130 h55", "")
+    preview.Opt("Background" currentHex)
+    
+    pickGui.Add("Text", "x" prevX " y" (svY + 68) " w48 h22 c0xC8C8C8 BackgroundTrans", "Hex: #")
+    hexEdit := pickGui.Add("Edit", "x" (prevX + 50) " y" (svY + 65) " w80 h24 c0xFFFFFF Background000000", currentHex)
+    hexEdit.SetFont("s9 Bold", "Consolas")
+
+    updatingFromPicker := false
+
+    UpdateMarkers()
+    {
+        mx := svX + Round(state.sat * (SVSize - 1)) - 5
+        my := svY + Round((1 - state.val) * (SVSize - 1)) - 5
+        svMarker.Move(mx, my)
+        svMarker.Opt("Background" (state.val > 0.55 ? "000000" : "FFFFFF"))
+        svMarker.Redraw()
+        hy := hueY + Round((state.hue / 360) * (SVSize - 1)) - 1
+        hueMarker.Move(, hy)
+    }
+
+    RefreshPreview()
+    {
+        hex := HSVtoRGBHex(state.hue, state.sat, state.val)
+        preview.Opt("Background" hex)
+        preview.Redraw()
+        updatingFromPicker := true
+        hexEdit.Value := hex
+        updatingFromPicker := false
+    }
+
+    OnHexEditChange(*)
+    {
+        if (updatingFromPicker)
+            return
+        raw := Trim(hexEdit.Value)
+        raw := RegExReplace(raw, "^(#|0x|0X)", "")
+        if (StrLen(raw) = 6 && RegExMatch(raw, "^[0-9A-Fa-f]{6}$")) {
+            raw := StrUpper(raw)
+            RGBHexToHSV(raw, &h, &s, &v)
+            state.hue := h
+            state.sat := s
+            state.val := v
+            
+            old := state.svBmp
+            state.svBmp := CreateSVBitmapGdi(state.hue, SVSize)
+            svPic.Value := "HBITMAP:*" state.svBmp
+            try DllCall("DeleteObject", "ptr", old)
+            
+            UpdateMarkers()
+            preview.Opt("Background" raw)
+            preview.Redraw()
+        }
+    }
+    hexEdit.OnEvent("Change", OnHexEditChange)
+
+    PickSV(cx, cy)
+    {
+        relX := Max(0, Min(SVSize - 1, cx - svX))
+        relY := Max(0, Min(SVSize - 1, cy - svY))
+        state.sat := relX / (SVSize - 1)
+        state.val := 1 - relY / (SVSize - 1)
+        UpdateMarkers()
+        RefreshPreview()
+    }
+
+    PickHue(cy)
+    {
+        relY := Max(0, Min(SVSize - 1, cy - hueY))
+        state.hue := (relY / (SVSize - 1)) * 360
+        old := state.svBmp
+        state.svBmp := CreateSVBitmapGdi(state.hue, SVSize)
+        svPic.Value := "HBITMAP:*" state.svBmp
+        DllCall("DeleteObject", "ptr", old)
+        UpdateMarkers()
+        RefreshPreview()
+    }
+
+    PollDrag()
+    {
+        if (!WinExist("ahk_id " pickHwnd)) {          ; the picker was closed from outside (for example by a design change): stop everything
+            CleanUp()
+            return
+        }
+        if (!GetKeyState("LButton", "P") || state.dragMode = 0) {
+            state.dragMode := 0
+            SetTimer(PollDrag, 0)
+            return
+        }
+        MouseGetPos(&sx, &sy)
+        pt := Buffer(8)
+        NumPut("int", sx, pt, 0)
+        NumPut("int", sy, pt, 4)
+        DllCall("ScreenToClient", "ptr", pickGui.Hwnd, "ptr", pt)
+        cx := NumGet(pt, 0, "int")
+        cy := NumGet(pt, 4, "int")
+        if (state.dragMode = 1)
+            PickSV(cx, cy)
+        else if (state.dragMode = 2)
+            PickHue(cy)
+    }
+
+    PickerClick(wParam, lParam, msg, hwnd)
+    {
+        if (!WinExist("ahk_id " pickHwnd)) {
+            CleanUp()
+            return
+        }
+        if (hwnd != pickHwnd)
+            return
+        x := lParam & 0xFFFF
+        y := (lParam >> 16) & 0xFFFF
+        if (x >= svX && x < svX + SVSize && y >= svY && y < svY + SVSize) {
+            state.dragMode := 1
+            PickSV(x, y)
+            SetTimer(PollDrag, 15)
+        } else if (x >= hueX && x < hueX + HueW && y >= hueY && y < hueY + SVSize) {
+            state.dragMode := 2
+            PickHue(y)
+            SetTimer(PollDrag, 15)
+        }
+    }
+    OnMessage(0x201, PickerClick)
+
+    UpdateMarkers()
+
+    CleanUp()
+    {
+        try OnMessage(0x201, PickerClick, 0)
+        SetTimer(PollDrag, 0)
+        if (state.svBmp) {
+            try DllCall("DeleteObject", "ptr", state.svBmp)
+            state.svBmp := 0
+        }
+        if (hueBmp) {
+            try DllCall("DeleteObject", "ptr", hueBmp)
+            hueBmp := 0
+        }
+    }
+
+    applyBtn := pickGui.Add("Button", "x" prevX " y" (svY + 102) " w130 h26", "Apply")
+    applyBtn.OnEvent("Click", (*) => (
+        CleanUp(),
+        rawVal := Trim(hexEdit.Value),
+        cleanHex := RegExReplace(rawVal, "^(#|0x|0X)", ""),
+        finalHex := (StrLen(cleanHex) = 6 && RegExMatch(cleanHex, "^[0-9A-Fa-f]{6}$")) ? StrUpper(cleanHex) : HSVtoRGBHex(state.hue, state.sat, state.val),
+        applyCallback(finalHex),
+        pickGui.Destroy()
+    ))
+
+    cancelBtn := pickGui.Add("Button", "x" prevX " y" (svY + 134) " w130 h26", "Cancel")
+    cancelBtn.OnEvent("Click", (*) => (CleanUp(), pickGui.Destroy()))
+
+    pickGui.OnEvent("Close", (*) => CleanUp())
+
+    pickGui.Show("w" (prevX + 150) " h" (svY + SVSize + 30))
+}
+
+OpenColorPicker(*)
+{
+    global AccentColor
+    OpenAdvancedColorPicker("Pick Text Color", AccentColor, ApplyAccentColor)
+}
+
+OpenBgColorPicker(*)
+{
+    global BgColor
+    OpenAdvancedColorPicker("Pick Text Background Color", BgColor, ApplyBgColor)
+}
+
+OpenIconBgColorPicker(*)
+{
+    global IconBgColor
+    OpenAdvancedColorPicker("Pick Icon/Button Color", IconBgColor, ApplyIconBgColor)
+}
+
+OpenVignetteColorPicker(*)
+{
+    global VignetteColor
+    OpenAdvancedColorPicker("Pick Vignette Color", VignetteColor, ApplyVignetteColor)
+}
+
+ApplyVignetteColor(newColor)
+{
+    global VignetteColor, VignetteSwatchBtn, VignetteGuis
+    VignetteColor := newColor
+    VignetteSwatchBtn.Opt("Background" VignetteColor)
+    VignetteSwatchBtn.Redraw()
+    
+    if (VignetteGuis.Length > 0) {
+        for item in VignetteGuis
+            item.gui.Destroy()
+        VignetteGuis := []
+    }
+}
+
+OpenPanelColorPicker(*)
+{
+    global PanelColor
+    OpenAdvancedColorPicker("Pick Menu Background Color", PanelColor, ApplyPanelColor)
+}
+
+ApplyAccentColor(hex)
+{
+    global AccentColor, AccentBar, ColorSwatchBtn, CurrentTab, AllTextControls
+    AccentColor := hex
+    AccentBar.Opt("Background" hex)
+    AccentBar.Redraw()
+    ColorSwatchBtn.Opt("Background" hex)
+    ColorSwatchBtn.Redraw()
+    for ctrl in AllTextControls {
+        try {
+            ctrl.Opt("c" hex)
+            ctrl.Redraw()
+        }
+    }
+    RefreshChecks()
+    SwitchTab(CurrentTab)
+    ShowStatus("TEXT COLOR UPDATED", "0x1A1A1A", 500)
+}
+
+ApplyBgColor(hex)
+{
+    global BgColor, BgSwatchBtn, AllBgControls
+    SPNoteCustom("bg", hex)
+    BgColor := hex
+    BgSwatchBtn.Opt("Background" hex)
+    BgSwatchBtn.Redraw()
+    for ctrl in AllBgControls {
+        try {
+            ctrl.Opt("Background" hex)
+            ctrl.Redraw()
+        }
+    }
+    RefreshChecks()
+    ShowStatus("BACKGROUND COLOR UPDATED", "0x1A1A1A", 500)
+}
+
+ApplyIconBgColor(hex)
+{
+    global IconBgColor, IconBgSwatchBtn, TikTokBtn, BtnMin, BtnClose, CurrentTab
+    SPNoteCustom("icon", hex)
+    IconBgColor := hex
+    IconBgSwatchBtn.Opt("Background" hex)
+    IconBgSwatchBtn.Redraw()
+    TikTokBtn.Opt("Background" hex)
+    TikTokBtn.Redraw()
+    BtnMin.Opt("Background" hex)
+    BtnMin.Redraw()
+    BtnClose.Opt("Background" hex)
+    BtnClose.Redraw()
+    SwitchTab(CurrentTab)
+    ShowStatus("ICON COLOR UPDATED", "0x1A1A1A", 500)
+}
+
+ApplyPanelColor(hex)
+{
+    global PanelColor, PanelSwatchBtn, MainGui, SidebarBg, PanelBorderBg, PanelFillBg
+    SPNoteCustom("panel", hex)
+
+    PanelColor := hex
+    PanelSwatchBtn.Opt("Background" hex)
+    PanelSwatchBtn.Redraw()
+
+    R := Integer("0x" SubStr(hex, 1, 2))
+    G := Integer("0x" SubStr(hex, 3, 2))
+    B := Integer("0x" SubStr(hex, 5, 2))
+
+    sideHex := ShadeHex(R, G, B, -8)
+    borderHex := ShadeHex(R, G, B, 25)
+    if (DesignPresets.Has(CurrentDesign) && DesignPresets[CurrentDesign]["borderColor"] != "")
+        borderHex := DesignPresets[CurrentDesign]["borderColor"]
+
+    MainGui.BackColor := "0x" hex
+    SidebarBg.Opt("Background" sideHex)
+    SidebarBg.Redraw()
+    PanelBorderBg.Opt("Background" borderHex)
+    PanelBorderBg.Redraw()
+    PanelFillBg.Opt("Background" hex)
+    PanelFillBg.Redraw()
+
+    SkeetRecolor()
+    ShowStatus("MENU BACKGROUND UPDATED", "0x1A1A1A", 500)
+}
+
+ShadeHex(R, G, B, delta)
+{
+    R := Max(0, Min(255, R + delta))
+    G := Max(0, Min(255, G + delta))
+    B := Max(0, Min(255, B + delta))
+    return Format("{:02X}{:02X}{:02X}", R, G, B)
+}
+
+; --- Theme Presets ---
+Global ThemePresets := Map(
+    "Default",    ["D98484", "000000", "000000", "111111"],
+    "Cyberpunk",  ["00F0FF", "0A0014", "1A0033", "120022"],
+    "Matrix",     ["00FF41", "000000", "001A0A", "0A0F0A"],
+    "Blood Moon", ["FF3B3B", "0A0000", "1A0000", "140505"],
+    "Ocean",      ["4FC3F7", "001824", "00293D", "00131C"],
+    "Royal",      ["FFD700", "1A0033", "2B004D", "120022"],
+    "Monochrome", ["E0E0E0", "000000", "1A1A1A", "0D0D0D"],
+    "Vaporwave",  ["FF6EC7", "15001F", "240033", "1A0028"],
+    "Toxic",      ["CCFF00", "001400", "002200", "0A1400"],
+    "Sunset",     ["FFA542", "1A0800", "2A1000", "150800"],
+    "GitHub",     ["58A6FF", "0D1117", "161B22", "0D1117"],
+    "Anime",      ["FF8FCC", "1A0E1F", "2A1830", "1F1024"],
+    "Catppuccin", ["CBA6F7", "11111B", "181825", "1E1E2E"],
+    "Valve",      ["E2B548", "262F21", "2E3827", "434F37"],
+    "October",    ["3EE6C4", "0E0820", "1B1033", "150C2A"]
+)
+
+ApplyThemePreset(*)
+{
+    global ThemeDDL, ThemePresets, DesignPresets, CurrentDesign
+    theme := ThemeDDL.Text
+    if (!ThemePresets.Has(theme))
+        return
+    p := ThemePresets[theme]
+    global SPLogoIdx
+    if (theme != "October" && SPLogoIdx = 10) {          ; the flame name belongs to the October look: any other theme gives the normal one back
+        SPLogoIdx := 1
+        try NLRequest()
+    }
+    if (theme = "Default" && DesignPresets.Has(CurrentDesign) && IsObject(DesignPresets[CurrentDesign]["colors"])) {
+        ResetDesignColors()                 ; "Default" in a drawn design means that design's own colours
+        return
+    }
+    global SPCust, ColorsFollow
+    if (ColorsFollow) {
+        SPCust.Clear()                  ; colours picked by hand (or from a loaded config) give way to the theme
+        WHudResetColors()
+    }
+    ApplyAccentColor(p[1])
+    ApplyBgColor(p[2])
+    ApplyIconBgColor(p[3])
+    ApplyPanelColor(p[4])
+    if (theme = "October") {                    ; this look comes with the animated flame name
+        SPLogoIdx := 10
+        try NLRequest()
+    }
+    ShowStatus("THEME: " theme, "0x1A1A1A", 500)
+}
+
+; Puts the four colours back to what the current design looks like by itself.
+ResetDesignColors(*)
+{
+    global CurrentDesign, SPCust, SPDesignApplying
+    if (CurrentDesign = "Classic") {
+        SPDesignApplying := true
+        try {
+            ApplyAccentColor("D98484")
+            ApplyBgColor("000000")
+            ApplyIconBgColor("000000")
+            ApplyPanelColor("111111")
+        } finally
+            SPDesignApplying := false
+    } else
+        ApplyDesign(CurrentDesign)
+    SPCust.Clear()
+    WHudResetColors()
+    try NLRequest()
+    ShowStatus("COLORS RESET", "0x1A1A1A", 500)
+}
+
+; --- Design presets (look only; same layout and controls) ---
+Global DesignPresets := Map(
+    "Classic", Map("layout", "classic", "font", "Consolas", "size", 9, "check", "tick", "borderPx", 2, "title", "big", "rainbowH", 4, "borderColor", "", "colors", ""),
+    "Skeet",   Map("layout", "skeet", "font", "Tahoma",   "size", 8, "check", "fill", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "2E2E2E", "colors", ["A2D615", "111111", "161616", "141414"]),
+    "M0MENT4M", Map("layout", "nl", "style", "sp", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["10B981", "EEF0F3", "FFFFFF", "FFFFFF"]),
+    "Neverlose", Map("layout", "nl", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["4D7DFF", "08090F", "0B1223", "0A0D17"]),
+    "Fatality", Map("layout", "nl", "style", "fat", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["EB055A", "1C1437", "1F1942", "1C1437"]),
+    "Halloween", Map("layout", "nl", "style", "sp", "skin", "hw", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["FF7A18", "0A0610", "1A0F24", "120A1C"])
+)
+
+CheckPairs()
+{
+    global AdvRows
+    a := [[ChkSlide, IsSlideChecked], [ChkBhop, IsBhopChecked], [ChkStrafe, IsStrafeChecked], [ChkCombo, IsComboChecked],
+            [ChkCSpam, IsCSpamChecked], [ChkClick, IsClickChecked], [ChkSpinbot, IsSpinbotChecked],
+            [ChkBhopHold, IsBhopHoldChecked], [ChkSlideBehind, IsSlideBehindChecked],
+            [ChkLagPrecision, IsLagPrecisionChecked], [ChkLagBurst, IsLagBurstChecked],
+            [ChkLagHold, IsLagHoldChecked], [ChkLagVignette, IsLagVignetteChecked]]
+    for r in AdvRows {
+        if (r.kind = "tog") {
+            g := r.getter
+            a.Push([r.chk, g() ? 1 : 0])
+        }
+    }
+    return a
+}
+
+RefreshChecks()
+{
+    for pair in CheckPairs()
+        SetChk(pair[1], pair[2])
+    AdvRefresh()
+}
+
+; Draws a checkbox for the active design: tick = check mark on a dark box, fill = filled accent square.
+SetChk(ctrl, on)
+{
+    global DesignPresets, CurrentDesign, AccentColor, BgColor
+    if (DesignPresets[CurrentDesign]["check"] = "fill") {
+        ctrl.Text := ""
+        ctrl.Opt("Background" (on ? AccentColor : BgColor))
+    } else {
+        ctrl.Opt("Background" BgColor)
+        ctrl.Text := on ? "✓" : ""
+    }
+    ctrl.Redraw()
+    RepaintCtrl(ctrl)
+}
+
+; In the Classic / Skeet layouts controls sit on top of panel controls (and see-through labels do not wipe their old text):
+; repaint that spot of the window, so a change shows at once and old text does not stay behind.
+RepaintCtrl(ctrl)
+{
+    try {
+        ctrl.GetPos(&cx, &cy, &cw, &ch)
+        rc := Buffer(16, 0)
+        NumPut("Int", cx - 2, rc, 0), NumPut("Int", cy - 2, rc, 4), NumPut("Int", cx + cw + 2, rc, 8), NumPut("Int", cy + ch + 2, rc, 12)
+        DllCall("RedrawWindow", "Ptr", ctrl.Gui.Hwnd, "Ptr", rc, "Ptr", 0, "UInt", 0x0185)     ; INVALIDATE | ERASE | ALLCHILDREN | UPDATENOW
+    }
+}
+
+; set a label's text and repaint it (only when the text really changed)
+LblSet(ctrl, txt)
+{
+    if (ctrl.Text == txt)
+        return
+    ctrl.Text := txt
+    RepaintCtrl(ctrl)
+}
+
+LayoutPanel(w, h)
+{
+    global PanelBorderBg, PanelFillBg, PanelBorderPx
+    PanelBorderBg.Move(85, 47, w - 85 - 10, h - 47 - 10)
+    PanelFillBg.Move(85 + PanelBorderPx, 47 + PanelBorderPx, w - 85 - 10 - 2 * PanelBorderPx, h - 47 - 10 - 2 * PanelBorderPx)
+}
+
+ApplyDesignPreset(*)
+{
+    global DesignDDL
+    name := DesignDDL.Text
+    ApplyDesign(name, ColorsFollow)
+    if (ColorsFollow)
+        WHudResetColors()
+    if (ColorsFollow && name = "Classic")
+        ResetDesignColors()             ; Classic has no colours of its own in the table: it gets its usual dark/rose set
+    ShowStatus("DESIGN: " name, "0x1A1A1A", 500)
+}
+
+; "Change the colours too": on (the default), a theme or a design also sets every colour (menu, HUD, widgets...); off keeps the colours as they are.
+Global ColorsFollow := true
+ToggleColorsFollow(*)
+{
+    global ColorsFollow
+    ColorsFollow := !ColorsFollow
+    SPSavePrefs()
+    try NLRequest()
+}
+
+; applyColors = false keeps the current colors (used when a config supplies its own).
+ApplyDesign(name, applyColors := true)
+{
+    global DesignPresets, CurrentDesign, PreDesignColors, AccentColor, BgColor, IconBgColor, PanelColor
+    global AllTextControls, SideBtns, TikTokBtn, BtnMin, BtnClose, TitleText, TitleShadow, TitleGlow, PageTitles
+    global RainbowBarHeight, PanelBorderPx, MainGui, CurrentTab, DesignDDL, SPSkin
+    if (!DesignPresets.Has(name))
+        return
+    d := DesignPresets[name]
+    prev := CurrentDesign
+    CurrentDesign := name
+
+    global SPCust, SPDesignApplying
+    if (applyColors) {
+        SPCust.Clear()                  ; colours picked by hand go back to the new design's own look
+        SPDesignApplying := true
+        try {
+            if (IsObject(d["colors"])) {
+                if (!IsObject(PreDesignColors) && prev = "Classic")
+                    PreDesignColors := [AccentColor, BgColor, IconBgColor, PanelColor]
+                c := d["colors"]
+                ApplyAccentColor(c[1]), ApplyBgColor(c[2]), ApplyIconBgColor(c[3]), ApplyPanelColor(c[4])
+            } else if (IsObject(PreDesignColors)) {
+                c := PreDesignColors
+                PreDesignColors := ""
+                ApplyAccentColor(c[1]), ApplyBgColor(c[2]), ApplyIconBgColor(c[3]), ApplyPanelColor(c[4])
+            }
+        } finally
+            SPDesignApplying := false
+    } else if (name = "Classic") {
+        PreDesignColors := ""
+    }
+
+    ; Fonts. Glyph/icon controls, page titles and checkboxes keep their own fonts.
+    skip := Map()
+    for c in SideBtns
+        skip[c.Hwnd] := true
+    for c in [TikTokBtn, BtnMin, BtnClose, TitleText]
+        skip[c.Hwnd] := true
+    for c in PageTitles
+        skip[c.Hwnd] := true
+    for pair in CheckPairs()
+        skip[pair[1].Hwnd] := true
+    for c in AllTextControls {
+        if (skip.Has(c.Hwnd))
+            continue
+        try c.SetFont("s" d["size"] " norm", d["font"])
+    }
+    for c in [p2sys, p2colHeader, p2k, ConfigTitleLbl, p5patchHeader]
+        try c.SetFont("s" d["size"] " Bold", d["font"])
+    for c in PageTitles
+        try c.SetFont("s" (d["size"] + 2) " Bold", d["font"])
+    for c in AllTextControls
+        try c.Opt("c" AccentColor)
+
+    ; Title
+    if (d["title"] = "small") {
+        TitleShadow.Visible := false
+        TitleGlow.Visible := false
+        TitleText.SetFont("s9 Bold", "Tahoma")
+        TitleText.Move(14, 12, 200, 18)
+    } else {
+        TitleShadow.Visible := true
+        TitleGlow.Visible := true
+        TitleText.SetFont("s18 Bold", "Arial Black")
+        TitleText.Move(6, 4, 280, 30)
+    }
+
+    for c in [BtnSlideKey, BtnBhopKey, BtnBhopHoldKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey, BtnLagKey]
+        try c.SetFont(d["layout"] = "skeet" ? "s7 Bold" : "s" d["size"] " norm", d["layout"] = "skeet" ? "Consolas" : d["font"])
+
+    ; Layout (window size, tabs, boxes), frame + rainbow bar
+    RainbowBarHeight := d["rainbowH"]
+    PanelBorderPx := d["borderPx"]
+    if (d["layout"] = "nl") {
+        SPSkin := d.Has("skin") ? d["skin"] : ""
+        NLSetStyle(d.Has("style") ? d["style"] : "nl")
+        try NLRequest()
+        try CompSkinChanged()
+    }
+    ApplyLayout(d["layout"])
+    MainGui.GetClientPos(, , &cw, &ch)
+    if (LayoutMode = "classic")
+        LayoutPanel(cw, ch)
+    else if (LayoutMode = "skeet")
+        LayoutSkeet(cw, ch)
+    PositionRainbowBar(cw)
+    SPDesignApplying := true
+    try ApplyPanelColor(PanelColor)
+    finally SPDesignApplying := false
+
+    if (CurrentTab > 7)
+        CurrentTab := 4
+    SwitchTab(CurrentTab)
+    RefreshChecks()
+    try DesignDDL.Choose(name)
+    DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
+}
+
+; ===== Skeet layout engine: same controls, re-arranged into grouped boxes across 6 tabs =====
+
+SkeetStripBg()
+{
+    global PanelColor
+    return ShadeHex(Integer("0x" SubStr(PanelColor, 1, 2)), Integer("0x" SubStr(PanelColor, 3, 2)), Integer("0x" SubStr(PanelColor, 5, 2)), -6)
+}
+
+SkeetRecolor()
+{
+    global PanelColor, SkeetGroups, FrameBg, FrameBrd2, DesignPresets, CurrentDesign
+    border := DesignPresets[CurrentDesign]["borderColor"]
+    if (border = "")
+        border := "2E2E2E"
+    FrameBg.Opt("Background" PanelColor)
+    FrameBrd2.Opt("Background" border)
+    for g in SkeetGroups {
+        g.ob.Opt("Background" border)
+        g.fb.Opt("Background" PanelColor)
+        g.tt.Opt("Background" PanelColor)
+    }
+}
+
+CaptureOrigPos()
+{
+    global OrigPos, PageControls, BtnMin, BtnClose, TikTokBtn
+    if (OrigPos.Count > 0)
+        return
+    for ctrls in PageControls {
+        for c in ctrls {
+            c.GetPos(&x, &y, &w, &h)
+            OrigPos[c.Hwnd] := {c: c, x: x, y: y, w: w, h: h}
+        }
+    }
+    for c in [BtnMin, BtnClose, TikTokBtn] {
+        c.GetPos(&x, &y, &w, &h)
+        OrigPos[c.Hwnd] := {c: c, x: x, y: y, w: w, h: h}
+    }
+}
+
+RestoreOrigPos()
+{
+    global OrigPos
+    for hwnd, o in OrigPos {
+        if (o.c.Type = "DDL")
+            o.c.Move(o.x, o.y, o.w)
+        else
+            o.c.Move(o.x, o.y, o.w, o.h)
+    }
+}
+
+RefreshKeyButtons()
+{
+    global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey, LagKey
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    BtnSlideKey.Text := FormatKeyName(TriggerKey)
+    BtnBhopKey.Text := FormatKeyName(BhopKey)
+    BtnBhopHoldKey.Text := FormatKeyName(BhopHoldKey)
+    BtnStrafeKey.Text := FormatKeyName(StrafeKey)
+    BtnComboKey.Text := FormatKeyName(ComboKey)
+    BtnCSpamKey.Text := FormatKeyName(CSpamKey)
+    BtnClickKey.Text := FormatKeyName(ClickKey)
+    BtnSpinbotKey.Text := FormatKeyName(SpinbotKey)
+    BtnLagKey.Text := FormatKeyName(LagKey)
+    BtnReloadKey.Text := FormatKeyName(ReloadKey)
+    BtnMinimizeKey.Text := FormatKeyName(MinimizeKey)
+    BtnMacroLockKey.Text := FormatKeyName(MacroLockKey)
+    BtnExitKey.Text := FormatKeyName(ExitKey)
+}
+
+SetMacroLabels(skeet)
+{
+    pairs := [[LblSlide, "INF SLIDE", "Infinite Slide"], [LblBhop, "AUTO BHOP", "Auto Bunnyhop"], [LblStrafe, "AUTO STRAFER", "Auto Strafer"]
+            , [LblCombo, "EDASH", "EDash"], [LblCSpam, "CROUCH SPAM", "Crouch Spam"], [LblClick, "AUTO CLICKER", "Auto Clicker"]
+            , [LblSpinbot, "SPINBOT", "Spinbot"], ]
+    for pr in pairs
+        pr[1].Text := skeet ? pr[3] : pr[2]
+    LblSet(LblCSpamSpeed, SpeedText("Crouch", CSpamSpeed))
+    LblSet(LblClickSpeed, SpeedText("Clicker", ClickSpeed))
+}
+
+SpeedText(kind, value)
+{
+    return kind " speed: " value "ms"
+}
+
+ApplyLayout(mode)
+{
+    global LayoutMode, CurrentTab, MainGui, SidebarBg, PanelBorderBg, PanelFillBg, AccentBar, SideBtns, PageTitles, SkeetOnly, SkeetContentDone, SkeetGroupKey, NLX, NLY
+    if (mode = LayoutMode)
+        return
+    prev := LayoutMode
+    if (prev = "nl" && mode != "nl") {
+        NLHide()
+        MainGui.Move(NLX, NLY)
+    }
+    if (mode = "nl") {
+        MainGui.GetPos(&mx, &my)
+        LayoutMode := "nl"
+        MainGui.Hide()
+        NLShow(mx, my)
+        RefreshKeyButtons()
+        return
+    }
+    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 0, "Ptr", 0)
+    if (mode = "skeet") {
+        CaptureOrigPos()
+        LayoutMode := "skeet"
+        SkeetContentDone.Clear()
+        SkeetGroupKey.Clear()
+        for c in [SidebarBg, PanelBorderBg, PanelFillBg, AccentBar]
+            c.Visible := false
+        for c in SideBtns
+            c.Visible := false
+        for c in PageTitles
+            c.Visible := false
+        MainGui.Opt("+MinSize680x550 +0x02000000")   ; WS_CLIPCHILDREN: cheaper repaints while resizing
+        SkSlideBar.Move(, SkeetTabY[CurrentTab])
+        MainGui.Show("w680 h550 NA")
+        SetMacroLabels(true)
+    } else {
+        LayoutMode := "classic"
+        RestoreOrigPos()
+        for c in SkeetOnly
+            c.Visible := false
+        for c in [SidebarBg, PanelBorderBg, PanelFillBg, AccentBar]
+            c.Visible := true
+        for c in SideBtns
+            c.Visible := true
+        MainGui.Opt("+MinSize480x860 -0x02000000")
+        AccentBar.Move(, TabIconY[CurrentTab])
+        MainGui.Show("w480 h860 NA")
+        SetMacroLabels(false)
+    }
+    RefreshKeyButtons()
+    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 1, "Ptr", 0)
+}
+
+SwitchTabSkeet(i)
+{
+    global PageControls, PageTitles, SkeetPages, SkeetChrome, SkeetTabs, MainGui, IconBgColor, AccentColor
+    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 0, "Ptr", 0)
+    SkeetLayoutPage(i)
+    for ctrls in PageControls {
+        for c in ctrls
+            c.Visible := false
+    }
+    for t in PageTitles
+        t.Visible := false
+    for idx, pg in SkeetPages {
+        vis := (idx = i)
+        for c in pg
+            c.Visible := vis
+    }
+    for c in SkeetChrome
+        c.Visible := true
+    stripBg := SkeetStripBg()
+    for idx, t in SkeetTabs {
+        act := (idx = i)
+        bg := act ? IconBgColor : stripBg
+        t.ac.Opt("Background" stripBg)
+        t.tb.Opt("Background" bg)
+        t.tg.Opt("Background" bg " c" (act ? "FFFFFF" : "8C8C8C"))
+        t.tl.Opt("Background" bg " c" (act ? AccentColor : "666666"))
+    }
+    SkSlideBar.Opt("Background" AccentColor)
+    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 1, "Ptr", 0)
+    DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
+    AnimMoveY(SkSlideBar, SkeetTabY[i])
+}
+
+Global SkM := {W: 680, H: 550, colX1: 88, colX2: 383, colW1: 285, colW2: 285, colH: 492, btnHalfW: 124}
+Global SkeetContentDone := Map(), SkeetGroupKey := Map(), SkDragging := false
+Global SkLastLayout := 0, SkPendW := 680, SkPendH := 550
+
+; Re-lays out the chrome and the visible tab only. Other tabs are laid out lazily when you switch to them
+; (SwitchTabSkeet), which keeps dragging the window edge cheap.
+LayoutSkeet(W, H, full := true)
+{
+    global MainGui, FrameBrd1, FrameBrd2, FrameBrd3, FrameBg, TabDivider, BtnMin, BtnClose, TikTokBtn, SkM, CurrentTab, SkDragging
+
+    ; The big background rectangles and group boxes sit underneath everything else; moving them mid-drag makes
+    ; Windows repaint (and briefly blank) every control above them, so while an edge is being dragged they are
+    ; left alone and snapped to the final size when the mouse is released.
+    if (!SkDragging) {
+        Mv(FrameBrd1, 0, 0, W, H)
+        Mv(FrameBrd2, 1, 1, W - 2, H - 2)
+        Mv(FrameBrd3, 2, 2, W - 4, H - 4)
+        Mv(FrameBg, 3, 3, W - 6, H - 6)
+    }
+    Mv(BtnClose, W - 30, 7, 20, 18)
+    Mv(BtnMin, W - 52, 7, 20, 18)
+    PositionRainbowBar(W)
+    Mv(TabDivider, 78, 32, 1, H - 44)
+    Mv(TikTokBtn, 13, 498, 60, 38)
+
+    contentW := Max(580, W - 88 - 14)
+    colGap := 10
+    colW1 := (contentW - colGap) // 2
+    colW2 := contentW - colGap - colW1
+    SkM := {W: W, H: H, colX1: 88, colX2: 88 + colW1 + colGap, colW1: colW1, colW2: colW2
+          , colH: Max(492, H - 36 - 22), btnHalfW: (colW1 - 36) // 2}
+    SkeetLayoutPage(CurrentTab)
+    FlushMv()
+    if (full)
+        DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
+    else if (!SkDragging)
+        DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0081)
+}
+
+; Collects moves and applies them in one DeferWindowPos pass: one atomic update, far fewer repaints than
+; moving ~50 controls one by one.
+Global MvBatch := []
+Mv(ctrl, x, y, w := "", h := "")
+{
+    global MvBatch
+    MvBatch.Push([ctrl, x, y, w, h])
+}
+
+FlushMv()
+{
+    global MvBatch
+    items := MvBatch
+    MvBatch := []
+    if (items.Length = 0)
+        return
+    hdwp := DllCall("BeginDeferWindowPos", "Int", items.Length, "Ptr")
+    for it in items {
+        c := it[1]
+        if (c.Type = "DDL") {
+            if (it[4] = "")
+                c.Move(it[2], it[3])
+            else
+                c.Move(it[2], it[3], it[4])
+            continue
+        }
+        w := it[4], h := it[5]
+        if (w = "" || h = "") {
+            c.GetPos(, , &cw0, &ch0)
+            w := (w = "") ? cw0 : w
+            h := (h = "") ? ch0 : h
+        }
+        hdwp := DllCall("DeferWindowPos", "Ptr", hdwp, "Ptr", c.Hwnd, "Ptr", 0, "Int", it[2], "Int", it[3], "Int", w, "Int", h, "UInt", 0x14, "Ptr")
+    }
+    DllCall("EndDeferWindowPos", "Ptr", hdwp)
+}
+
+SkeetLayoutPage(i)
+{
+    global SkM, SkeetGroupKey, SkeetGroups, SkDragging
+    if (SkDragging)
+        return
+    key := SkM.W "x" SkM.H
+    if (SkeetGroupKey.Has(i) && SkeetGroupKey[i] = key)
+        return
+    SkeetGroupKey[i] := key
+    colX1 := SkM.colX1, colX2 := SkM.colX2, colW1 := SkM.colW1, colW2 := SkM.colW2
+    colH := SkM.colH, btnHalfW := SkM.btnHalfW
+
+    for g in SkeetGroups {
+        if (g.page != i)
+            continue
+        cx := (g.col = 1) ? colX1 : colX2
+        cw := (g.col = 1) ? colW1 : colW2
+        gy := 36, gh := colH
+        if (g.title = "HUD && Overlay")
+            gh := 212
+        else if (g.title = "Ticks && Vignette")
+            gh := 190
+        else if (g.title = "Freeze Effect")
+            gy := 238, gh := colH - 202
+        else if (g.title = "Colors && Themes")
+            gh := 262
+        else if (g.title = "HUD Style")
+            gy := 310, gh := 150
+        else if (g.title = "System Hotkeys")
+            gy := 260, gh := colH - 224
+        Mv(g.ob, cx, gy, cw, gh)
+        Mv(g.fb, cx + 1, gy + 1, cw - 2, gh - 2)
+        Mv(g.tt, cx + 14, gy - 7, StrLen(StrReplace(g.title, "&&", "&")) * 7 + 14, 15)
+    }
+
+    if (i = 1) {
+        Mv(ChkSlide, colX1 + 14, 58, 14, 14), Mv(LblSlide, colX1 + 36, 57, colW1 - 50, 16)
+        Mv(ChkBhop, colX1 + 14, 90, 14, 14), Mv(LblBhop, colX1 + 36, 89, colW1 - 50, 16)
+        Mv(ChkStrafe, colX1 + 14, 122, 14, 14), Mv(LblStrafe, colX1 + 36, 121, colW1 - 50, 16)
+        Mv(ChkCombo, colX1 + 14, 154, 14, 14), Mv(LblCombo, colX1 + 36, 153, colW1 - 50, 16)
+        Mv(ChkCSpam, colX1 + 14, 186, 14, 14), Mv(LblCSpam, colX1 + 36, 185, colW1 - 50, 16)
+        Mv(ChkClick, colX1 + 14, 218, 14, 14), Mv(LblClick, colX1 + 36, 217, colW1 - 50, 16)
+        Mv(ChkSlideBehind, colX2 + 14, 58, 14, 14), Mv(LblSlideBehind, colX2 + 36, 57, colW2 - 50, 16)
+        Mv(LblSlideTurn, colX2 + 36, 82, 112, 14), Mv(SlideTurnSlider, colX2 + 148, 78, colW2 - 162, 20)
+        Mv(ChkBhopHold, colX2 + 14, 110, 14, 14), Mv(LblBhopHold, colX2 + 36, 109, colW2 - 50, 16)
+        Mv(LblCSpamSpeed, colX2 + 36, 138, 112, 14), Mv(CSpamSlider, colX2 + 148, 134, colW2 - 162, 20)
+        Mv(LblClickSpeed, colX2 + 36, 162, 112, 14), Mv(ClickSlider, colX2 + 148, 158, colW2 - 162, 20)
+        Mv(ChkSpinbot, colX2 + 14, 192, 14, 14), Mv(LblSpinbot, colX2 + 36, 191, colW2 - 50, 16)
+    } else if (i = 2) {
+        kbRows := [[p3a, BtnSlideKey], [p3b, BtnBhopKey], [p3hold, BtnBhopHoldKey], [p3c, BtnStrafeKey], [p3d, BtnComboKey], [p3e, BtnCSpamKey], [p3f, BtnClickKey], [p3h, BtnSpinbotKey]]
+        for i, row in kbRows {
+            yy := 58 + (i - 1) * 38
+            Mv(row[1], colX1 + 14, yy, colW1 - 130, 16)
+            Mv(row[2], colX1 + colW1 - 110, yy - 3, 96, 22)
+        }
+        Mv(SkBindsNote, colX2 + 14, 58, colW2 - 28, 140)
+    } else if (i = 3) {
+        Mv(p4c, colX1 + 14, 58, 110, 16), Mv(BtnLagKey, colX1 + colW1 - 130, 55, 116, 20)
+        Mv(p4b, colX1 + 14, 90, colW1 - 28, 16), Mv(FreezeEdit, colX1 + 14, 108, colW1 - 28, 22)
+        Mv(ApplyBtn, colX1 + 14, 140, btnHalfW, 24), Mv(TestBtn, colX1 + 14 + btnHalfW + 8, 140, colW1 - 28 - btnHalfW - 8, 24)
+        Mv(ChkLagPrecision, colX1 + 14, 180, 14, 14), Mv(LblLagPrecision, colX1 + 36, 179, colW1 - 50, 16)
+        Mv(ChkLagHold, colX1 + 14, 208, 14, 14), Mv(LblLagHold, colX1 + 36, 207, colW1 - 50, 16)
+        Mv(StatusText, colX1 + 14, 246, colW1 - 28, 16)
+        Mv(p4d, colX1 + 14, 276, colW1 - 28, 44)
+        Mv(ChkLagBurst, colX2 + 14, 58, 14, 14), Mv(LblLagBurst, colX2 + 36, 57, colW2 - 50, 16)
+        Mv(LblLagBurstCount, colX2 + 36, 80, colW2 - 50, 14), Mv(LagBurstSlider, colX2 + 32, 96, colW2 - 44, 20)
+        Mv(ChkLagVignette, colX2 + 14, 134, 14, 14), Mv(LblLagVignette, colX2 + 36, 133, colW2 - 120, 16), Mv(VignetteSwatchBtn, colX2 + colW2 - 70, 131, 56, 20)
+        Mv(LblVignetteThickness, colX2 + 36, 160, colW2 - 50, 14), Mv(VignetteThicknessSlider, colX2 + 32, 176, colW2 - 44, 20)
+    } else if (i = 4) {
+        Mv(p2g, colX1 + 14, 58, colW1 - 80, 16), Mv(ColorSwatchBtn, colX1 + colW1 - 66, 55, 52, 20)
+        Mv(p2h, colX1 + 14, 88, colW1 - 80, 16), Mv(BgSwatchBtn, colX1 + colW1 - 66, 85, 52, 20)
+        Mv(p2i, colX1 + 14, 118, colW1 - 80, 16), Mv(IconBgSwatchBtn, colX1 + colW1 - 66, 115, 52, 20)
+        Mv(p2j, colX1 + 14, 148, colW1 - 80, 16), Mv(PanelSwatchBtn, colX1 + colW1 - 66, 145, 52, 20)
+        Mv(p2k, colX1 + 14, 184, colW1 - 28, 16)
+        Mv(ThemeDDL, colX1 + 14, 204, colW1 - 130), Mv(ThemeApplyBtn, colX1 + colW1 - 104, 203, 90, 24)
+        Mv(DesignDDL, colX1 + 14, 240, colW1 - 130), Mv(DesignApplyBtn, colX1 + colW1 - 104, 239, 90, 24)
+        Mv(p2indic, colX2 + 14, 58, colW2 - 90, 16), Mv(ChkSidebarIndicators, colX2 + colW2 - 76, 55, 62, 20)
+        Mv(p2notif, colX2 + 14, 92, colW2 - 90, 16), Mv(ChkStatusNotifs, colX2 + colW2 - 76, 89, 62, 20)
+        Mv(p2hudpos, colX2 + 14, 130, colW2 - 28, 16), Mv(HudPosDDL, colX2 + 14, 152, colW2 - 28)
+        Mv(p2hudopacity, colX2 + 14, 194, colW2 - 90, 16), Mv(LblHudOpacity, colX2 + colW2 - 76, 194, 62, 16)
+        Mv(HudOpacitySlider, colX2 + 14, 216, colW2 - 28, 20)
+        Mv(p2b, colX2 + 14, 284, colW2 - 130, 16), Mv(BtnReloadKey, colX2 + colW2 - 110, 281, 96, 22)
+        Mv(p2c, colX2 + 14, 322, colW2 - 130, 16), Mv(BtnMinimizeKey, colX2 + colW2 - 110, 319, 96, 22), Mv(p2c2, colX2 + 14, 340, colW2 - 28, 14)
+        Mv(p2d, colX2 + 14, 374, colW2 - 130, 16), Mv(BtnMacroLockKey, colX2 + colW2 - 110, 371, 96, 22), Mv(p2e, colX2 + 14, 392, colW2 - 28, 14)
+        Mv(p2f, colX2 + 14, 426, colW2 - 130, 16), Mv(BtnExitKey, colX2 + colW2 - 110, 423, 96, 22)
+    } else if (i = 5) {
+        Mv(p5a, colX1 + 14, 58, colW1 - 28, 16), Mv(p5b, colX1 + 14, 82, colW1 - 28, 16), Mv(p5d, colX1 + 14, 106, colW1 - 28, 46)
+        Mv(p5e, colX1 + 14, 168, colW1 - 28, 16), Mv(p5f, colX1 + 14, 190, colW1 - 28, 16), Mv(p5g, colX1 + 14, 212, colW1 - 28, 34)
+        Mv(p5k, colX1 + 14, 254, colW1 - 28, 16), Mv(p5h, colX1 + 14, 276, colW1 - 28, 16), Mv(p5diag, colX1 + 14, 300, colW1 - 28, 16)
+        Mv(p5patch, colX2 + 14, 58, colW2 - 28, colH - 70)
+    } else if (i = 6) {
+        Mv(SaveLbl, colX1 + 14, 58, colW1 - 28, 16), Mv(SaveNameInput, colX1 + 14, 80, colW1 - 106, 22), Mv(SaveBtn, colX1 + colW1 - 84, 79, 70, 24)
+        Mv(LoadLbl, colX1 + 14, 120, colW1 - 28, 16), Mv(ConfigDDL, colX1 + 14, 142, colW1 - 106), Mv(LoadBtn, colX1 + colW1 - 84, 141, 70, 24)
+        Mv(DeleteBtn, colX1 + 14, 185, btnHalfW, 24), Mv(ResetBtn, colX1 + 14 + btnHalfW + 8, 185, colW1 - 28 - btnHalfW - 8, 24)
+        Mv(SkCfgInfoTitle, colX2 + 14, 58, colW2 - 28, 16), Mv(SkCfgInfoText, colX2 + 14, 80, colW2 - 28, colH - 90)
+    }
+    AdvLayoutSkeet(i)
+    FlushMv()
+}
+
+; Window-edge drags fire a lot of size events: lay out at most every ~25ms, and always finish on the last size.
+SkeetResizeThrottled(W, H)
+{
+    global SkLastLayout, SkPendW, SkPendH
+    SkPendW := W, SkPendH := H
+    if (A_TickCount - SkLastLayout >= 25) {
+        SetTimer(SkeetResizeApply, 0)
+        SkeetResizeApply()
+    } else
+        SetTimer(SkeetResizeApply, -30)
+}
+
+SkeetResizeApply()
+{
+    global SkLastLayout, SkPendW, SkPendH
+    SkLastLayout := A_TickCount
+    LayoutSkeet(SkPendW, SkPendH, false)
+    SetTimer(SkeetSettle, -150)
+}
+
+; While an edge is being dragged (WM_SIZING is only sent for that, not for moving the window) nothing is re-laid
+; out, which keeps dragging smooth; the contents are scaled to the new size and repainted once on release.
+SkeetOnSizing(wParam, lParam, msg, hwnd)
+{
+    global SkDragging, MainGui, LayoutMode
+    if (hwnd != MainGui.Hwnd || LayoutMode != "skeet")
+        return
+    SkDragging := true
+}
+
+SkeetOnExitSize(wParam, lParam, msg, hwnd)
+{
+    global SkDragging, MainGui
+    if (!SkDragging || hwnd != MainGui.Hwnd)
+        return
+    SkDragging := false
+    SetTimer(SkeetResizeApply, 0)
+    MainGui.GetClientPos(, , &cw, &ch)
+    LayoutSkeet(cw, ch, true)
+    RainbowTick()
+}
+
+; Runs once the window has stopped changing size: one clean full repaint.
+SkeetSettle()
+{
+    global MainGui, LayoutMode
+    if (LayoutMode != "skeet")
+        return
+    DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
+    RainbowTick()
+}
+
+; ===== Animations: window fade, sliding accent bar, smooth hover =====
+FadeWindow(show)
+{
+    global MainGui, FadeAlpha, FadeFrom, FadeTo, FadeStart
+    FadeFrom := FadeAlpha
+    FadeTo := show ? 255 : 0
+    if (show) {
+        FadeApply(FadeAlpha)
+        FadeShowWin()
+        SetTimer(RainbowTick, 48)
+    }
+    FadeStart := A_TickCount
+    SetTimer(FadeTick, 15)
+}
+
+FadeTick()
+{
+    global MainGui, FadeAlpha, FadeFrom, FadeTo, FadeStart, NLWinK, NLWinDy
+    t := Min(1, (A_TickCount - FadeStart) / 260)
+    e := 1 - (1 - t) ** 3
+    FadeAlpha := Round(FadeFrom + (FadeTo - FadeFrom) * e)
+    NLWinK := 0.94 + 0.06 * (FadeAlpha / 255)
+    NLWinDy := (1 - FadeAlpha / 255) * 14
+    FadeApply(FadeAlpha)
+    if (t >= 1) {
+        SetTimer(FadeTick, 0)
+        if (FadeTo = 0) {
+            FadeHideWin()
+            SetTimer(RainbowTick, 0)
+        } else {
+            NLWinK := 1.0, NLWinDy := 0.0
+            FadeApply(255, true)
+        }
+    }
+}
+
+; The Neverlose design is its own window with per-pixel alpha, so fading goes through it instead of MainGui.
+FadeApply(a, final := false)
+{
+    global MainGui, NLAlphaWin
+    if (LayoutMode = "nl") {
+        NLAlphaWin := a
+        NLRequest()
+    } else if (final)
+        WinSetTransparent("Off", MainGui)
+    else
+        WinSetTransparent(a, MainGui)
+}
+
+; The window you were in before the menu opened (usually the game); it gets the focus back when the menu hides.
+Global MenuPrevWin := 0
+
+MenuOwnWin(hwnd)
+{
+    global MainGui, NLHwnd
+    return hwnd = MainGui.Hwnd || (NLHwnd && hwnd = NLHwnd)
+}
+
+; Keeps track of the last window outside this script that had the focus. The menu grabs the focus the moment it
+; opens (before anything could record it), so it is remembered continuously rather than at that moment.
+MenuTrackFg()
+{
+    global MenuPrevWin
+    fg := DllCall("GetForegroundWindow", "Ptr")
+    if (!fg)
+        return
+    pid := 0
+    DllCall("GetWindowThreadProcessId", "Ptr", fg, "UInt*", &pid)
+    if (pid && pid != DllCall("GetCurrentProcessId", "UInt"))
+        MenuPrevWin := fg
+}
+SetTimer(MenuTrackFg, 200)
+
+FadeShowWin()
+{
+    global MainGui, NLGui, NLShown, MenuPrevWin
+    fg := DllCall("GetForegroundWindow", "Ptr")
+    if (fg && !MenuOwnWin(fg))
+        MenuPrevWin := fg
+    if (LayoutMode = "nl") {
+        NLShown := true
+        NLGui.Show(), DllCall("ClipCursor", "Ptr", 0)
+        SetTimer(NLInputTick, 16)
+        NLRequest()
+    } else
+        MainGui.Show()
+}
+
+FadeHideWin()
+{
+    global MainGui, NLGui, NLShown, MenuPrevWin
+    NLEditsStop()
+    hadFocus := MenuOwnWin(DllCall("GetForegroundWindow", "Ptr"))
+    if (LayoutMode = "nl") {
+        NLShown := false
+        NLGui.Hide()
+    } else
+        MainGui.Hide()
+    ; hiding the menu would otherwise hand the focus to whatever window is behind it (e.g. the folder you started from)
+    if (hadFocus && MenuPrevWin && DllCall("IsWindow", "Ptr", MenuPrevWin))
+        try WinActivate("ahk_id " MenuPrevWin)
+}
+
+; Slides a control to a new Y with ease-out; calling it again mid-slide restarts from where it is.
+AnimMoveY(ctrl, toY, dur := 130)
+{
+    global AnimMoves
+    ctrl.GetPos(, &y)
+    if (y = toY && !AnimMoves.Has(ctrl.Hwnd))
+        return
+    AnimMoves[ctrl.Hwnd] := {c: ctrl, from: y, to: toY, start: A_TickCount, dur: dur}
+    SetTimer(AnimTick, 15)
+}
+
+AnimTick()
+{
+    global AnimMoves
+    done := []
+    for h, a in AnimMoves {
+        t := Min(1, (A_TickCount - a.start) / a.dur)
+        e := 1 - (1 - t) ** 3
+        a.c.Move(, Round(a.from + (a.to - a.from) * e))
+        if (t >= 1)
+            done.Push(h)
+    }
+    for h in done
+        AnimMoves.Delete(h)
+    if (AnimMoves.Count = 0)
+        SetTimer(AnimTick, 0)
+}
+
+RegisterHover(ctrls, baseFn)
+{
+    global HoverMap
+    g := {ctrls: ctrls, bfn: baseFn, t: 0, dir: 0}
+    for c in ctrls
+        HoverMap[c.Hwnd] := g
+}
+
+MakeTabBase(i)
+{
+    return () => (LayoutMode != "skeet" || CurrentTab = i) ? "" : SkeetStripBg()
+}
+
+HoverMouseMove(wParam, lParam, msg, hwnd)
+{
+    global HoverMap, HoverAnim, HoverCur
+    if (!HoverMap.Has(hwnd))
+        return
+    g := HoverMap[hwnd]
+    if (g = HoverCur)
+        return
+    if (IsObject(HoverCur)) {
+        HoverCur.dir := -1
+        HoverAnim[HoverCur] := true
+    }
+    HoverCur := g
+    g.dir := 1
+    HoverAnim[g] := true
+    SetTimer(HoverTick, 15)
+}
+
+HoverTick()
+{
+    global HoverMap, HoverAnim, HoverCur, MainGui
+    if (IsObject(HoverCur)) {
+        MouseGetPos(, , &win, &ctl, 2)
+        if (win != MainGui.Hwnd || !HoverMap.Has(ctl) || HoverMap[ctl] != HoverCur) {
+            HoverCur.dir := -1
+            HoverAnim[HoverCur] := true
+            HoverCur := 0
+        }
+    }
+    done := []
+    for g in HoverAnim {
+        base := g.bfn.Call()
+        if (base = "") {
+            g.t := 0, g.dir := 0
+            done.Push(g)
+            continue
+        }
+        g.t := Max(0, Min(1, g.t + g.dir * 0.15))
+        hex := LerpHex(base, LightenHex(base, 18), g.t)
+        for c in g.ctrls {
+            c.Opt("Background" hex)
+            c.Redraw()
+        }
+        if ((g.dir = 1 && g.t >= 1) || (g.dir = -1 && g.t <= 0)) {
+            g.dir := 0
+            done.Push(g)
+        }
+    }
+    for g in done
+        HoverAnim.Delete(g)
+    if (HoverAnim.Count = 0 && !IsObject(HoverCur))
+        SetTimer(HoverTick, 0)
+}
+
+LightenHex(hex, d)
+{
+    return ShadeHex(Integer("0x" SubStr(hex, 1, 2)), Integer("0x" SubStr(hex, 3, 2)), Integer("0x" SubStr(hex, 5, 2)), d)
+}
+
+LerpHex(a, b, t)
+{
+    r := Round(Integer("0x" SubStr(a, 1, 2)) + (Integer("0x" SubStr(b, 1, 2)) - Integer("0x" SubStr(a, 1, 2))) * t)
+    g := Round(Integer("0x" SubStr(a, 3, 2)) + (Integer("0x" SubStr(b, 3, 2)) - Integer("0x" SubStr(a, 3, 2))) * t)
+    bl := Round(Integer("0x" SubStr(a, 5, 2)) + (Integer("0x" SubStr(b, 5, 2)) - Integer("0x" SubStr(a, 5, 2))) * t)
+    return Format("{:02X}{:02X}{:02X}", r, g, bl)
+}
+
+; ===== Startup intro: WELCOME + the Windows user name, then the menu fades in =====
+ShowMenuStartup()
+{
+    global MainGui, FadeAlpha, NLAlphaWin, NLGui, NLW, NLH, DesignPresets, NLInited
+    if (!IsSet(DesignPresets) || !IsSet(NLInited)) {   ; the rest of the script is still initialising
+        SetTimer(ShowMenuStartup, -40)
+        return
+    }
+    FadeAlpha := 0
+    reloaded := (EnvGet("M0M_RELOADED") = "1")
+    EnvSet("M0M_RELOADED", "")
+    if (reloaded && StartDesign = "M0MENT4M")
+        SetTimer(() => SPToast("Script reloaded", 7001, "on", "Everything is running again"), -900)
+    SPLoadPrefs()
+    if (StartDesign != "Classic") {
+        NLAlphaWin := 0
+        ApplyDesign(StartDesign)
+        NLGui.Move((A_ScreenWidth - NLW) // 2, (A_ScreenHeight - NLH) // 2)
+        FadeWindow(true)
+        return
+    }
+    WinSetTransparent(0, MainGui)
+    MainGui.Show("w480 h860")
+    FadeWindow(true)
+}
+
+; The intro is drawn in the same style as the menu (rounded card, moving gradient, typed letters).
+Global IntroW := 640, IntroH := 250
+
+PlayIntro()
+{
+    SetTimer(IntroBegin, -30)
+}
+
+IntroBegin()
+{
+    global Intro, IntroW, IntroH, IntroFontBig, IntroFontUser
+    ; the rest of the script is still initialising: try again in a moment
+    if (!IsSet(VigGradSel) || !IsSet(HudBorderSel) || !IsSet(DesignPresets)) {
+        SetTimer(IntroBegin, -40)
+        return
+    }
+    SPLoadPrefs()
+    NLGdipInit()
+    IntroFontBig := NLMakeFont("Segoe UI Black", 34, 0)
+    IntroFontUser := NLMakeFont("Segoe UI", 22, 1)
+    g := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M intro")
+    dc := 0, bmp := 0, gr := 0
+    VigMakeSurface(IntroW, IntroH, &dc, &bmp, &gr)
+    Intro := {g: g, dc: dc, bmp: bmp, gr: gr, user: A_UserName, text: "WELCOME", start: 0, skipAt: 0}
+    g.Show("x" ((A_ScreenWidth - IntroW) // 2) " y" ((A_ScreenHeight - IntroH) // 2 - 60) " w" IntroW " h" IntroH " NA")
+    SetTimer(IntroTick, 16)
+}
+
+IntroTick()
+{
+    global Intro, IntroW, IntroH
+    if (!IsObject(Intro)) {
+        SetTimer(IntroTick, 0)
+        return
+    }
+    if (!Intro.start)
+        Intro.start := A_TickCount
+    t := A_TickCount - Intro.start
+    n := StrLen(Intro.user)
+    uEnd := 900 + n * 70
+    holdEnd := uEnd + 900
+    if (!Intro.skipAt && t > 300 && GetKeyState("Escape", "P"))
+        Intro.skipAt := t
+    fadeStart := (Intro.skipAt && Intro.skipAt < holdEnd) ? Intro.skipAt : holdEnd
+    tin := Min(1.0, t / 420)
+    alpha := 1 - (1 - tin) ** 3
+    if (t >= fadeStart)
+        alpha *= 1 - Min(1.0, (t - fadeStart) / 300)
+    IntroDraw(t, alpha, uEnd)
+    if (t >= fadeStart + 300) {
+        SetTimer(IntroTick, 0)
+        Intro.g.Destroy()
+        Intro := ""
+        ShowMenuStartup()
+    }
+}
+
+; Critical keeps another timer from using the shared drawing handle halfway; it is switched back afterwards.
+IntroDraw(t, alpha, uEnd)
+{
+    pc := A_IsCritical
+    Critical
+    try IntroDrawInner(t, alpha, uEnd)
+    finally Critical(pc ? "On" : "Off")
+}
+
+IntroDrawInner(t, alpha, uEnd)
+{
+    global Intro, IntroW, IntroH, IntroFontBig, IntroFontUser, NLG, NLAlphaPage, NLFontSm, SPLogoIdx
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := Intro.gr
+    NLAlphaPage := 1.0
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", Intro.gr, "UInt", 0)
+    gi := (SPLogoIdx = 1) ? 2 : SPLogoIdx          ; "Accent Flow" would still be the pre-design accent here, so use Aurora
+    W := IntroW, H := IntroH
+    cin := Min(1.0, t / 460)
+    ce := 1 + 2.70158 * (cin - 1) ** 3 + 1.70158 * (cin - 1) ** 2
+    oy := (1 - ce) * -26                     ; the card settles into place with a small bounce
+    cx0 := 22, cy0 := 26 + oy, cw := W - 44, ch := H - 56
+    ; card + soft shadow
+    NLRR(cx0 - 2, cy0 + 8, cw + 4, ch, 28, NLC(0, 0, 0, 70))
+    NLRR(cx0, cy0, cw, ch, 26, SPCol("Card"))
+    NLRR(cx0, cy0, cw, ch / 2, 26, SPCol("Hover", 120))
+    ; the moving gradient border, same one the macro HUD uses
+    stops := SPLogoStops(gi)
+    pts := HudPerimeter(cx0 + 1, cy0 + 1, cw - 2, ch - 2, 25)
+    np := pts.Length
+    tt := t / 1000 * 0.35
+    ba := Min(1.0, t / 300)
+    Loop np {
+        a := pts[A_Index], b := pts[Mod(A_Index, np) + 1]
+        c := SPStopsSample(stops, Round(((A_Index - 1) / np - tt) * 96) / 96)
+        NLLineW(a[1], a[2], b[1], b[2], NLC(c[1], c[2], c[3], Round(255 * ba)), 2.4)
+    }
+    ; WELCOME: letters pop in one by one, each coloured by the moving gradient
+    txt := Intro.text
+    n := StrLen(txt)
+    adv := []
+    total := 0
+    Loop n {
+        w1 := NLTextW(SubStr(txt, A_Index, 1), IntroFontBig) * 0.72 + 9
+        adv.Push(w1)
+        total += w1
+    }
+    x := (W - total) / 2 + 2
+    ty := cy0 + 18
+    Loop n {
+        k := Max(0.0, Min(1.0, (t - 200 - (A_Index - 1) * 55) / 220))
+        e := 1 - (1 - k) ** 3
+        if (e > 0.01) {
+            col := SPLogoRGB(gi, A_Index, n)
+            NLAlphaPage := e
+            NLText(SubStr(txt, A_Index, 1), x, ty + (1 - e) * 14, NLC(col[1], col[2], col[3], 60), IntroFontBig, 60, 56, 0, 1)
+            NLText(SubStr(txt, A_Index, 1), x, ty + (1 - e) * 14 - 1, NLC(col[1], col[2], col[3]), IntroFontBig, 60, 56, 0, 1)
+            NLAlphaPage := 1.0
+        }
+        x += adv[A_Index]
+    }
+    ; line drawing out from the middle, filled with the same gradient
+    lw := Round(300 * Max(0, Min(1.0, (t - 700) / 320)))
+    if (lw > 2) {
+        ly := cy0 + 84
+        segs := 30
+        Loop segs {
+            sx0 := W / 2 - lw / 2 + (A_Index - 1) * lw / segs
+            c := SPStopsSample(stops, Round(((A_Index - 1) / segs - tt) * 96) / 96)
+            NLRR(sx0, ly, lw / segs + 1, 3, 0, NLC(c[1], c[2], c[3]))
+        }
+    }
+    ; the user name types in inside a pill, with a blinking cursor (kept from the old intro)
+    user := Intro.user
+    un := StrLen(user)
+    uw := NLTextW(user, IntroFontUser)
+    pw := Min(W - 120, uw + 70)
+    pk := Max(0.0, Min(1.0, (t - 760) / 260))
+    pe := 1 - (1 - pk) ** 3
+    if (pe > 0.01) {
+        px := (W - pw) / 2, py := cy0 + 104 + (1 - pe) * 10
+        NLAlphaPage := pe
+        NLRR(px, py, pw, 48, 24, SPCol("Pill"))
+        NLRRLine(px, py, pw, 48, 24, SPCol("Border"))
+        c1 := SPLogoRGB(gi, 1, 8)
+        NLDisc(px + 24, py + 24, 4.5, NLC(c1[1], c1[2], c1[3]))
+        u := Max(0, Min(un, (t - 900) // 70))
+        typed := SubStr(user, 1, u)
+        NLText(typed, px + 42, py, SPCol("Text"), IntroFontUser, pw - 50, 48, 0, 1)
+        if (u < un || Mod(t // 260, 2) = 0) {
+            cxp := px + 42 + (u > 0 ? NLTextW(typed, IntroFontUser) - 2 : 0)
+            NLRR(cxp, py + 12, 2.4, 24, 1.2, NLC(c1[1], c1[2], c1[3]))
+        }
+        NLAlphaPage := 1.0
+    }
+    ; small spaced-out name under it
+    sk := Max(0.0, Min(1.0, (t - 1100) / 400))
+    if (sk > 0.01) {
+        NLAlphaPage := sk
+        NLText("M 0 M E N T 4 M", 0, cy0 + ch - 36, SPCol("Muted"), NLFontSm, W, 24, 1, 1)
+        NLAlphaPage := 1.0
+    }
+    NLG := prevG
+    NLAlphaPage := prevA
+    sz := Buffer(8, 0)
+    NumPut("Int", W, sz, 0)
+    NumPut("Int", H, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", Max(0, Min(255, Round(255 * alpha))), bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", Intro.g.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", Intro.dc, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; ===== NEVERLOSE DESIGN: a custom-drawn (GDI+) window, same macro logic underneath =====
+Global NLStyle := "nl", SPDark := true, SPAvatar := 0, SPAvatarPath := "", SPScroll := 0.0, SPScrollT := 0.0, SPContentH := 0, NLFontB := 0, NLFontH := 0, NLFontLogo := 0
+Global NLGui := "", NLHwnd := 0, NLW := 690, NLH := 500, NLShown := false, NLInited := false
+Global NLToken := 0, NLG := 0, NLMemDC := 0, NLBmp := 0, NLFmt := 0, NLFmtW := 0
+Global NLFontUI := 0, NLFontSm := 0, NLFontTitle := 0, NLFontIcon := 0
+Global NLHits := [], NLHitsB := [], NLAnim := Map(), NLAnimating := false
+Global NLMx := -1, NLMy := -1, NLDown := false, NLActive := 0, NLDragSlider := 0, NLHoverId := "", NLLastBtn := false, NLWinDrag := 0, NLEdge := 0, NLResizing := 0, NLMinW := 690, NLMinH := 500, NLMaxW := 1600, NLMaxH := 1000
+Global NLAlphaWin := 255, NLAlphaPage := 1.0, NLPageAnim := 0.0, NLSubTab := 1
+Global NLWinK := 1.0, NLWinDy := 0.0            ; size and offset of the whole menu while it fades in / out
+
+; applied to the drawing right after it is cleared (the menu grows a little while it fades in, and sinks a little while it fades out)
+NLWinXf()
+{
+    global NLG, NLW, NLH, NLWinK, NLWinDy
+    if (NLWinK >= 1 && NLWinDy = 0)
+        return
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", NLG, "Float", NLW / 2, "Float", NLH / 2 + NLWinDy, "Int", 0)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", NLG, "Float", NLWinK, "Float", NLWinK, "Int", 0)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", NLG, "Float", -NLW / 2, "Float", -NLH / 2, "Int", 0)
+}
+Global NLX := 100, NLY := 100
+Global NLCx := 0, NLCy := 0, NLCw := 0
+
+
+; Clicking the menu must not activate it: the click goes straight through and your game keeps the focus.
+NLOnMouseActivate(wParam, lParam, msg, hwnd)
+{
+    global NLHwnd
+    if (hwnd = NLHwnd)
+        return 3
+}
+
+; ---------- window ----------
+NLShow(x, y)
+{
+    global NLGui, NLHwnd, NLW, NLH, NLShown, NLInited, NLX, NLY
+    NLX := x, NLY := y
+    if (!NLInited) {
+        NLGdipInit()
+        NLGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 -DPIScale", "M0MENT4M NL")
+        NLHwnd := NLGui.Hwnd
+        NLCreateSurface()
+        NLInited := true
+    }
+    NLShown := true
+    NLGui.Show("x" x " y" y " w" NLW " h" NLH), DllCall("ClipCursor", "Ptr", 0)
+    SetTimer(NLInputTick, 16)
+    NLRequest()
+}
+
+NLHide()
+{
+    global NLGui, NLShown, NLInited
+    NLEditsStop()
+    if (!NLInited)
+        return
+    NLGui.GetPos(&nx, &ny)
+    NLX := nx, NLY := ny
+    NLShown := false
+    NLGui.Hide()
+}
+
+; ---------- GDI+ setup ----------
+NLGdipInit()
+{
+    global NLToken, NLFmt, NLFmtW, NLFontUI, NLFontSm, NLFontTitle, NLFontIcon, NLFontB, NLFontH, NLFontLogo
+    if (NLToken)
+        return
+    DllCall("LoadLibrary", "Str", "gdiplus")
+    si := Buffer(24, 0)
+    NumPut("UInt", 1, si, 0)
+    DllCall("gdiplus\GdiplusStartup", "Ptr*", &NLToken, "Ptr", si, "Ptr", 0)
+    DllCall("gdiplus\GdipCreateStringFormat", "Int", 0x4000, "Int", 0, "Ptr*", &NLFmt)
+    DllCall("gdiplus\GdipCreateStringFormat", "Int", 0, "Int", 0, "Ptr*", &NLFmtW)
+    NLFontUI := NLMakeFont("Segoe UI", 13, 0)
+    NLFontSm := NLMakeFont("Segoe UI", 12, 0)
+    NLFontTitle := NLMakeFont("Segoe UI", 20, 1)
+    NLFontB := NLMakeFont("Segoe UI", 13, 1)
+    NLFontH := NLMakeFont("Segoe UI", 17, 1)
+    NLFontLogo := NLMakeFont("Segoe UI Black", 18, 0)
+    NLFontIcon := NLMakeFont("Segoe UI Symbol", 15, 0)
+}
+
+NLMakeFont(name, px, style)
+{
+    fam := 0, font := 0
+    DllCall("gdiplus\GdipCreateFontFamilyFromName", "WStr", name, "Ptr", 0, "Ptr*", &fam)
+    DllCall("gdiplus\GdipCreateFont", "Ptr", fam, "Float", px, "Int", style, "Int", 2, "Ptr*", &font)
+    return font
+}
+
+NLCreateSurface()
+{
+    global NLMemDC, NLBmp, NLG, NLW, NLH, NLMaxW, NLMaxH
+    NLMemDC := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+    bi := Buffer(40, 0)
+    NumPut("int", 40, bi, 0)
+    NumPut("int", NLMaxW, bi, 4)
+    NumPut("int", -NLMaxH, bi, 8)
+    NumPut("short", 1, bi, 12)
+    NumPut("short", 32, bi, 14)
+    pBits := 0
+    NLBmp := DllCall("CreateDIBSection", "Ptr", NLMemDC, "Ptr", bi, "UInt", 0, "Ptr*", &pBits, "Ptr", 0, "UInt", 0, "Ptr")
+    DllCall("SelectObject", "Ptr", NLMemDC, "Ptr", NLBmp)
+    DllCall("gdiplus\GdipCreateFromHDC", "Ptr", NLMemDC, "Ptr*", &NLG)
+    DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", NLG, "Int", 4)
+    DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", NLG, "Int", 4)
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+}
+
+NLPresent()
+{
+    global NLHwnd, NLMemDC, NLW, NLH, NLAlphaWin
+    sz := Buffer(8, 0)
+    NumPut("Int", NLW, sz, 0)
+    NumPut("Int", NLH, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", NLAlphaWin, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", NLHwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", NLMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", NLG)
+}
+
+; ---------- colours ----------
+NLC(r, g, b, a := 255)
+{
+    global NLAlphaPage
+    return (Round(a * NLAlphaPage) << 24) | (r << 16) | (g << 8) | b
+}
+
+NLAccent(a := 255)
+{
+    global AccentColor
+    return NLC(Integer("0x" SubStr(AccentColor, 1, 2)), Integer("0x" SubStr(AccentColor, 3, 2)), Integer("0x" SubStr(AccentColor, 5, 2)), a)
+}
+
+NLHexCol(hex, a := 255)
+{
+    return NLC(Integer("0x" SubStr(hex, 1, 2)), Integer("0x" SubStr(hex, 3, 2)), Integer("0x" SubStr(hex, 5, 2)), a)
+}
+
+NLWhite(a := 255) => NLC(255, 255, 255, a)
+NLDim(a := 255) => NLC(130, 133, 143, a)
+NLBorder() => NLC(255, 255, 255, 8)
+NLFrameIn(a := 255)
+{
+    global SPCust
+    if (SPCust.Has("bg")) {
+        c := SPHexArr(SPCust["bg"])
+        return NLC(c[1], c[2], c[3], a)
+    }
+    return NLC(6, 10, 18, a)
+}
+NLFrameAct(a := 255)
+{
+    global SPCust
+    if (SPCust.Has("icon")) {
+        c := SPHexArr(SPCust["icon"])
+        return NLC(c[1], c[2], c[3], a)
+    }
+    return NLC(11, 18, 35, a)
+}
+NLGroupBg()
+{
+    global SPCust
+    if (SPCust.Has("panel")) {
+        c := SPShadeArr(SPHexArr(SPCust["panel"]), -0.3)
+        return NLC(c[1], c[2], c[3])
+    }
+    return NLC(5, 9, 16)
+}
+NLBtnCol(hv)
+{
+    global SPCust
+    if (SPCust.Has("icon")) {
+        c := SPShadeArr(SPHexArr(SPCust["icon"]), hv * 0.12)
+        return NLC(c[1], c[2], c[3])
+    }
+    return NLC(Round(8 + 7 * hv), Round(9 + 7 * hv), Round(15 + 8 * hv))
+}
+
+; Blends the dim grey and the accent colour (used for the toggle knob).
+NLKnobCol(t)
+{
+    global AccentColor
+    ar := Integer("0x" SubStr(AccentColor, 1, 2)), ag := Integer("0x" SubStr(AccentColor, 3, 2)), ab := Integer("0x" SubStr(AccentColor, 5, 2))
+    return NLC(Round(130 + (ar - 130) * t), Round(133 + (ag - 133) * t), Round(143 + (ab - 143) * t))
+}
+
+; ---------- primitives ----------
+NLPath(x, y, w, h, r)
+{
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    r := Min(r, w / 2, h / 2)
+    d := r * 2
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y, "Float", d, "Float", d, "Float", 180, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y, "Float", d, "Float", d, "Float", 270, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y + h - d, "Float", d, "Float", d, "Float", 0, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y + h - d, "Float", d, "Float", d, "Float", 90, "Float", 90)
+    DllCall("gdiplus\GdipClosePathFigure", "Ptr", path)
+    return path
+}
+
+; Cached GDI+ objects: creating and deleting a brush / pen / path for every rectangle, line and glyph is most of the cost
+; of drawing a frame. They are keyed by colour (and size) and reused; the caches are emptied when they grow too big.
+Global NLBrushCache := Map(), NLPenCache := Map(), NLPathCache := Map()
+Global NLBrushOld := Map(), NLPenOld := Map(), NLPathOld := Map()
+
+; Two generations: when the current cache is full it becomes the "old" one and the previous old one is deleted.
+; A handle that was just handed out therefore stays valid for a whole cache cycle, even if another timer thread
+; (HUD, widgets, companion, menu) draws in between. Deleting handles at the moment of overflow crashed GDI+.
+NLCacheAge(cur, old, delFn)
+{
+    pc := A_IsCritical
+    Critical
+    for k, h in old {
+        if (!cur.Has(k))                  ; (a handle that was promoted back into the current cache is still in use)
+            DllCall(delFn, "Ptr", h)
+    }
+    old.Clear()
+    for k, h in cur
+        old[k] := h
+    cur.Clear()
+    Critical(pc ? "On" : "Off")
+}
+
+; Cleaning happens on a slow timer, never in the middle of drawing: whatever a draw call got from the cache is still
+; valid for at least one whole cleaning interval afterwards.
+NLCacheGC()
+{
+    global NLBrushCache, NLBrushOld, NLPenCache, NLPenOld, NLPathCache, NLPathOld
+    if (NLBrushCache.Count > 250)
+        NLCacheAge(NLBrushCache, NLBrushOld, "gdiplus\GdipDeleteBrush")
+    if (NLPenCache.Count > 250)
+        NLCacheAge(NLPenCache, NLPenOld, "gdiplus\GdipDeletePen")
+    if (NLPathCache.Count > 250)
+        NLCacheAge(NLPathCache, NLPathOld, "gdiplus\GdipDeletePath")
+}
+SetTimer(NLCacheGC, 3000)
+
+NLBrush(argb)
+{
+    global NLBrushCache, NLBrushOld
+    h := NLBrushCache.Get(argb, 0)
+    if (h)
+        return h
+    h := NLBrushOld.Get(argb, 0)
+    if (h) {
+        NLBrushCache[argb] := h
+        return h
+    }
+    if (NLBrushCache.Count > 20000)
+        NLCacheAge(NLBrushCache, NLBrushOld, "gdiplus\GdipDeleteBrush")
+    b := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &b)
+    NLBrushCache[argb] := b
+    return b
+}
+
+NLPen(argb, wd := 1, caps := 0)
+{
+    global NLPenCache, NLPenOld
+    key := argb "|" wd "|" caps
+    h := NLPenCache.Get(key, 0)
+    if (h)
+        return h
+    h := NLPenOld.Get(key, 0)
+    if (h) {
+        NLPenCache[key] := h
+        return h
+    }
+    if (NLPenCache.Count > 20000)
+        NLCacheAge(NLPenCache, NLPenOld, "gdiplus\GdipDeletePen")
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", wd, "Int", 2, "Ptr*", &pen)
+    if (caps) {
+        DllCall("gdiplus\GdipSetPenStartCap", "Ptr", pen, "Int", 2)
+        DllCall("gdiplus\GdipSetPenEndCap", "Ptr", pen, "Int", 2)
+    }
+    NLPenCache[key] := pen
+    return pen
+}
+
+; a rounded-rectangle path that stays alive (do not delete it)
+NLPathK(x, y, w, h, r)
+{
+    global NLPathCache, NLPathOld
+    key := Round(x, 1) "|" Round(y, 1) "|" Round(w, 1) "|" Round(h, 1) "|" r
+    pa := NLPathCache.Get(key, 0)
+    if (pa)
+        return pa
+    pa := NLPathOld.Get(key, 0)
+    if (pa) {
+        NLPathCache[key] := pa
+        return pa
+    }
+    if (NLPathCache.Count > 20000)
+        NLCacheAge(NLPathCache, NLPathOld, "gdiplus\GdipDeletePath")
+    pa := NLPath(x, y, w, h, r)
+    NLPathCache[key] := pa
+    return pa
+}
+
+NLRR(x, y, w, h, r, argb)
+{
+    global NLG
+    brush := NLBrush(argb)
+    if (r <= 0)
+        DllCall("gdiplus\GdipFillRectangle", "Ptr", NLG, "Ptr", brush, "Float", x, "Float", y, "Float", w, "Float", h)
+    else
+        DllCall("gdiplus\GdipFillPath", "Ptr", NLG, "Ptr", brush, "Ptr", NLPathK(x, y, w, h, r))
+}
+
+NLRRLine(x, y, w, h, r, argb)
+{
+    global NLG
+    DllCall("gdiplus\GdipDrawPath", "Ptr", NLG, "Ptr", NLPen(argb, 1, 0), "Ptr", NLPathK(x + 0.5, y + 0.5, w - 1, h - 1, r))
+}
+
+NLDisc(cx, cy, rad, argb)
+{
+    global NLG
+    DllCall("gdiplus\GdipFillEllipse", "Ptr", NLG, "Ptr", NLBrush(argb), "Float", cx - rad, "Float", cy - rad, "Float", rad * 2, "Float", rad * 2)
+}
+
+NLLine(x1, y1, x2, y2, argb)
+{
+    global NLG
+    DllCall("gdiplus\GdipDrawLine", "Ptr", NLG, "Ptr", NLPen(argb, 1, 0), "Float", x1, "Float", y1, "Float", x2, "Float", y2)
+}
+
+; ha: 0 left, 1 centre, 2 right.  va: 0 top, 1 middle.  wrap = true for paragraphs.
+NLText(str, x, y, argb, font, w := 0, h := 0, ha := 0, va := 0, wrap := false)
+{
+    global NLG, NLFmt, NLFmtW
+    static lastA := Map(), lastV := Map(), rc := Buffer(16, 0)
+    if (str = "")
+        return
+    ; the menu, the HUDs, the widgets and the companion all draw on their own timers and share the string format and this
+    ; rectangle: nothing may interrupt between setting them and drawing
+    pc := A_IsCritical
+    Critical
+    fmt := wrap ? NLFmtW : NLFmt
+    if (!lastA.Has(fmt) || lastA[fmt] != ha) {
+        DllCall("gdiplus\GdipSetStringFormatAlign", "Ptr", fmt, "Int", ha)
+        lastA[fmt] := ha
+    }
+    if (!lastV.Has(fmt) || lastV[fmt] != va) {
+        DllCall("gdiplus\GdipSetStringFormatLineAlign", "Ptr", fmt, "Int", va)
+        lastV[fmt] := va
+    }
+    NumPut("Float", x, rc, 0)
+    NumPut("Float", y, rc, 4)
+    NumPut("Float", w ? w : 1000, rc, 8)
+    NumPut("Float", h ? h : 1000, rc, 12)
+    DllCall("gdiplus\GdipDrawString", "Ptr", NLG, "WStr", str, "Int", -1, "Ptr", font, "Ptr", rc, "Ptr", fmt, "Ptr", NLBrush(argb))
+    Critical(pc ? "On" : "Off")
+}
+
+NLTextW(str, font)
+{
+    global NLG, NLFmt
+    static known := Map()
+    key := font "|" str
+    if (known.Has(key))
+        return known[key]
+    if (known.Count > 4000)
+        known.Clear()
+    known[key] := NLTextWRaw(str, font)
+    return known[key]
+}
+
+NLTextWRaw(str, font)
+{
+    global NLG, NLFmt
+    rc := Buffer(16, 0)
+    NumPut("Float", 1000, rc, 8)
+    NumPut("Float", 100, rc, 12)
+    out := Buffer(16, 0)
+    DllCall("gdiplus\GdipMeasureString", "Ptr", NLG, "WStr", str, "Int", -1, "Ptr", font, "Ptr", rc, "Ptr", NLFmt, "Ptr", out, "Ptr", 0, "Ptr", 0)
+    return NumGet(out, 8, "Float")
+}
+
+; ---------- animation + hit testing ----------
+NLLerp(id, target, factor)
+{
+    global NLAnim, NLAnimating
+    v := NLAnim.Has(id) ? NLAnim[id] : target
+    v += (target - v) * factor
+    if (Abs(target - v) < 0.004)
+        v := target
+    else
+        NLAnimating := true
+    NLAnim[id] := v
+    return v
+}
+
+; Hit regions are collected in a spare list while a frame is drawn and swapped in once the frame is complete.
+; (A frame takes a while; if the mouse poll ran in the middle of it, the list would be empty for a moment, the
+; hover would drop for an instant and descriptions and highlights would flicker.)
+NLAddHit(id, x, y, w, h, fn, data := "")
+{
+    global NLHitsB
+    NLHitsB.Push({id: id, x: x, y: y, w: w, h: h, fn: fn, data: data})
+}
+
+NLHitAt(x, y)
+{
+    global NLHits
+    i := NLHits.Length
+    while (i >= 1) {
+        h := NLHits[i]
+        if (x >= h.x && x < h.x + h.w && y >= h.y && y < h.y + h.h)
+            return h
+        i--
+    }
+    return 0
+}
+
+; Re-arming a running timer restarts its countdown, so the input poll (every 16ms) used to keep pushing the
+; render back while the mouse was held; only start it when it is not already running.
+Global NLTimerOn := false
+
+; MenuTouchAt: when the mouse last did something on the menu (moved over it, pressed, dragged). While it is recent the purely decorative
+; extras (idle animation of the keys and mouse, the companion's frame rate) give the menu the time it needs.
+Global MenuTouchAt := -99999
+MenuBusy() => (A_TickCount - MenuTouchAt < 900)
+
+NLRequest()
+{
+    global NLTimerOn
+    if (NLTimerOn)
+        return
+    NLTimerOn := true
+    SetTimer(NLTick, 16)
+}
+
+NLTick()
+{
+    global NLShown, NLAnimating, NLDown, NLEditIH, NLNum, NLTimerOn
+    if (!NLShown) {
+        SetTimer(NLTick, 0)
+        NLTimerOn := false
+        return
+    }
+    NLRender()
+    if (!NLAnimating && !NLDown && !IsObject(NLEditIH) && !IsObject(NLNum)) {
+        SetTimer(NLTick, 0)
+        NLTimerOn := false
+    }
+}
+
+; ---------- mouse ----------
+; The menu reads the mouse directly (cursor position + button state) every ~16ms while it is visible instead of
+; waiting for window messages: while the game has the mouse captured, Windows does not send mouse messages to
+; other windows, but the physical state can always be read. Dragging the window is handled here too.
+NLInputTick()
+{
+    global NLShown, NLGui, NLHwnd, NLW, NLH, NLMx, NLMy, NLDown, NLActive, NLDragSlider, NLHoverId, NLLastBtn, NLWinDrag, NLEdge, NLResizing, NLDragVert, MenuTouchAt
+    if (!NLShown) {
+        SetTimer(NLInputTick, 0)
+        NLEditsStop()
+        return
+    }
+    if ((IsObject(NLEditIH) || IsObject(NLNum)) && WinActive(GAME_EXE))
+        NLEditsStop()                                ; the game has the focus again: nothing may be typed into the menu any more
+    pt := Buffer(8, 0)
+    DllCall("GetCursorPos", "Ptr", pt)
+    sx := NumGet(pt, 0, "Int"), sy := NumGet(pt, 4, "Int")
+    NLGui.GetPos(&wx, &wy)
+    x := sx - wx, y := sy - wy
+    geom := (x >= 0 && y >= 0 && x < NLW && y < NLH)
+    inside := (geom && DllCall("WindowFromPoint", "Int64", (sx & 0xFFFFFFFF) | (sy << 32), "Ptr") = NLHwnd)
+    btn := (DllCall("GetAsyncKeyState", "Int", 0x01, "Short") & 0x8000) ? true : false
+
+    ; hover
+    NLEdge := IsObject(NLResizing) ? NLResizing.edge : (geom ? NLEdgeAt(x, y) : 0)
+    if (NLEdge)
+        NLSetResizeCursor()      ; set every tick so the corner pixels (see-through) still show the resize cursor
+    nid := ""
+    if (inside && !NLEdge) {
+        h := NLHitAt(x, y)
+        nid := IsObject(h) ? h.id : ""
+    }
+    if (nid != NLHoverId) {
+        NLHoverId := nid
+        NLRequest()
+    }
+    if (inside && (x != NLMx || y != NLMy || btn || NLLastBtn))
+        MenuTouchAt := A_TickCount
+    NLMx := x, NLMy := y
+
+    if (btn && !NLLastBtn) {                       ; pressed
+        if (IsObject(NLEditIH) || IsObject(NLNum)) {
+            hh := (inside && !NLEdge) ? NLHitAt(x, y) : 0
+            NLEditsStop(IsObject(hh) ? hh.id : "")
+        }
+        if (inside || NLEdge) {
+            NLDown := true
+            h := NLEdge ? 0 : NLHitAt(x, y)
+            if (IsObject(h) && SubStr(h.id, 1, 4) = "tip:")
+                h := 0
+            if (NLEdge) {
+                NLActive := 0
+                NLResizing := {edge: NLEdge, sx: sx, sy: sy, wx: wx, wy: wy, w: NLW, h: NLH}
+            } else if (!IsObject(h)) {
+                NLActive := 0
+                NLWinDrag := {ox: sx - wx, oy: sy - wy}
+            } else if (Type(h.fn) = "String" && h.fn = "slider") {
+                NLActive := h
+                NLDragSlider := h.data
+                NLSliderDrag(x)
+            } else if (Type(h.fn) = "String" && h.fn = "vscroll") {
+                NLActive := h
+                NLDragVert := h.data
+                NLVertDrag(y)
+            } else {
+                NLActive := h
+            }
+            NLRequest()
+        }
+    } else if (!btn && NLLastBtn) {                ; released
+        if (IsObject(NLDragSlider)) {
+            NLDragSlider := 0
+        } else if (IsObject(NLDragVert)) {
+            NLDragVert := 0
+        } else if (IsObject(NLActive)) {
+            h := inside ? NLHitAt(x, y) : 0
+            if (IsObject(h) && h.id = NLActive.id && IsObject(h.fn))
+                SetTimer(NLRunHit.Bind(h.fn), -1)
+        }
+        NLActive := 0
+        NLWinDrag := 0
+        NLResizing := 0
+        NLDown := false
+        NLRequest()
+    } else if (btn) {                              ; held
+        if (IsObject(NLDragSlider)) {
+            NLSliderDrag(x)
+            NLRequest()
+        } else if (IsObject(NLDragVert)) {
+            NLVertDrag(y)
+            NLRequest()
+        } else if (IsObject(NLResizing)) {
+            NLDoResize(sx, sy)
+        } else if (IsObject(NLWinDrag)) {
+            NLGui.Move(sx - NLWinDrag.ox, sy - NLWinDrag.oy)
+        }
+    }
+    NLLastBtn := btn
+}
+
+; Click the number next to a slider and type a value; Enter applies it (clamped to the slider range), ESC cancels.
+Global NLNum := 0, NLDragVert := 0
+
+NLNumStart(id, minv, maxv, setter, *)
+{
+    global NLNum
+    if (IsObject(NLNum)) {
+        if (NLNum.id = id)
+            return
+        old := NLNum.ih
+        NLNum := 0
+        old.Stop()
+    }
+    ih := InputHook("V L30", "{Enter}{Esc}")
+    ih.OnChar := NLNumChar
+    ih.OnKeyDown := NLNumKey
+    ih.KeyOpt("{Backspace}", "N")
+    ih.OnEnd := NLNumEnd
+    NLNum := {id: id, min: minv, max: maxv, setter: setter, buf: "", ih: ih}
+    ih.Start()
+    NLRequest()
+}
+
+NLNumChar(ih, ch)
+{
+    global NLNum
+    if (IsObject(NLNum) && NLNum.ih = ih && ch >= "0" && ch <= "9" && StrLen(NLNum.buf) < 4)
+        NLNum.buf .= ch
+    NLRequest()
+}
+
+NLNumKey(ih, vk, sc)
+{
+    global NLNum
+    if (vk = 8 && IsObject(NLNum) && NLNum.ih = ih)
+        NLNum.buf := SubStr(NLNum.buf, 1, -1)
+    NLRequest()
+}
+
+NLNumEnd(ih)
+{
+    global NLNum
+    n := NLNum
+    if (!IsObject(n) || n.ih != ih)
+        return
+    NLNum := 0
+    if (IsObject(n) && ih.EndKey != "Escape" && n.buf != "")
+        n.setter.Call(Max(n.min, Min(n.max, Integer(n.buf))))
+    NLRequest()
+}
+
+; ---------- resizing (any edge or corner) ----------
+NLEdgeAt(x, y)
+{
+    global NLW, NLH
+    m := 10, c := 20          ; edges are 10px wide, corners get a generous 20x20 grab area
+    nl := x < c, nr := x >= NLW - c, nt := y < c, nb := y >= NLH - c
+    if ((nl || nr) && (nt || nb))
+        return (nl ? 1 : 0) | (nr ? 2 : 0) | (nt ? 4 : 0) | (nb ? 8 : 0)
+    return (x < m ? 1 : 0) | (x >= NLW - m ? 2 : 0) | (y < m ? 4 : 0) | (y >= NLH - m ? 8 : 0)
+}
+
+NLDoResize(sx, sy)
+{
+    global NLResizing, NLW, NLH, NLGui, NLG, NLMinW, NLMinH, NLMaxW, NLMaxH
+    r := NLResizing
+    dx := sx - r.sx, dy := sy - r.sy
+    nw := r.w, nh := r.h, nx := r.wx, ny := r.wy
+    if (r.edge & 2)
+        nw := r.w + dx
+    else if (r.edge & 1)
+        nw := r.w - dx
+    if (r.edge & 8)
+        nh := r.h + dy
+    else if (r.edge & 4)
+        nh := r.h - dy
+    nw := Max(NLMinW, Min(NLMaxW, nw))
+    nh := Max(NLMinH, Min(NLMaxH, nh))
+    if (r.edge & 1)
+        nx := r.wx + r.w - nw
+    if (r.edge & 4)
+        ny := r.wy + r.h - nh
+    if (nw = NLW && nh = NLH)
+        return
+    NLW := nw, NLH := nh
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+    NLGui.Move(nx, ny, nw, nh)
+    NLRender()
+}
+
+NLSetResizeCursor()
+{
+    global NLEdge
+    id := (NLEdge = 5 || NLEdge = 10) ? 32642 : (NLEdge = 6 || NLEdge = 9) ? 32643 : (NLEdge & 3) ? 32644 : 32645
+    DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", id, "Ptr"))
+}
+
+NLOnSetCursor(wParam, lParam, msg, hwnd)
+{
+    global NLHwnd, NLEdge
+    if (hwnd != NLHwnd || !NLEdge)
+        return
+    NLSetResizeCursor()
+    return 1
+}
+OnMessage(0x0020, NLOnSetCursor)
+
+NLBoxW() => Floor((NLW - (NLStyle = "fat" ? 36 : 207)) / 2)
+
+; Runs a menu click; anything that calls ShowStatus meanwhile is allowed to show a card.
+Global SPMenuAction := false, SPQuiet := false
+
+NLRunHit(fn, *)
+{
+    global SPMenuAction
+    SPMenuAction := true
+    try fn.Call()
+    SPMenuAction := false
+}
+
+SPPairVals()
+{
+    arr := []
+    for pair in CheckPairs()
+        arr.Push(pair[2] ? 1 : 0)
+    return arr
+}
+
+; Toggle clicked in the menu: run it, then say what actually changed.
+SPToggleAct(fn, label, was, generic, *)
+{
+    global SPMenuAction
+    before := SPPairVals()
+    SPMenuAction := false
+    fn.Call()
+    after := SPPairVals()
+    changed := 0
+    for i, v in after {
+        if (v != before[i]) {
+            changed := i
+            break
+        }
+    }
+    if (changed)
+        SPToast(label ": " (after[changed] ? "ON" : "OFF"), 1000 + changed)
+    else if (generic)
+        SPToast(label ": " (was ? "OFF" : "ON"), 2000 + StrLen(label))
+}
+
+; Dragging a scrollbar: the thumb follows the mouse (clicking the track jumps there).
+NLVertDrag(y)
+{
+    global NLDragVert, SPScroll, SPScrollT, SPNavScroll, SPNavScrollT
+    d := NLDragVert
+    frac := Max(0.0, Min(1.0, (y - d.top - d.thumbH / 2) / Max(1, d.trackH - d.thumbH)))
+    v := frac * d.max
+    if (d.kind = "page")
+        SPScrollT := v, SPScroll := v
+    else
+        SPNavScrollT := v, SPNavScroll := v
+}
+
+NLSliderDrag(x)
+{
+    global NLDragSlider, NLAnim
+    d := NLDragSlider
+    pos := Max(0, Min(1, (x - d.tx) / d.tw))
+    v := Round(d.min + pos * (d.max - d.min))
+    if (v != d.last) {
+        d.last := v
+        NLRequest()
+        d.setter.Call(v)
+    }
+}
+
+; ---------- widgets (immediate style: draw + register a hit region) ----------
+NLGroup(title, x, y, w, h)
+{
+    global NLCx, NLCy, NLCw, NLFontUI, NLStyle
+    if (NLStyle = "fat") {
+        NLRR(x, y + 9, w, h - 9, 0, NLFatBox())
+        NLRRLine(x, y + 9, w, h - 9, 1, NLFatEdge())
+        lw := NLTextW(title, NLFontUI)
+        NLRR(x + 8, y + 2, lw + 10, 15, 0, NLFatBox())
+        NLText(title, x + 13, y + 2, NLWhite(), NLFontUI, lw + 4, 15, 0, 1)
+        NLCx := x + 12, NLCy := y + 31, NLCw := w - 24
+        return
+    }
+    NLText(title, x + 12, y, NLWhite(128), NLFontUI)
+    NLRR(x, y + 20, w, h - 20, 6, NLGroupBg())
+    NLRRLine(x, y + 20, w, h - 20, 6, NLBorder())
+    NLCx := x + 12, NLCy := y + 31, NLCw := w - 24
+}
+
+NLToggleRow(id, label, on, fn)
+{
+    global NLCx, NLCy, NLCw, NLFontUI, NLStyle
+    x := NLCx, y := NLCy, w := NLCw
+    t := NLLerp(id, on ? 1 : 0, 0.08)
+    NLText(label, x, y, NLC(Round(130 + 125 * t), Round(133 + 122 * t), Round(143 + 112 * t)), NLFontUI, w - 40, 17, 0, 1)
+    if (NLStyle = "fat") {
+        fx := x + w - 13
+        hv := NLLerp(id "f", (NLHoverId = id) ? 1 : 0, 0.3)
+        NLRR(fx, y + 3, 11, 11, 0, NLC(25, 21, 63))
+        NLRR(fx, y + 3, 11, 11, 0, NLAccent(Round(255 * t)))
+        NLRRLine(fx, y + 3, 11, 11, 1, NLC(Round(70 + 165 * Max(hv, t)), Round(63 - 58 * Max(hv, t)), Round(106 - 16 * Max(hv, t))))
+        NLAddHit(id, x, y - 3, w, 22, SPToggleAct.Bind(fn, label, on, true))
+        NLCy += 26
+        return
+    }
+    fx := x + w - 30
+    NLRR(fx, y, 30, 17, 8.5, NLFrameIn())
+    NLRR(fx, y, 30, 17, 8.5, NLFrameAct(Round(255 * t)))
+    NLRRLine(fx, y, 30, 17, 8.5, NLBorder())
+    NLDisc(fx + 8.5 + 13 * t, y + 8.5, 6.5, NLKnobCol(t))
+    NLAddHit(id, x, y - 3, w, 22, SPToggleAct.Bind(fn, label, on, true))
+    NLCy += 26
+}
+
+NLSliderRow(id, label, minv, maxv, val, setter)
+{
+    global NLCx, NLCy, NLCw, NLFontUI, NLFontSm, NLNum, NLDragSlider, NLStyle
+    x := NLCx, y := NLCy, w := NLCw
+    dragging := IsObject(NLDragSlider) && NLDragSlider.id = id
+    if (dragging)
+        val := NLDragSlider.last
+    t := NLLerp(id, (Max(minv, Min(maxv, val)) - minv) / (maxv - minv), dragging ? 0.3 : 0.125)
+    NLText(label, x, y, NLDim(), NLFontUI, 92, 17, 0, 1)
+    tx := x + w - 118, tw := 74
+    if (NLStyle = "fat") {
+        hv := NLLerp(id "f", (NLHoverId = id || dragging) ? 1 : 0, 0.3)
+        NLRR(tx, y + 3, tw, 10, 0, NLC(0, 0, 0, 50))
+        NLRR(tx, y + 3, Max(1, tw * t), 10, 0, NLAccent())
+        NLRRLine(tx, y + 3, tw, 10, 1, NLC(Round(70 + 165 * hv), Round(63 - 58 * hv), Round(106 - 16 * hv)))
+        typing := IsObject(NLNum) && NLNum.id = id
+        nx := x + w - 36
+        NLText(typing ? NLNum.buf . (Mod(A_TickCount // 500, 2) = 0 ? "|" : "") : String(val), nx, y, typing ? NLAccent() : NLWhite(), NLFontSm, 36, 17, 2, 1)
+        NLAddHit(id "n", nx - 2, y - 3, 40, 22, NLNumStart.Bind(id, minv, maxv, setter))
+        NLAddHit(id, tx - 6, y - 3, tw + 14, 22, "slider", {id: id, min: minv, max: maxv, tx: tx, tw: tw, setter: setter, last: val})
+        NLCy += 26
+        return
+    }
+    NLRR(tx, y + 6, tw, 4, 2, NLFrameAct())
+    NLRR(tx, y + 6, Max(2, tw * t), 4, 2, NLAccent())
+    NLDisc(tx + tw * t - 2, y + 8, 6, NLAccent())
+    nx := x + w - 36
+    NLRR(nx, y, 36, 17, 4, NLFrameIn())
+    NLRRLine(nx, y, 36, 17, 4, NLBorder())
+    typing := IsObject(NLNum) && NLNum.id = id
+    if (typing)
+        NLRRLine(nx, y, 36, 17, 4, NLAccent(200))
+    NLText(typing ? NLNum.buf . (Mod(A_TickCount // 500, 2) = 0 ? "|" : "") : String(val), nx, y, NLWhite(), NLFontSm, 36, 17, 1, 1)
+    NLAddHit(id "n", nx - 2, y - 3, 40, 22, NLNumStart.Bind(id, minv, maxv, setter))
+    NLAddHit(id, tx - 6, y - 3, tw + 14, 22, "slider", {id: id, min: minv, max: maxv, tx: tx, tw: tw, setter: setter, last: val})
+    NLCy += 26
+}
+
+NLKeyRow(id, label, key, btnCtrl, starter)
+{
+    global NLCx, NLCy, NLCw, NLFontUI, NLFontSm, NLHoverId
+    x := NLCx, y := NLCy, w := NLCw
+    listening := InStr(btnCtrl.Text, "Press") ? true : false
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.2)
+    NLText(label, x, y, NLDim(), NLFontUI, w - 104, 20, 0, 1)
+    bx := x + w - 96
+    NLRR(bx, y, 96, 20, 4, listening ? NLFrameAct() : NLBtnCol(hv))
+    NLRRLine(bx, y, 96, 20, 4, listening ? NLAccent(150) : NLBorder())
+    NLText(listening ? "press a key" : (key = "" ? "NONE" : StrUpper(KeyNameCore(key))), bx, y, listening ? NLAccent() : NLWhite(), NLFontSm, 96, 20, 1, 1)
+    NLAddHit(id, bx - 4, y - 2, 104, 24, starter)
+    NLCy += 28
+}
+
+NLValueRow(id, label, text, fn)
+{
+    global NLCx, NLCy, NLCw, NLFontUI, NLFontSm, NLHoverId
+    x := NLCx, y := NLCy, w := NLCw
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.2)
+    NLText(label, x, y, NLDim(), NLFontUI, 80, 20, 0, 1)
+    bx := x + 70, bw := w - 70
+    NLRR(bx, y, bw, 20, 4, NLBtnCol(hv))
+    NLRRLine(bx, y, bw, 20, 4, NLBorder())
+    NLText(text, bx + 8, y, NLWhite(), NLFontSm, bw - 16, 20, 0, 1)
+    NLAddHit(id, bx, y - 2, bw, 24, fn)
+    NLCy += 28
+}
+
+NLSelRow(id, label, text, prevFn, nextFn)
+{
+    global NLCx, NLCy, NLCw, NLFontUI, NLFontSm, NLHoverId
+    x := NLCx, y := NLCy, w := NLCw
+    NLText(label, x, y, NLDim(), NLFontUI, 80, 20, 0, 1)
+    bx := x + 70, bw := w - 70
+    NLRR(bx, y, bw, 20, 4, NLFrameIn())
+    NLRRLine(bx, y, bw, 20, 4, NLBorder())
+    hl := NLLerp(id "L", (NLHoverId = id "L") ? 1 : 0, 0.2)
+    hr := NLLerp(id "R", (NLHoverId = id "R") ? 1 : 0, 0.2)
+    NLText(Chr(0x2039), bx, y, NLC(130 + Round(125 * hl), 133 + Round(122 * hl), 143 + Round(112 * hl)), NLFontIcon, 22, 20, 1, 1)
+    NLText(Chr(0x203A), bx + bw - 22, y, NLC(130 + Round(125 * hr), 133 + Round(122 * hr), 143 + Round(112 * hr)), NLFontIcon, 22, 20, 1, 1)
+    NLText(text = "" ? "none yet" : text, bx + 22, y, text = "" ? NLDim() : NLWhite(), NLFontSm, bw - 44, 20, 1, 1)
+    NLAddHit(id "L", bx, y - 2, 26, 24, prevFn)
+    NLAddHit(id "R", bx + bw - 26, y - 2, 26, 24, nextFn)
+    NLCy += 28
+}
+
+NLSwatchRow(id, label, hex, fn)
+{
+    global NLCx, NLCy, NLCw, NLFontUI
+    x := NLCx, y := NLCy, w := NLCw
+    NLText(label, x, y, NLDim(), NLFontUI, w - 50, 17, 0, 1)
+    NLRR(x + w - 40, y, 40, 17, 4, NLHexCol(hex))
+    NLRRLine(x + w - 40, y, 40, 17, 4, NLC(255, 255, 255, 40))
+    NLAddHit(id, x + w - 44, y - 3, 48, 23, fn)
+    NLCy += 26
+}
+
+NLButton(id, x, y, w, h, text, fn)
+{
+    global NLFontSm, NLHoverId, NLActive, NLDown
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.2)
+    pressed := (NLDown && IsObject(NLActive) && NLActive.id = id) ? 1 : 0
+    NLRR(x, y, w, h, 4, NLC(Round(8 + 7 * hv + 8 * pressed), Round(9 + 7 * hv + 8 * pressed), Round(15 + 8 * hv + 8 * pressed)))
+    NLRRLine(x, y, w, h, 4, NLBorder())
+    NLText(text, x, y, (NLHoverId = id) ? NLWhite() : NLDim(), NLFontSm, w, h, 1, 1)
+    NLAddHit(id, x, y, w, h, fn)
+}
+
+NLButtonRow(id, text, fn)
+{
+    global NLCx, NLCy, NLCw
+    NLButton(id, NLCx, NLCy, NLCw, 24, text, fn)
+    NLCy += 32
+}
+
+NLPara(text, x, y, w, h, argb)
+{
+    global NLFontSm
+    NLText(text, x, y, argb, NLFontSm, w, h, 0, 0, true)
+}
+
+; step through the items of one of the selector classes (SPDD-style objects)
+NLSelStep(sel, dir, *)
+{
+    n := sel.items.Length
+    sel.Choose(Mod(sel.Value - 1 + dir + n, n) + 1)
+    NLRequest()
+}
+
+NLSelRowS(id, label, sel)
+{
+    NLSelRow(id, label, sel.Text, NLSelStep.Bind(sel, -1), NLSelStep.Bind(sel, 1))
+}
+
+NLStatRow(label, text, frac, col)
+{
+    global NLCx, NLCy, NLCw, NLFontUI, NLFontSm
+    x := NLCx, y := NLCy, w := NLCw
+    NLText(label, x, y, NLDim(), NLFontUI, w - 110, 17, 0, 1)
+    NLText(text, x + w - 110, y, NLWhite(), NLFontSm, 110, 17, 1, 1)
+    NLRR(x, y + 21, w, 4, 2, NLFrameAct())
+    if (col)
+        NLRR(x, y + 21, Max(2, w * Max(0, Min(1, frac))), 4, 2, col)
+    else
+        SPGradBarFill(x, y + 21, w, 4, 2, Max(2, w * Max(0, Min(1, frac))), PHStyle.grad ? PHStyle.grad : 1)
+    NLCy += 34
+}
+
+NLDDLStep(ddl, dir, *)
+{
+    n := ControlGetItems(ddl).Length
+    if (n = 0)
+        return
+    v := ddl.Value + dir
+    if (v < 1)
+        v := n
+    if (v > n)
+        v := 1
+    ddl.Choose(v)
+}
+
+NLHudPosStep(dir, *)
+{
+    global HudPosDDL
+    NLDDLStep(HudPosDDL, dir)
+    UpdateHudPosition()
+}
+
+NLGoTab(n, *)
+{
+    global CurrentTab, NLPageAnim, NLSubTab, SPScroll, SPScrollT
+    if (CurrentTab = n)
+        return
+    CurrentTab := n
+    NLPageAnim := 0.0
+    NLSubTab := 1
+    SPScroll := 0.0, SPScrollT := 0.0
+    NLRequest()
+}
+
+NLSetSub(n, *)
+{
+    global NLSubTab, NLPageAnim, SPScroll, SPScrollT
+    if (NLSubTab = n)
+        return
+    NLSubTab := n
+    NLPageAnim := 0.0
+    SPScroll := 0.0, SPScrollT := 0.0
+    NLRequest()
+}
+
+; Rename the config right in the menu: type to edit, Enter keeps it, Esc cancels.
+Global NLEditIH := 0, NLEditOld := ""
+
+NLRename(*)
+{
+    global NLEditIH, NLEditOld, SaveNameInput
+    if (IsObject(NLEditIH))
+        return
+    NLEditOld := SaveNameInput.Value
+    NLEditIH := InputHook("V L40", "{Enter}{Esc}")
+    NLEditIH.OnChar := NLEditChar
+    NLEditIH.OnKeyDown := NLEditKey
+    NLEditIH.KeyOpt("{Backspace}", "N")
+    NLEditIH.OnEnd := NLEditEnd
+    NLEditIH.Start()
+    NLRequest()
+}
+
+; Ends any typing in the menu (the config name, a typed slider value): the text stays as it is, but the keys go to the game again.
+; exceptId = the hit that was just clicked (clicking the field you are typing in keeps it going).
+NLEditsStop(exceptId := "")
+{
+    global NLEditIH, NLNum
+    if (IsObject(NLEditIH) && exceptId != "v_name")
+        try NLEditIH.Stop()
+    if (IsObject(NLNum) && exceptId != NLNum.id "n")
+        try NLNum.ih.Stop()
+}
+
+NLEditChar(ih, ch)
+{
+    global SaveNameInput
+    if (ch = "\" || ch = "/" || ch = ":" || ch = "*" || ch = "?" || ch = '"' || ch = "<" || ch = ">" || ch = "|")
+        return
+    SaveNameInput.Value .= ch
+    NLRequest()
+}
+
+NLEditKey(ih, vk, sc)
+{
+    global SaveNameInput
+    if (vk = 8)
+        SaveNameInput.Value := SubStr(SaveNameInput.Value, 1, -1)
+    NLRequest()
+}
+
+NLEditEnd(ih)
+{
+    global NLEditIH, NLEditOld, SaveNameInput
+    if (ih.EndKey = "Escape" || Trim(SaveNameInput.Value) = "")
+        SaveNameInput.Value := NLEditOld
+    else
+        SaveNameInput.Value := Trim(SaveNameInput.Value)
+    NLEditIH := 0
+    NLRequest()
+}
+
+NLQuit(*)
+{
+    ExitWithAnimation()
+}
+
+; every HUD that is showing fades out (used when the script closes or reloads)
+FadeAwayAll()
+{
+    global CompOn, VigPillOff, PHudOn, WH
+    VigPillOff := true
+    CompOn := false
+    PHudOn := false
+    try HudHide()
+    try PHudHide()
+    for id, wd in WH {
+        wd.on := false
+        try WHudHideOne(wd)
+    }
+}
+
+Global ExitAnimBusy := false, ExitGui := "", ExitDC := 0, ExitBmp := 0, ExitG := 0, ExitCardText := "Closing M0MENT4M"
+ExitWithAnimation(*)
+{
+    global ExitAnimBusy
+    if (ExitAnimBusy)
+        return
+    ExitAnimBusy := true
+    FadeAwayAll()
+    try CompHide()
+    SetTimer(FadeTick, 0)
+    SetTimer(ExitApp, -2200)                          ; (safety: it quits even if something in the animation goes wrong)
+    try ExitCardShow()
+    SetTimer(ExitAnimTick, 15)
+    ExitAnimTick(true)
+}
+
+; a small card in the middle of the screen: "Closing M0MENT4M" with moving dots and a filling bar
+ExitCardShow()
+{
+    global ExitGui, ExitDC, ExitBmp, ExitG
+    NLGdipInit()
+    ExitGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M closing")
+    VigMakeSurface(300, 72, &ExitDC, &ExitBmp, &ExitG)
+    ExitCardRender(0.0)
+    ExitGui.Show("x" ((A_ScreenWidth - 300) // 2) " y" ((A_ScreenHeight - 72) // 2) " w300 h72 NA")
+}
+
+ExitCardRender(t)
+{
+    global ExitGui, ExitDC, ExitG, NLG, NLAlphaPage, NLFontB, NLFontSm, ExitCardText
+    if (!IsObject(ExitGui))
+        return
+    pc := A_IsCritical
+    Critical
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := ExitG
+    ; fades in during the first fifth, out during the last sixth
+    a := Min(1.0, t * 5)
+    if (t > 0.84)
+        a := Max(0.0, 1 - (t - 0.84) / 0.16)
+    NLAlphaPage := a
+    k := 0.9 + 0.1 * Min(1.0, t * 5)                   ; and grows a little while it appears
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", ExitG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", ExitG, "UInt", 0)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", ExitG, "Float", 150, "Float", 36, "Int", 0)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", ExitG, "Float", k, "Float", k, "Int", 0)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", ExitG, "Float", -150, "Float", -36, "Int", 0)
+    NLRR(6, 10, 288, 58, 20, NLC(0, 0, 0, 70))
+    NLRR(6, 6, 288, 58, 19, SPCol("Card"))
+    SPGradBorder(7, 7, 286, 56, 18, SPLogoStops(2), A_TickCount / 1000 * 0.5, 2)
+    dots := SubStr("...", 1, Mod(Floor(t * 10), 3) + 1)
+    NLText(ExitCardText dots, 24, 13, SPCol("Text"), NLFontB, 250, 24, 0, 1)
+    e := 1 - (1 - Min(1.0, t * 1.08)) ** 2
+    NLRR(24, 45, 252, 6, 3, SPCol("Track"))
+    if (e > 0.01)
+        SPGradBarFill(24, 45, 252, 6, 3, Max(6, 252 * e), 2)
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", ExitG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    sz := Buffer(8, 0)
+    NumPut("Int", 300, sz, 0)
+    NumPut("Int", 72, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", ExitGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", ExitDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+    Critical(pc ? "On" : "Off")
+}
+
+ExitAnimTick(first := false)
+{
+    static t0 := 0
+    global NLWinK, NLWinDy, NLAlphaWin, MainGui, LayoutMode
+    if (first = true)
+        t0 := A_TickCount
+    el := A_TickCount - t0
+    t := Min(1.0, el / 520)
+    e := t * t * (3 - 2 * t)                          ; smooth in and out
+    if (LayoutMode = "nl") {
+        NLWinK := 1 - 0.5 * e                         ; shrinks into the centre ...
+        NLWinDy := -26 * e                            ; ... drifting up a little ...
+        NLAlphaWin := Round(255 * (1 - t) ** 1.5)     ; ... and fading away
+        NLRequest()
+    } else {
+        try WinSetTransparent(Round(255 * (1 - t) ** 1.5), MainGui)
+    }
+    tc := Min(1.0, el / 1050)
+    try ExitCardRender(tc)
+    if (tc >= 1) {
+        SetTimer(ExitAnimTick, 0)
+        ExitApp()
+    }
+}
+
+; value setters used by the sliders
+NLSetTurn(v) {
+    global SlideTurnSlider
+    SlideTurnSlider.Value := v
+    UpdateSlideTurn()
+}
+NLSetCSpam(v) {
+    global CSpamSlider
+    CSpamSlider.Value := v
+    UpdateCSpamSpeed()
+}
+NLSetClick(v) {
+    global ClickSlider
+    ClickSlider.Value := v
+    UpdateClickSpeed()
+}
+NLSetBurstGap(v) {
+    global LagBurstGap
+    LagBurstGap := Max(20, Min(1000, Integer(v)))
+}
+NLSetBurst(v) {
+    global LagBurstSlider
+    LagBurstSlider.Value := v
+    UpdateLagBurstCount()
+}
+NLSetThick(v) {
+    global VignetteThicknessSlider
+    VignetteThicknessSlider.Value := v
+    UpdateVignetteThickness()
+}
+NLSetOpacity(v) {
+    global HudOpacitySlider
+    HudOpacitySlider.Value := v
+    UpdateHudOpacity()
+}
+NLSetFreeze(v) {
+    global FreezeDuration, FreezeEdit
+    FreezeDuration := v
+    FreezeEdit.Value := v
+}
+
+; ---------- rendering ----------
+NLRender()
+{
+    global NLG, NLW, NLH, NLAnimating, NLHits, NLHitsB, NLPageAnim, NLAlphaPage, CurrentTab, NLSubTab
+    global NLFontUI, NLFontSm, NLFontTitle, NLFontIcon, NLHoverId, NLStyle, SPDD, SPCust
+    if (NLStyle = "sp") {
+        SPRender()
+        return
+    }
+    NLAnimating := false
+    NLHitsB := []
+    NLAlphaPage := 1.0
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", NLG, "UInt", 0)
+    NLWinXf()
+
+    ; page fade / slide-in (restarts on every tab change)
+    NLPageAnim += (1.0 - NLPageAnim) * 0.045
+    if (NLPageAnim > 0.995)
+        NLPageAnim := 1.0
+    else
+        NLAnimating := true
+
+    if (NLStyle = "fat") {
+        NLRenderFat()
+        return
+    }
+    ; window
+    wc := SPCust.Has("panel") ? SPHexArr(SPCust["panel"]) : [9, 12, 21]
+    NLRR(0, 0, NLW, NLH, 10, NLC(wc[1], wc[2], wc[3], 238))
+    NLRRLine(0, 0, NLW, NLH, 10, NLC(255, 255, 255, 14))
+
+    ; title
+    tw := NLTextW("M0MENT4M", NLFontTitle)
+    NLText("M0MENT4M", 85 - tw / 2 + 1, 18, NLAccent(), NLFontTitle)
+    NLText("M0MENT4M", 85 - tw / 2, 18, NLWhite(), NLFontTitle)
+
+    ; sidebar
+    y := 70
+    NLText("MOVEMENT", 20, y, NLWhite(128), NLFontSm)
+    y += 18
+    NLSideTab(1, Chr(0x26A1), "Macros", y), y += 34
+    NLSideTab(2, Chr(0x2328), "Keybinds", y), y += 34
+    y += 12
+    NLText("UTILITY", 20, y, NLWhite(128), NLFontSm)
+    y += 18
+    NLSideTab(3, Chr(0x231B), "Lagswitch", y), y += 34
+    y += 12
+    NLText("SYSTEM", 20, y, NLWhite(128), NLFontSm)
+    y += 18
+    NLSideTab(4, Chr(0x2699), "Misc", y), y += 34
+    NLSideTab(8, Chr(0x2328), "System keys", y), y += 34
+    NLSideTab(5, Chr(0x2139), "Info", y), y += 34
+    NLSideTab(6, Chr(0x1F4BE), "Config", y), y += 34
+    NLSideTab(7, Chr(0x25D4), "Performance", y)
+
+    ; config block (bottom left)
+    NLLine(0, NLH - 50, 170, NLH - 50, NLC(255, 255, 255, 14))
+    NLDisc(30, NLH - 25, 15, NLFrameAct())
+    NLDisc(30, NLH - 29, 5, NLAccent())
+    NLRR(20, NLH - 21, 20, 8, 4, NLAccent())
+    NLText(A_UserName, 50, NLH - 41, NLWhite(), NLFontUI, 115, 32, 0, 1)
+
+    ; top bar
+    if (CurrentTab = 4 || CurrentTab = 3 || CurrentTab = 7) {
+        names := (CurrentTab = 3) ? ["Lagswitch", "Freeze effect", "Pill"] : (CurrentTab = 7) ? ["Overview", "HUD styles"] : ["Colors", "Overlay"]
+        NLRR(300, 20, 80 * names.Length, 25, 4, NLC(8, 9, 15))
+        NLRRLine(300, 20, 80 * names.Length, 25, 4, NLBorder())
+        for i, nm in names {
+            sx := 300 + (i - 1) * 80
+            st := NLLerp("sub" i, (NLSubTab = i) ? 1 : 0, 0.05)
+            NLRR(sx + 1, 21, 78, 23, 3, NLFrameAct(Round(205 * st)))
+            NLText(nm, sx, 20, (NLSubTab = i) ? NLWhite() : NLDim(), NLFontSm, 80, 25, 1, 1)
+            NLAddHit("sub" i, sx, 20, 80, 25, NLSetSub.Bind(i))
+        }
+    }
+    ; minimise / close
+    mh := NLLerp("min", (NLHoverId = "min") ? 1 : 0, 0.2)
+    ch := NLLerp("close", (NLHoverId = "close") ? 1 : 0, 0.2)
+    NLText(Chr(0x2013), NLW - 64, 14, NLC(130 + Round(125 * mh), 133 + Round(122 * mh), 143 + Round(112 * mh)), NLFontUI, 22, 22, 1, 1)
+    NLText(Chr(0x2715), NLW - 36, 14, NLC(130 + Round(125 * ch), 133 - Round(60 * ch), 143 - Round(70 * ch)), NLFontSm, 22, 22, 1, 1)
+    NLAddHit("min", NLW - 64, 14, 22, 22, MinimizeApp)
+    NLAddHit("close", NLW - 36, 14, 22, 22, NLQuit)
+
+    ; page content: fades in and slides up 5px
+    NLAlphaPage := NLPageAnim
+    cx := 185, cy := 81 - 5 * NLPageAnim
+    switch CurrentTab {
+        case 1: NLPageMacro(cx, cy)
+        case 2: NLPageBinds(cx, cy)
+        case 3: NLPageLag(cx, cy)
+        case 4: NLPageMisc(cx, cy)
+        case 5: NLPageInfo(cx, cy)
+        case 6: NLPageConfig(cx, cy)
+        case 7: NLPagePerf(cx, cy)
+        case 8: NLPageSysKeys(cx, cy)
+    }
+    NLAlphaPage := 1.0
+    NLHits := NLHitsB
+    NLPresent()
+}
+
+; ----- the Fatality look: a top bar with a gradient line, a row of tabs, fieldset boxes -----
+NLFatBg(a := 255) => NLC(28, 20, 55, a)
+NLFatBox(a := 255) => NLC(31, 25, 66, a)
+NLFatEdge(a := 255) => NLC(70, 63, 106, a)
+
+; The glitch of the original: pink and violet copies of the text jump around it (0.65 s loop).
+NLFatGlitch(txt, x, y, font, w, h, al, col)
+{
+    static P := [[0, 0], [-1.5, -1.5], [1.5, -1.5], [-1.5, 1.5], [1.5, 1.5]]
+    u := Mod(A_TickCount, 650) / 650 * 4
+    i := Min(3, Floor(u)), f := u - i
+    a0 := P[i + 1], a1 := P[i + 2]
+    dx := a0[1] + (a1[1] - a0[1]) * f, dy := a0[2] + (a1[2] - a0[2]) * f
+    al8 := (i = 0) ? Round(255 * f) : 255
+    NLText(txt, x + dx, y + dy, NLC(235, 5, 90, al8), font, w, h, al, 1)
+    NLText(txt, x - dx, y - dy, NLC(70, 50, 240, al8), font, w, h, al, 1)
+    NLText(txt, x, y, col, font, w, h, al, 1)
+}
+
+NLRenderFat()
+{
+    global NLG, NLW, NLH, NLPageAnim, NLAlphaPage, CurrentTab, NLSubTab, NLFontUI, NLFontSm, NLFontTitle, NLHoverId, AccentColor, NLHits, NLHitsB, NLAnimating
+    NLAnimating := true                                   ; the line pulses and the logo glitches all the time
+    NLRR(0, 0, NLW, NLH, 3, NLFatBg())
+    NLRR(0, 0, NLW, 74, 0, NLC(30, 23, 62))                ; the bar
+    Loop 4
+        NLRR(0, 73 + A_Index, NLW, 1, 0, NLC(0, 0, 0, 40 - A_Index * 9))
+    NLRRLine(0, 0, NLW, NLH, 3, NLFatEdge())
+    ; the line on top: violet -> pink, pulsing between 70 % and 100 % brightness over 5 s
+    br := 0.85 - 0.15 * Cos(Mod(A_TickCount, 5000) / 5000 * 6.28318)
+    segs := 46, sw := NLW / segs
+    Loop segs {
+        f := (A_Index - 1) / (segs - 1)
+        NLRR((A_Index - 1) * sw, 0, sw + 1, 3, 0, NLC(Round((70 + 165 * f) * br), Round((50 - 45 * f) * br), Round((240 - 150 * f) * br)))
+    }
+    ; logo
+    NLFatGlitch("M0MENT4M", 16, 8, NLFontTitle, 160, 30, 0, NLWhite())
+    ; sub tabs (right of the logo)
+    if (CurrentTab = 4 || CurrentTab = 3 || CurrentTab = 7) {
+        names := (CurrentTab = 3) ? ["Lagswitch", "Freeze effect", "Pill"] : (CurrentTab = 7) ? ["Overview", "HUD styles"] : ["Colors", "Overlay"]
+        for i, nm in names {
+            sx := 230 + (i - 1) * 84
+            st := NLLerp("sub" i, (NLSubTab = i) ? 1 : 0, 0.05)
+            NLRR(sx + 14, 30, 56, 2, 0, NLAccent(Round(255 * st)))
+            NLText(nm, sx, 8, (NLSubTab = i) ? NLWhite() : NLC(104, 100, 140), NLFontSm, 84, 24, 1, 1)
+            NLAddHit("sub" i, sx, 8, 84, 26, NLSetSub.Bind(i))
+        }
+    }
+    ; minimise / close
+    mh := NLLerp("min", (NLHoverId = "min") ? 1 : 0, 0.2)
+    ch := NLLerp("close", (NLHoverId = "close") ? 1 : 0, 0.2)
+    NLText(Chr(0x2013), NLW - 64, 9, NLC(104 + Round(150 * mh), 100 + Round(150 * mh), 140 + Round(110 * mh)), NLFontUI, 22, 22, 1, 1)
+    NLText(Chr(0x2715), NLW - 36, 9, NLC(104 + Round(131 * ch), 100 - Round(95 * ch), 140 - Round(50 * ch)), NLFontSm, 22, 22, 1, 1)
+    NLAddHit("min", NLW - 64, 9, 22, 22, MinimizeApp)
+    NLAddHit("close", NLW - 36, 9, 22, 22, NLQuit)
+    ; the tab row: grey caps, white + glitch on hover, the pink line grows from the middle
+    order := [[1, "MACROS"], [2, "KEYBINDS"], [3, "LAGSWITCH"], [4, "MISC"], [8, "SYSTEM KEYS"], [5, "INFO"], [6, "CONFIG"], [7, "PERFORMANCE"]]
+    tw := (NLW - 28) / order.Length
+    for i, o in order {
+        id := "tab" o[1]
+        tx := 14 + (i - 1) * tw
+        cur := (CurrentTab = o[1])
+        hov := (NLHoverId = id)
+        t := NLLerp(id, (cur || hov) ? 1 : 0, 0.28)
+        lw := NLTextW(o[2], NLFontSm) + 14
+        NLRR(tx + tw / 2 - lw * t / 2, 66, lw * t, 2, 0, NLAccent())
+        col := NLC(Round(104 + 151 * t), Round(100 + 155 * t), Round(140 + 115 * t))
+        if (hov && !cur)
+            NLFatGlitch(o[2], tx - 20, 40, NLFontSm, tw + 40, 28, 1, col)
+        else
+            NLText(o[2], tx - 20, 40, col, NLFontSm, tw + 40, 28, 1, 1)
+        NLAddHit(id, tx, 40, tw, 30, NLGoTab.Bind(o[1]))
+    }
+    NLAlphaPage := NLPageAnim
+    cx := 14, cy := 81 - 5 * NLPageAnim
+    switch CurrentTab {
+        case 1: NLPageMacro(cx, cy)
+        case 2: NLPageBinds(cx, cy)
+        case 3: NLPageLag(cx, cy)
+        case 4: NLPageMisc(cx, cy)
+        case 5: NLPageInfo(cx, cy)
+        case 6: NLPageConfig(cx, cy)
+        case 7: NLPagePerf(cx, cy)
+        case 8: NLPageSysKeys(cx, cy)
+    }
+    NLAlphaPage := 1.0
+    NLHits := NLHitsB
+    NLPresent()
+}
+
+NLSideTab(n, icon, label, y)
+{
+    global CurrentTab, NLHoverId, NLFontUI, NLFontIcon
+    id := "tab" n
+    t := NLLerp(id, (CurrentTab = n) ? 1 : 0, 0.05)
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.15)
+    NLRR(10, y, 150, 30, 5, NLFrameAct(Round(128 * t + 55 * hv * (1 - t))))
+    NLText(icon, 17, y, NLAccent(), NLFontIcon, 24, 30, 1, 1)
+    NLText(label, 45, y, NLWhite(), NLFontUI, 110, 30, 0, 1)
+    NLAddHit(id, 10, y, 150, 30, NLGoTab.Bind(n))
+}
+
+; ---------- pages ----------
+NLPageMacro(x, y)
+{
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    NLGroup("Movement", x, y, bw, 160)
+    NLToggleRow("t_slide", "Infinite Slide", IsSlideChecked, ToggleSlideBox)
+    NLToggleRow("t_bhop", "Auto Bunnyhop", IsBhopChecked, ToggleBhopBox)
+    NLToggleRow("t_strafe", "Auto Strafer", IsStrafeChecked, ToggleStrafeBox)
+    NLToggleRow("t_edash", "EDash", IsComboChecked, ToggleComboBox)
+    NLGroup("Utility", x, y + 168, bw, 124 + dh)
+    NLToggleRow("t_cspam", "Crouch Spam", IsCSpamChecked, ToggleCSpamBox)
+    NLToggleRow("t_click", "Auto Clicker", IsClickChecked, ToggleClickBox)
+    NLToggleRow("t_spin", "Spinbot", IsSpinbotChecked, ToggleSpinbotBox)
+    NLGroup("Options", rx, y, bw, 292 + dh)
+    NLToggleRow("t_behind", "Slide turn camera", IsSlideBehindChecked, ToggleSlideBehindBox)
+    NLSliderRow("s_turn", "Turn amount", 200, 4000, SlideTurnAmount, NLSetTurn)
+    NLToggleRow("t_hold", "Bhop hold", IsBhopHoldChecked, ToggleBhopHoldBox)
+    NLToggleRow("t_edstrafe", "E-Dash autostrafer", IsEDashStrafe, ToggleEDashStrafe)
+    NLSliderRow("s_cs", "Crouch speed", 10, 200, CSpamSpeed, NLSetCSpam)
+    NLSliderRow("s_ck", "Clicker speed", 1, 200, ClickSpeed, NLSetClick)
+}
+
+NLPageBinds(x, y)
+{
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    NLGroup("Macro keys", x, y, bw, 270 + dh)
+    NLKeyRow("k_slide", "Slide", TriggerKey, BtnSlideKey, StartBindSlide)
+    NLKeyRow("k_bhop", "Bunnyhop", BhopKey, BtnBhopKey, StartBindBhop)
+    NLKeyRow("k_hold", "Bhop hold", BhopHoldKey, BtnBhopHoldKey, StartBindBhopHold)
+    NLKeyRow("k_strafe", "Strafer", StrafeKey, BtnStrafeKey, StartBindStrafe)
+    NLKeyRow("k_edash", "EDash", ComboKey, BtnComboKey, StartBindCombo)
+    NLKeyRow("k_cspam", "Crouch spam", CSpamKey, BtnCSpamKey, StartBindCSpam)
+    NLKeyRow("k_click", "Auto clicker", ClickKey, BtnClickKey, StartBindClick)
+    NLKeyRow("k_spin", "Spinbot", SpinbotKey, BtnSpinbotKey, StartBindSpinbot)
+    NLGroup("How to bind", rx, y, bw, 120 + dh)
+    NLPara("Click a key box, then press a key or mouse button. ESC clears the bind. A key that another bind already uses is rejected.", NLCx, NLCy, NLCw, 70, NLDim())
+    cf := KeyConflictList()
+    if (cf.Length > 0)
+        NLPara("Warning: " cf[1] " share a key." (cf.Length > 1 ? " (+" (cf.Length - 1) " more)" : ""), NLCx, NLCy + 76, NLCw, 40, NLC(255, 120, 120))
+}
+
+NLPageLag(x, y)
+{
+    global NLSubTab, NLCx, NLCy, NLCw
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    if (NLSubTab = 2) {
+        NLGroup("Freeze effect", x, y, bw, 240 + dh)
+        NLToggleRow("t_lvig", "Screen effect", IsLagVignetteChecked, ToggleLagVignetteBox)
+        NLSelRowS("p_vstyle", "Style", VigStyleSel)
+        NLSelRowS("p_vgrad", "Colour", VigGradSel)
+        NLSwatchRow("c_vig", "Solid colour", VignetteColor, OpenVignetteColorPicker)
+        NLToggleRow("t_vanim", "Animate colours", VigAnim, VigToggleAnim)
+        NLSliderRow("s_vspd", "Anim speed", 1, 10, VigAnimSpd, VigSetSpd)
+        NLSliderRow("s_thick", "Glow size", 2, 30, VignetteThickness, NLSetThick)
+        NLGroup("Look and feel", rx, y, bw, 360 + dh)
+        NLSliderRow("s_vstay", "Stays (ms)", 200, 5000, VigMinShow, VigSetStay)
+        NLSliderRow("s_vint", "Intensity", 10, 100, VigIntensity, VigSetInt)
+        NLSliderRow("s_vtint", "Screen tint", 0, 40, VigTint, VigSetTint)
+        NLToggleRow("t_vsound", "Sound cue", VigSound, VigToggleSound)
+        NLSelRowS("p_vsoundsel", "Sound", VigSoundSel)
+        NLToggleRow("t_bsound", "Sound per tick", BurstSyncSound, ToggleBurstSyncSound)
+        NLSliderRow("s_vvol", "Volume", 0, 100, VigVol, VigSetVol)
+        NLButtonRow("b_vsoundtest", "Play the sound", VigSoundTest)
+        NLButtonRow("b_vprev", "Preview without freezing", VigPreview)
+        return
+    }
+    if (NLSubTab = 3) {
+        NLGroup("Countdown pill", x, y, bw, 300 + dh)
+        NLToggleRow("t_vpill", "Show the pill", VigPillOn, VigTogglePill)
+        NLToggleRow("t_vpillalways", "Keep it on screen", PillAlways, VigTogglePillAlways)
+        NLToggleRow("t_bpill", "Count down per tick", BurstSyncPill, ToggleBurstSyncPill)
+        NLRowsHudStyle(PillStyle, PillBorderSel, PillGradSel, "pl")
+        NLGroup("About the pill", rx, y, bw, 120 + dh)
+        NLPara("The pill counts your freeze time down while the game is frozen. Drag it while the menu is open; with Keep it on screen it stays visible all the time.", NLCx, NLCy, NLCw, 90, NLDim())
+        return
+    }
+    NLGroup("Lagswitch", x, y, bw, 290 + dh)
+    NLKeyRow("k_lag", "Trigger key", LagKey, BtnLagKey, StartBindLag)
+    NLSliderRow("s_freeze", "Freeze (ms)", 1, 1000, FreezeDuration, NLSetFreeze)
+    NLToggleRow("t_lprec", "High precision", IsLagPrecisionChecked, ToggleLagPrecisionBox)
+    NLToggleRow("t_lhold", "Hold to freeze", IsLagHoldChecked, ToggleLagHoldBox)
+    NLButtonRow("b_test", "Test freeze", TestFreeze)
+    NLText(StatusText.Text, NLCx, NLCy, NLDim(), NLFontSm, NLCw, 16)
+    NLPara("Use it in private servers only.", NLCx, NLCy + 22, NLCw, 60, NLDim(150))
+    NLGroup("Effects", rx, y, bw, 136)
+    NLToggleRow("t_lburst", "Tick mode", IsLagBurstChecked, ToggleLagBurstBox)
+    NLSliderRow("s_burst", "Ticks", 1, 20, LagBurstCount, NLSetBurst)
+    NLSliderRow("s_burstgap", "Gap (ms)", 20, 1000, LagBurstGap, NLSetBurstGap)
+    NLGroup("Screen shake", rx, y + 144, bw, 256 + dh)
+    NLToggleRow("t_shake", "Shake while frozen", ShakeOn, ToggleShake)
+    NLSelRowS("p_shakewhere", "On", ShakeWhereSel)
+    NLSelRowS("p_shakestyle", "Style", ShakeStyleSel)
+    NLSliderRow("s_shakeamt", "Strength", 1, 100, ShakeAmt, SetShakeAmt)
+    NLToggleRow("t_shakesync", "Same length as freeze", ShakeSyncLen, ToggleShakeSync)
+    NLSliderRow("s_shakelen", "Min length", 0, 2000, ShakeLen, SetShakeLen)
+    NLButtonRow("b_shaketest", "Try the shake", ShakeTest)
+}
+
+NLPageMisc(x, y)
+{
+    global NLSubTab, ThemeDDL, DesignDDL, HudPosDDL, HudOpacitySlider
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    if (NLSubTab = 1) {
+        NLGroup("Colors", x, y, bw, 200)
+        NLSwatchRow("c_acc", "Accent / text", AccentColor, OpenColorPicker)
+        NLSwatchRow("c_bg", "Text background", BgColor, OpenBgColorPicker)
+        NLSwatchRow("c_icon", "Icon / button", IconBgColor, OpenIconBgColorPicker)
+        NLSwatchRow("c_panel", "Menu background", PanelColor, OpenPanelColorPicker)
+        NLButtonRow("b_resetcol", "Reset colors to this design", ResetDesignColors)
+        NLGroup("Presets", rx, y, bw, 192 + dh)
+        NLSelRow("p_theme", "Theme", ThemeDDL.Text, NLDDLStep.Bind(ThemeDDL, -1), NLDDLStep.Bind(ThemeDDL, 1))
+        NLButtonRow("b_theme", "Apply theme", ApplyThemePreset)
+        NLSelRow("p_design", "Design", DesignDDL.Text, NLDDLStep.Bind(DesignDDL, -1), NLDDLStep.Bind(DesignDDL, 1))
+        NLButtonRow("b_design", "Apply design", ApplyDesignPreset)
+        NLToggleRow("t_follow", "Change colors too", ColorsFollow, ToggleColorsFollow)
+        NLGroup("Menu background", x, y + 208, bw, 192 + dh)
+        NLToggleRow("t_mblur", "Blur the game", MenuBlurOn, ToggleMenuBlur)
+        NLSliderRow("s_mdim", "Darken", 0, 90, MenuBlurDim, SetMenuBlurDim)
+        NLSelRowS("p_mfx", "Effect", MenuFxSel)
+        NLSliderRow("s_mfxamt", "Amount", 10, 100, MenuFxAmt, SetMenuFxAmt)
+    } else if (NLSubTab = 2) {
+        NLGroup("Macro HUD", x, y, bw, 294 + dh)
+        NLToggleRow("t_hud", "Macro HUD", ShowSidebarIndicators, ToggleSidebarIndicators)
+        NLToggleRow("t_stat", "Status popups", ShowStatusNotifs, ToggleStatusNotifs)
+        NLSelRow("p_hudpos", "Position", HudPosDDL.Text, NLHudPosStep.Bind(-1), NLHudPosStep.Bind(1))
+        NLSelRowS("p_hudstyle", "Style", HudStyleSel)
+        NLSelRowS("p_hudborder", "Border", HudBorderSel)
+        NLSelRowS("p_hudgrad", "Gradient", HudGradSel)
+        NLToggleRow("t_hudcompact", "Compact (running only)", HudCompact, HudToggleCompact)
+        NLToggleRow("t_hudkeys", "Show keybinds", HudShowKeys, HudToggleKeys)
+        NLSliderRow("s_op", "Opacity", 10, 100, HudOpacitySlider.Value, NLSetOpacity)
+        NLGroup("Notification style", rx, y, bw, 230 + dh)
+        NLRowsHudStyle(NotifStyle, NotifBorderSel, NotifGradSel, "nt")
+    }
+}
+
+NLPageSysKeys(x, y)
+{
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    NLGroup("System keys", x, y, bw, 280 + dh)
+    NLKeyRow("k_reload", "Reload", ReloadKey, BtnReloadKey, StartBindReload)
+    NLKeyRow("k_min", "Hide menu", MinimizeKey, BtnMinimizeKey, StartBindMinimize)
+    NLKeyRow("k_lock", "Macro lock", MacroLockKey, BtnMacroLockKey, StartBindMacroLock)
+    NLKeyRow("k_exit", "Exit", ExitKey, BtnExitKey, StartBindExit)
+    NLButtonRow("b_sysreload", "Reload the script", ReloadAction)
+    NLButtonRow("b_syshide", "Hide this menu", MinimizeApp)
+    NLButtonRow("b_syslock", IsMacrosLocked ? "Unlock the macros" : "Lock every macro", MacroLockToggle)
+    NLButtonRow("b_sysexit", "Close the script", ExitWithAnimation)
+    NLGroup("What they do", rx, y, bw, 160 + dh)
+    NLPara("Reload restarts the script.`nHide menu shows or hides this window (the tray icon works too).`nMacro lock turns every macro off; press it again to restore them.`nExit closes the script.", NLCx, NLCy, NLCw, 110, NLDim())
+}
+
+NLPagePerf(x, y)
+{
+    global GpuLoad, GpuTemp, GpuUsed, GpuTotal, GpuLast, PHudOn, WH
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    ok := GpuInit()
+    if (ok && A_TickCount - GpuLast > 900) {
+        GpuLast := A_TickCount
+        GpuPoll()
+    }
+    if (NLSubTab = 2) {
+        NLGroup("Performance HUD style", x, y, bw, 192)
+        NLRowsHudStyle(PHStyle, PHBorderSel, PHGradSel, "ph")
+        NLGroup("FPS HUD style", x + bw + 8, y, bw, 192)
+        NLRowsHudStyle(WH["fps"], FpsBorderSel, FpsGradSel, "fh")
+        return
+    }
+    NLGroup("Performance HUD", x, y, bw, 216)
+    NLToggleRow("t_phud", "Show performance HUD", PHudOn, PHudToggle)
+    NLSelRowS("p_phudpos", "Position", PHudPosSel)
+    NLButtonRow("b_fpsinst", FpsInstalled() ? "Reinstall the FPS counter" : "Install the FPS counter", FpsInstallBtn)
+    NLToggleRow("t_wfps", "Show the FPS HUD", WH["fps"].on, FpsToggle)
+    NLToggleRow("t_fpsstats", "1% low and frame time", FpsShowStats, FpsToggleStats)
+    NLText(FpsStatusText(), NLCx, NLCy, NLDim(), NLFontSm, NLCw, 16)
+    NLGroup("NVIDIA graphics card", x, y + 226, bw, 172 + dh)
+    if (!ok) {
+        NLPara("No NVIDIA graphics card was found, so there is nothing to show here.", NLCx, NLCy, NLCw, 60, NLDim())
+    } else {
+        tcol := (GpuTemp >= 85) ? NLC(240, 96, 96) : 0
+        NLStatRow("GPU load", GpuLoad " %", GpuLoad / 100, 0)
+        NLStatRow("Temperature", GpuTemp " " Chr(0xB0) "C", GpuTemp / 90, tcol)
+        NLStatRow("Video memory", Round(GpuUsed / 1024, 1) " / " Round(GpuTotal / 1024, 1) " GB", GpuUsed / GpuTotal, 0)
+        NLPara("Read from the NVIDIA driver once per second.", NLCx, NLCy, NLCw, 30, NLDim(150))
+    }
+    LiveEnsure()
+    NLGroup("On-screen widgets", rx, y, bw, 424 + dh)
+    NLToggleRow("t_wkeys", "Keys", WH["keys"].on, WHudToggle.Bind("keys"))
+    NLToggleRow("t_wmbtn", "Mouse buttons", WH["mbtn"].on, WHudToggle.Bind("mbtn"))
+    NLToggleRow("t_wmouse", "Mouse speed", WH["mouse"].on, WHudToggle.Bind("mouse"))
+    NLToggleRow("t_wstrafer", "Auto strafer", WH["strafer"].on, WHudToggle.Bind("strafer"))
+    NLToggleRow("t_widle", "Idle animation", IdleAnim, ToggleIdleAnim)
+    NLSelRowS("p_wsel", "Settings for", WSel)
+    sel := WHudSel()
+    NLToggleRow("t_wbg", "Background", sel.bg, WHudToggleBg)
+    NLToggleRow("t_wborder", "Border", sel.border, WHudToggleBorder)
+    NLSelRowS("p_wbstyle", "Border style", WBorderSel)
+    NLSelRowS("p_wgrad", "Gradient", WGradSel)
+    if (sel.id = "pill")
+        NLSelRowS("p_plfill", "Dot and bar", PillFillSel)
+    NLSliderRow("s_wscale", "Size (%)", 60, 160, sel.scale, WHudSetScale)
+    NLPara("Drag a widget with the mouse while this menu is open. They stay click-through while you play.", NLCx, NLCy, NLCw, 50, NLDim(150))
+}
+
+NLPageInfo(x, y)
+{
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    NLGroup("About", x, y, bw, 365 + dh)
+    NLText(p5b.Text, NLCx, NLCy, NLWhite(), NLFontUI)
+    NLPara(p5d.Text, NLCx, NLCy + 26, NLCw, 70, NLDim())
+    NLText(p5f.Text, NLCx, NLCy + 104, (NLHoverId = "ttlink") ? NLWhite() : NLDim(), NLFontSm)
+    NLAddHit("ttlink", NLCx, NLCy + 104, NLCw, 18, TikTokOpen)
+    NLText(p5g.Text, NLCx, NLCy + 124, (NLHoverId = "dclink") ? NLWhite() : NLDim(), NLFontSm, NLCw, 32, 0, 0, true)
+    NLAddHit("dclink", NLCx, NLCy + 124, NLCw, 32, DiscordOpen)
+    NLText(p5k.Text, NLCx, NLCy + 168, (NLHoverId = "kflink") ? NLWhite() : NLDim(), NLFontSm)
+    NLAddHit("kflink", NLCx, NLCy + 168, NLCw, 18, KofiOpen)
+    NLText(p5h.Text, NLCx, NLCy + 194, NLDim(), NLFontSm)
+    NLButton("b_diag", NLCx, NLCy + 224, NLCw, 24, "Copy diagnostics (for bug reports)", CopyDiagnostics)
+    NLGroup("Changelog", rx, y, bw, 365 + dh)
+    NLPara(p5patch.Text, NLCx, NLCy, NLCw, 345, NLDim())
+}
+
+NLPageConfig(x, y)
+{
+    global ConfigDDL, SaveNameInput, NLCy, NLEditIH
+    bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
+    NLGroup("Configs", x, y, bw, 330 + dh)
+    editing := IsObject(NLEditIH)
+    NLValueRow("v_name", "Name", SaveNameInput.Value . (editing && Mod(A_TickCount // 500, 2) = 0 ? "|" : ""), NLRename)
+    NLButtonRow("b_save", "Save", SaveConfig)
+    NLSelRow("p_cfg", "Config", ConfigDDL.Text, NLDDLStep.Bind(ConfigDDL, -1), NLDDLStep.Bind(ConfigDDL, 1))
+    hw := (NLCw - 8) / 2
+    NLButton("b_load", NLCx, NLCy, hw, 24, "Load", LoadConfig)
+    NLButton("b_del", NLCx + hw + 8, NLCy, hw, 24, "Delete", DeleteConfig)
+    NLCy += 40
+    NLButtonRow("b_reset", "Reset to defaults", ResetDefaults)
+    NLButtonRow("b_export", "Copy config to the clipboard", ExportConfig)
+    NLButtonRow("b_import", "Import config from the clipboard", ImportConfig)
+    NLGroup("Notes", rx, y, bw, 160 + dh)
+    NLPara("Configs are saved as JSON files in the configs folder and store every macro option, keybind, color, theme and the design. Loading one rebinds the hotkeys and applies the design immediately.", NLCx, NLCy, NLCw, 120, NLDim())
+}
+
+; ===== M0MENT4M design: light / dark card UI, drawn by the same engine as Neverlose =====
+Global SPX := 0, SPY := 0, SPW := 0, SPVT := 66, SPVB := 0
+
+SPPal(key)
+{
+    global SPDark, NLStyle
+    static L := Map("Win", [255, 255, 255], "Side", [238, 240, 243], "Card", [255, 255, 255], "Hover", [246, 247, 249]
+        , "Border", [228, 228, 231], "Text", [24, 24, 27], "Text2", [82, 82, 91], "Muted", [161, 161, 170]
+        , "Off", [212, 212, 216], "Track", [228, 228, 231], "Thumb", [24, 24, 27], "Pill", [244, 244, 245], "Active", [226, 229, 234])
+    static D := Map("Win", [20, 21, 24], "Side", [15, 16, 18], "Card", [27, 28, 33], "Hover", [33, 34, 41]
+        , "Border", [38, 39, 46], "Text", [244, 244, 245], "Text2", [161, 161, 170], "Muted", [113, 113, 122]
+        , "Off", [56, 58, 67], "Track", [45, 47, 56], "Thumb", [255, 255, 255], "Pill", [32, 33, 39], "Active", [38, 40, 48])
+    static H := Map("Win", [17, 9, 24], "Side", [11, 5, 17], "Card", [30, 17, 40], "Hover", [42, 24, 54]
+        , "Border", [70, 40, 84], "Text", [252, 240, 228], "Text2", [196, 172, 176], "Muted", [146, 118, 134]
+        , "Off", [74, 50, 74], "Track", [60, 38, 68], "Thumb", [255, 214, 150], "Pill", [38, 22, 48], "Active", [66, 34, 58])
+    global SPSkin, SPCust
+    base := (SPSkin = "hw" && NLStyle = "sp") ? H[key] : (SPDark || NLStyle = "nl" ? D : L)[key]
+    if (SPCust.Count = 0)
+        return base
+    return SPCustPal(key, base)
+}
+
+; colours the user picked on Misc > Appearance, mapped onto the drawn designs' palette
+SPHexArr(hex) => [Integer("0x" SubStr(hex, 1, 2)), Integer("0x" SubStr(hex, 3, 2)), Integer("0x" SubStr(hex, 5, 2))]
+
+SPShadeArr(c, f)
+{
+    if (f >= 0)
+        return [Round(c[1] + (255 - c[1]) * f), Round(c[2] + (255 - c[2]) * f), Round(c[3] + (255 - c[3]) * f)]
+    return [Round(c[1] * (1 + f)), Round(c[2] * (1 + f)), Round(c[3] * (1 + f))]
+}
+
+SPCustLight()
+{
+    global SPCust
+    if (!SPCust.Has("panel"))
+        return false
+    c := SPHexArr(SPCust["panel"])
+    return 0.299 * c[1] + 0.587 * c[2] + 0.114 * c[3] > 150
+}
+
+SPCustPal(key, base)
+{
+    global SPCust
+    light := SPCustLight()
+    switch key {
+        case "Win":
+            if (SPCust.Has("panel"))
+                return SPHexArr(SPCust["panel"])
+        case "Side":
+            if (SPCust.Has("panel"))
+                return SPShadeArr(SPHexArr(SPCust["panel"]), light ? -0.05 : -0.22)
+        case "Border":
+            if (SPCust.Has("panel"))
+                return SPShadeArr(SPHexArr(SPCust["panel"]), light ? -0.12 : 0.14)
+        case "Card":
+            if (SPCust.Has("bg"))
+                return SPHexArr(SPCust["bg"])
+        case "Pill", "Track":
+            if (SPCust.Has("bg"))
+                return SPShadeArr(SPHexArr(SPCust["bg"]), SPCustLum("bg") > 150 ? -0.06 : 0.08)
+        case "Hover":
+            if (SPCust.Has("icon"))
+                return SPShadeArr(SPHexArr(SPCust["icon"]), SPCustLum("icon") > 150 ? -0.04 : 0.06)
+            if (SPCust.Has("bg"))
+                return SPShadeArr(SPHexArr(SPCust["bg"]), SPCustLum("bg") > 150 ? -0.04 : 0.06)
+        case "Active":
+            if (SPCust.Has("icon"))
+                return SPHexArr(SPCust["icon"])
+        case "Text":
+            if (SPCust.Has("panel"))
+                return light ? [24, 24, 27] : [244, 244, 245]
+        case "Text2":
+            if (SPCust.Has("panel"))
+                return light ? [82, 82, 91] : [161, 161, 170]
+        case "Muted":
+            if (SPCust.Has("panel"))
+                return light ? [140, 140, 150] : [113, 113, 122]
+    }
+    return base
+}
+
+SPCustLum(k)
+{
+    global SPCust
+    c := SPHexArr(SPCust[k])
+    return 0.299 * c[1] + 0.587 * c[2] + 0.114 * c[3]
+}
+
+; a colour picked by hand (not by a design or theme) is remembered until the design changes
+SPNoteCustom(key, hex)
+{
+    global SPCust, SPDesignApplying, DesignPresets, CurrentDesign
+    if (SPDesignApplying)
+        return
+    ; the design's own colours (e.g. from a saved config) are not custom ones
+    idx := (key = "bg") ? 2 : (key = "icon") ? 3 : 4
+    if (DesignPresets.Has(CurrentDesign) && IsObject(DesignPresets[CurrentDesign]["colors"]) && StrUpper(DesignPresets[CurrentDesign]["colors"][idx]) = StrUpper(hex)) {
+        if (SPCust.Has(key))
+            SPCust.Delete(key)
+        try NLRequest()
+        return
+    }
+    SPCust[key] := hex
+    try NLRequest()
+}
+
+SPCol(key, a := 255)
+{
+    c := SPPal(key)
+    return NLC(c[1], c[2], c[3], a)
+}
+
+SPMix(k1, k2, t, a := 255)
+{
+    c1 := SPPal(k1), c2 := SPPal(k2)
+    return NLC(Round(c1[1] + (c2[1] - c1[1]) * t), Round(c1[2] + (c2[2] - c1[2]) * t), Round(c1[3] + (c2[3] - c1[3]) * t), a)
+}
+
+; palette colour blended toward the accent colour
+SPAccMix(key, t)
+{
+    global AccentColor
+    c := SPPal(key)
+    ar := Integer("0x" SubStr(AccentColor, 1, 2)), ag := Integer("0x" SubStr(AccentColor, 3, 2)), ab := Integer("0x" SubStr(AccentColor, 5, 2))
+    return NLC(Round(c[1] + (ar - c[1]) * t), Round(c[2] + (ag - c[2]) * t), Round(c[3] + (ab - c[3]) * t))
+}
+
+SPHit(id, x, y, w, h, fn, data := "")
+{
+    global SPVT, SPVB
+    y1 := Max(y, SPVT), y2 := Min(y + h, SPVB)
+    if (y2 <= y1)
+        return
+    NLAddHit(id, x, y1, w, y2 - y1, fn, data)
+}
+
+SPToggleTheme(*)
+{
+    global SPDark
+    SPDark := !SPDark
+    SPSavePrefs()
+    NLRequest()
+}
+
+; Look settings that belong to you, not to a config: light/dark and the profile picture (configs\ui.ini).
+SPPrefsFile() => AppDir "\configs\ui.ini"
+
+SPLoadPrefs()
+{
+    global WH, PHudOn, PHudPosIdx, PHudCustom, PHudCX, PHudCY, VigMinShow, VigAnim, VigAnimSpd, VigStyle, VigIntensity, VigGrad, VigTint, VigPillOn, VigSound, VigSoundIdx, VigSoundFile, VigSoundSel, SPDark, SPAvatarPath, SPLogoIdx, HudGradIdx, HudBorderIdx, HudCompact, HudShowKeys, HudCustom, HudCX, HudCY, VigPillX, VigPillY, VigPillCustom, ColorsFollow
+    try {
+        SPDark := IniRead(SPPrefsFile(), "ui", "dark", SPDark ? "1" : "0") = "1"
+        ColorsFollow := IniRead(SPPrefsFile(), "ui", "follow", "1") = "1"
+        ; the performance HUD always starts switched off (only its position is remembered)
+        PHudPosIdx := Max(1, Min(4, Integer(IniRead(SPPrefsFile(), "phud", "pos", "2"))))
+        PHudCustom := IniRead(SPPrefsFile(), "phud", "custom", "0") = "1"
+        PHudCX := Integer(IniRead(SPPrefsFile(), "phud", "x", "8"))
+        PHudCY := Integer(IniRead(SPPrefsFile(), "phud", "y", "400"))
+        for wid in ["keys", "mbtn", "mouse", "strafer", "fps"] {
+            if (IniRead(SPPrefsFile(), "widgets", wid "custom", "0") = "1") {
+                wd := WH[wid]
+                wd.x := Integer(IniRead(SPPrefsFile(), "widgets", wid "x", wd.x))
+                wd.y := Integer(IniRead(SPPrefsFile(), "widgets", wid "y", wd.y))
+                wd.custom := true
+            }
+        }
+        VigPillCustom := IniRead(SPPrefsFile(), "pill", "custom", "0") = "1"
+        VigPillX := Integer(IniRead(SPPrefsFile(), "pill", "x", "0"))
+        VigPillY := Integer(IniRead(SPPrefsFile(), "pill", "y", "34"))
+        HudCustom := IniRead(SPPrefsFile(), "hud", "custom", "0") = "1"
+        HudCX := Integer(IniRead(SPPrefsFile(), "hud", "x", "8"))
+        HudCY := Integer(IniRead(SPPrefsFile(), "hud", "y", "80"))
+        path := IniRead(SPPrefsFile(), "ui", "avatar", "")
+        if (path != "" && FileExist(path))
+            SPSetAvatar(path)
+        CompLoadPrefs()
+    }
+}
+
+; Saving is deferred a moment and done in one write, so picking things in the menu never waits on the disk.
+SPSavePrefs()
+{
+    SetTimer(SPSavePrefsNow, -500)
+}
+
+SPSavePrefsNow()
+{
+    global WH, PHudOn, PHudPosIdx, PHudCustom, PHudCX, PHudCY, VigMinShow, VigAnim, VigAnimSpd, VigStyle, VigIntensity, VigGrad, VigTint, VigPillOn, VigSound, VigSoundIdx, VigSoundFile, VigSoundSel, SPDark, SPAvatarPath, SPLogoIdx, HudGradIdx, HudBorderIdx, HudCompact, HudShowKeys, HudCustom, HudCX, HudCY, VigPillX, VigPillY, VigPillCustom, ColorsFollow
+    txt := "[ui]`n" . "dark=" (SPDark ? 1 : 0) "`n" . "follow=" (ColorsFollow ? 1 : 0) "`n" . "avatar=" SPAvatarPath "`n"
+        . "[pill]`n" . "custom=" (VigPillCustom ? 1 : 0) "`n" . "x=" VigPillX "`n" . "y=" VigPillY "`n"
+        . "[hud]`n" . "custom=" (HudCustom ? 1 : 0) "`n" . "x=" HudCX "`n" . "y=" HudCY "`n"
+        . "[phud]`n" . "on=" (PHudOn ? 1 : 0) "`n" . "pos=" PHudPosIdx "`n" . "custom=" (PHudCustom ? 1 : 0) "`n" . "x=" PHudCX "`n" . "y=" PHudCY "`n" . "[widgets]`n" . WHudPrefsText() . "mbtnx=" WH["mbtn"].x "`n" . "mbtny=" WH["mbtn"].y "`n" . "mbtncustom=" (WH["mbtn"].custom ? 1 : 0) "`n" . "keysx=" WH["keys"].x "`n" . "keysy=" WH["keys"].y "`n" . "keyscustom=" (WH["keys"].custom ? 1 : 0) "`n"
+        . "mousex=" WH["mouse"].x "`n" . "mousey=" WH["mouse"].y "`n" . "mousecustom=" (WH["mouse"].custom ? 1 : 0) "`n"
+        . "straferx=" WH["strafer"].x "`n" . "strafery=" WH["strafer"].y "`n" . "strafercustom=" (WH["strafer"].custom ? 1 : 0) "`n"
+        . "fpsx=" WH["fps"].x "`n" . "fpsy=" WH["fps"].y "`n" . "fpscustom=" (WH["fps"].custom ? 1 : 0) "`n" . CompPrefsText()
+    try {
+        DirCreate(AppDir "\configs")
+        f := FileOpen(SPPrefsFile(), "w", "UTF-16")
+        f.Write(txt)
+        f.Close()
+    }
+}
+
+; Loads a picture (or every frame of an animated GIF), crops it to a centred square and keeps small copies.
+Global SPAvFrames := [], SPAvDelays := [], SPAvIdx := 1
+
+SPMakeSmall(img, w, h)
+{
+    side := Min(w, h)
+    small := 0
+    DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", 96, "Int", 96, "Int", 0, "Int", 0x26200A, "Ptr", 0, "Ptr*", &small)
+    g2 := 0
+    DllCall("gdiplus\GdipGetImageGraphicsContext", "Ptr", small, "Ptr*", &g2)
+    DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", g2, "Int", 7)
+    DllCall("gdiplus\GdipDrawImageRectRectI", "Ptr", g2, "Ptr", img, "Int", 0, "Int", 0, "Int", 96, "Int", 96
+        , "Int", (w - side) // 2, "Int", (h - side) // 2, "Int", side, "Int", side, "Int", 2, "Ptr", 0, "Ptr", 0, "Ptr", 0)
+    DllCall("gdiplus\GdipDeleteGraphics", "Ptr", g2)
+    return small
+}
+
+SPFreeAvatar()
+{
+    global SPAvatar, SPAvFrames, SPAvDelays, SPAvIdx
+    SetTimer(SPAvTick, 0)
+    for f in SPAvFrames
+        DllCall("gdiplus\GdipDisposeImage", "Ptr", f)
+    if (SPAvFrames.Length = 0 && SPAvatar)
+        DllCall("gdiplus\GdipDisposeImage", "Ptr", SPAvatar)
+    SPAvFrames := [], SPAvDelays := [], SPAvIdx := 1
+    SPAvatar := 0
+}
+
+SPSetAvatar(path)
+{
+    global SPAvatar, SPAvatarPath, SPAvFrames, SPAvDelays, SPAvIdx
+    NLGdipInit()
+    img := 0
+    if (DllCall("gdiplus\GdipCreateBitmapFromFile", "WStr", path, "Ptr*", &img) != 0 || !img)
+        return false
+    w := 0, h := 0
+    DllCall("gdiplus\GdipGetImageWidth", "Ptr", img, "UInt*", &w)
+    DllCall("gdiplus\GdipGetImageHeight", "Ptr", img, "UInt*", &h)
+    guid := Buffer(16, 0)
+    DllCall("ole32\CLSIDFromString", "WStr", "{6aedbd6d-3fb5-418a-83a6-7f45229dc872}", "Ptr", guid)
+    count := 1
+    DllCall("gdiplus\GdipImageGetFrameCount", "Ptr", img, "Ptr", guid, "UInt*", &count)
+    n := Max(1, Min(count, 150))
+    frames := [], delays := []
+    if (n > 1) {
+        size := 0
+        DllCall("gdiplus\GdipGetPropertyItemSize", "Ptr", img, "UInt", 0x5100, "UInt*", &size)
+        if (size > 0) {
+            item := Buffer(size, 0)
+            if (DllCall("gdiplus\GdipGetPropertyItem", "Ptr", img, "UInt", 0x5100, "UInt", size, "Ptr", item) = 0) {
+                len := NumGet(item, 4, "UInt")
+                vp := NumGet(item, 8 + A_PtrSize - 0, "Ptr")
+                Loop Min(n, len // 4)
+                    delays.Push(NumGet(vp, (A_Index - 1) * 4, "UInt"))
+            }
+        }
+    }
+    Loop n {
+        if (n > 1)
+            DllCall("gdiplus\GdipImageSelectActiveFrame", "Ptr", img, "Ptr", guid, "UInt", A_Index - 1)
+        frames.Push(SPMakeSmall(img, w, h))
+        if (n > 1 && delays.Length < A_Index)
+            delays.Push(10)
+    }
+    DllCall("gdiplus\GdipDisposeImage", "Ptr", img)
+    SPFreeAvatar()
+    SPAvFrames := (n > 1) ? frames : []
+    SPAvDelays := delays
+    SPAvIdx := 1
+    SPAvatar := frames[1]
+    SPAvatarPath := path
+    if (n > 1)
+        SetTimer(SPAvTick, -Max(40, delays[1] * 10))
+    return true
+}
+
+; Steps an animated profile picture; a redraw is only requested when the frame really changes.
+SPAvTick()
+{
+    global SPAvatar, SPAvFrames, SPAvDelays, SPAvIdx, NLShown, NLStyle
+    n := SPAvFrames.Length
+    if (n < 2)
+        return
+    if (NLShown && NLStyle = "sp") {
+        SPAvIdx := Mod(SPAvIdx, n) + 1
+        SPAvatar := SPAvFrames[SPAvIdx]
+        NLRequest()
+    }
+    SetTimer(SPAvTick, -Max(40, SPAvDelays[SPAvIdx] * 10))
+}
+
+SPPickAvatar(*)
+{
+    global NLGui, SPAvatar, SPAvatarPath
+    global MenuFxHold
+    NLGui.Opt("-AlwaysOnTop")
+    MenuFxHold := true                                        ; (the blur and the effect step aside while the file window is open)
+    path := FileSelect(1, , "Choose a profile picture", "Pictures (*.png; *.jpg; *.jpeg; *.bmp; *.gif)")
+    MenuFxHold := false
+    NLGui.Opt("+AlwaysOnTop")
+    if (path != "" && SPSetAvatar(path))
+        SPSavePrefs()
+    NLRequest()
+}
+
+SPClearAvatar(*)
+{
+    global SPAvatar, SPAvatarPath
+    SPFreeAvatar()
+    SPAvatarPath := ""
+    SPSavePrefs()
+    NLRequest()
+}
+
+; Draws the picture clipped to a rounded square.
+SPDrawAvatar(x, y, size)
+{
+    global NLG, NLW, NLH, SPAvatar
+    path := NLPath(x, y, size, size, 16)                      ; the same corner radius as the box and its border
+    DllCall("gdiplus\GdipSetClipPath", "Ptr", NLG, "Ptr", path, "Int", 0)
+    DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", NLG, "Int", 7)
+    DllCall("gdiplus\GdipDrawImageRectRectI", "Ptr", NLG, "Ptr", SPAvatar, "Int", x, "Int", y, "Int", size, "Int", size
+        , "Int", 0, "Int", 0, "Int", 96, "Int", 96, "Int", 2, "Ptr", 0, "Ptr", 0, "Ptr", 0)
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+; Switches between the two Neverlose-engine looks ("nl" / "sp"), resizing the window if it is already open.
+NLSetStyle(style)
+{
+    global NLStyle, NLW, NLH, NLMinW, NLMinH, NLInited, NLGui, NLG, SPScroll, SPScrollT, LayoutMode
+    if (style = "sp")
+        NLMinW := 760, NLMinH := 612
+    else
+        NLMinW := 690, NLMinH := 500
+    if (NLStyle = style && NLInited)
+        return
+    NLStyle := style
+    NLW := (style = "sp") ? 860 : 690
+    NLH := (style = "sp") ? 632 : 500
+    SPScroll := 0.0, SPScrollT := 0.0
+    if (NLInited) {
+        DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+        if (LayoutMode = "nl")
+            NLGui.Move(, , NLW, NLH)
+        NLRequest()
+    }
+}
+
+SPOnWheel(wParam, lParam, msg, hwnd)
+{
+    global NLHwnd, NLStyle, SPScrollT, SPContentH, NLH, SPDD, NLMx, SPNavScrollT, SPNavH, CurrentTab, SPSkin, HWView
+    if (hwnd != NLHwnd || NLStyle != "sp")
+        return
+    delta := (wParam >> 16) & 0xFFFF
+    if (delta > 32767)
+        delta -= 65536
+    if (IsObject(SPDD) && SPDD.open) {
+        SPDD.scroll := Max(0, Min(Max(0, SPDD.items.Length - 7) * 30, SPDD.scroll - delta / 120 * 30))
+        NLRequest()
+        return 0
+    }
+    if (NLStyle = "sp" && SPSkin != "hw" && NLMx >= 0 && NLMx < 224) {   ; mouse is over the sidebar: scroll the tab list
+        navMax := Max(0, SPNavH - (NLH - 70 - 100))
+        SPNavScrollT := Max(0, Min(navMax, SPNavScrollT - delta / 120 * 50))
+        NLRequest()
+        return 0
+    }
+    maxS := Max(0, SPContentH - ((SPSkin = "hw") ? HWView : NLH - 14 - 76))
+    SPScrollT := Max(0, Min(maxS, SPScrollT - delta / 120 * 70))
+    NLRequest()
+    return 0
+}
+OnMessage(0x020A, SPOnWheel)
+
+; ---------- hover descriptions ----------
+Global SPTipRect := Map(), SPTipId := "", SPTipSince := 0, SPTipLast := ""
+Global SPTips := Map(
+    "t_shake", "Shakes the game while it is frozen (it starts the moment the freeze does, and stops when the freeze ends). Off by default.",
+    "p_shakewhere", "The game picture: only the game shakes (your widgets and the menu stay still). The whole screen: everything on the game's screen shakes.",
+    "p_shakestyle", "Jitter: quick random jumps. Impact: one hard hit that fades. Wobble: a smooth sway.",
+    "s_shakeamt", "How far the screen moves.",
+    "t_shakesync", "The shake starts and ends together with the freeze (and with every tick in tick mode). The minimum length below is ignored.",
+    "s_shakelen", "The shake lasts as long as the freeze, but at least this long. If the freeze is shorter, the shake goes on for a moment after the game runs again (then it shows the live game, at about 20 pictures a second). 0 = exactly as long as the freeze.",
+    "b_shaketest", "Shakes the screen for a moment so you can judge it. Your game is not frozen.",
+    "t_mblur", "Blurs the game behind the menu while it is open, so only the menu stands out. Off by default.",
+    "s_mdim", "How much the blurred background is darkened.",
+    "p_mfx", "Drifting effects behind the menu while it is open: Embers, Snow, Rain, Fireflies, Stars or Bats. They only run while the menu is open.",
+    "s_mfxamt", "How many particles the effect uses. Fewer is lighter on your PC.",
+    "avatar", "Click to set your own picture (PNG, JPG or GIF). The small x removes it.",
+    "logo", "Click to change the colours of the name.",
+    "t_slide", "Infinite slide. Turn it on, then press the slide key in-game to start or stop it.",
+    "t_behind", "When infinite slide starts, the camera snaps 180 degrees behind you and turns back when you stop.",
+    "s_turn", "Mouse pixels used for the look-behind turn. Tune it to your sensitivity until it turns exactly 180.",
+    "t_bhop", "Auto bhop. Taps jump rapidly while active. Press the Bhop key to toggle it, or use hold mode.",
+    "t_hold", "Bhops automatically for as long as you hold your Bhop hold key.",
+    "t_edstrafe", "For emote dashing (E-Dash): the auto strafer stops holding W. It only spams jump, strafes with your mouse and holds Ctrl.",
+    "t_strafe", "Auto strafer. Holds W and presses A or D depending on which way you move your mouse.",
+    "t_edash", "EDash. Holds crouch and spams jump while active.",
+    "t_cspam", "Spams the crouch key. Use the slider to set the speed.",
+    "s_cs", "Delay between crouch taps in milliseconds. Lower is faster.",
+    "t_click", "Auto clicker. Toggle it with its key.",
+    "s_ck", "Delay between clicks in milliseconds. Lower is faster.",
+    "t_spin", "Continuously spins your camera while active.",
+    "k_hold", "The key you hold to bhop (default Space). Click, then press a key.",
+    "k_reload", "Restarts the macro script.",
+    "b_sysreload", "Restarts the script, the same as the Reload key.",
+    "b_syshide", "Hides the menu. Bring it back with its key or from the tray icon.",
+    "b_syslock", "Turns every macro off, or restores them (the same as the Macro lock key).",
+    "b_sysexit", "Closes the script, the same as the Exit key.",
+    "k_min", "Shows or hides this menu.",
+    "k_lock", "Panic key: turns every macro off. Press it again to restore them.",
+    "k_exit", "Closes the macro script completely.",
+    "k_lag", "The key that triggers the lagswitch.",
+    "s_freeze", "How long the freeze lasts, in milliseconds.",
+    "t_lprec", "Uses a more precise timer for the freeze length. Costs a little more CPU.",
+    "t_lhold", "Freezes only while you hold the trigger key.",
+    "b_test", "Runs one freeze right now so you can feel how it behaves.",
+    "t_lburst", "Freezes the game several times in a row (ticks), with a pause between them.",
+    "s_burst", "How many ticks (freezes in a row). Each one lasts as long as the freeze (ms) above.",
+    "s_burstgap", "How long the game runs normally between two ticks, in milliseconds.",
+    "t_lvig", "Shows the freeze effect on screen while Roblox is frozen.",
+    "c_vig", "The colour used when the colour mode is Solid.",
+    "s_thick", "How far the glow reaches into the screen (or how thick the hard border is).",
+    "p_vstyle", "Look of the freeze effect: soft glow, breathing pulse, scanlines, glitch bars, frost or a hard border.",
+    "p_vgrad", "Use your solid colour or one of the gradient presets around the screen edge.",
+    "t_vanim", "Makes the colours flow around the screen edge while you are frozen. A single solid colour shimmers to a lighter shade.",
+    "s_vspd", "How fast the colours move.",
+    "p_plfill", "Colour of the dot and the bar of the countdown pill. 'Default' keeps the freeze effect's colour (red unless you changed it).",
+    "s_vvol", "How loud the sound cue is. Saved with your config, 100 % by default.",
+    "s_vstay", "How long the effect stays on screen at least, counted from the moment the freeze starts. A short freeze keeps the effect up until this time has passed.",
+    "s_vint", "How strong the freeze effect looks.",
+    "s_vtint", "Adds a light colour wash over the whole screen while frozen.",
+    "t_vpill", "Shows a small card at the top with a countdown while you are frozen.",
+    "p_vsoundsel", "The sound played when the freeze starts (and a lower one when it ends, for the beep patterns). Pick a beep pattern, or 'Custom file...' for a .wav / .mp3 of your own.",
+    "b_vsoundtest", "Plays the chosen sound once.",
+    "t_vsound", "Plays a short beep when the freeze starts and when it ends.",
+    "t_bsound", "In tick mode the sound plays for every single tick, not only the first.",
+    "t_bpill", "In tick mode the pill starts its countdown again for every tick.",
+    "b_export", "Copies your current config as text, without file paths, so you can paste it to a friend.",
+    "b_import", "Reads a config that was copied with the button next to it, saves it as a new config and loads it.",
+    "b_diag", "Copies facts about this PC and your config (no user name) that help to find a bug.",
+    "b_vprev", "Plays the freeze effect for a moment so you can judge it. Your game is not frozen.",
+    "c_acc", "Main accent colour used for highlights.",
+    "c_bg", "Background behind text in the classic designs.",
+    "c_icon", "Colour of icons and buttons in the classic designs.",
+    "c_panel", "Colour of the menu background in the classic designs.",
+    "p_theme", "Pick a colour theme, then press Apply.",
+    "b_theme", "Applies the selected theme colours.",
+    "p_design", "Switches the whole look of the menu.",
+    "b_design", "Applies the selected design. Classic is the original look.",
+    "t_hud", "Shows a small card on screen with the macros that are running.",
+    "t_stat", "Shows slide-in cards for what you do in the menu. Turn it off to hide every card.",
+    "p_hudpos", "Which screen corner the macro HUD sits in. You can also drag it with the mouse while the menu is open.",
+    "p_hudstyle", "The look of the macro HUD. Default is this menu's card. Skeet is a dark box with a coloured line on top. Neverlose is a flat dark bar with a blue icon and a light list under it. Compact lists only the running macros; the border and gradient settings belong to the Default look.",
+    "p_hudborder", "Border style of the macro HUD.",
+    "p_hudgrad", "Colours used when the HUD border is an animated gradient.",
+    "t_hudcompact", "Shows only the macros that are running.",
+    "t_hudkeys", "Shows each macro's key on the HUD.",
+    "t_wkeys", "A small card on screen that lights up the keyboard keys you press (also the ones the macros press for you).",
+    "b_fpsinst", "Downloads Intel's PresentMon (about 1 MB) into the tools folder, after checking its checksum and signature. Needed once for the FPS HUD.",
+    "t_fpsstats", "Shows or hides the small line under the FPS number (1% low = your worst frames, and the frame time in ms). With it off you only see the number and the history line.",
+    "t_wfps", "A small HUD with your Roblox FPS, a history line and the 1% low. It asks Windows for administrator rights once per session.",
+    "p_wbstyle", "Border style of this widget. 'Default' is the animated gradient, independent of the macro HUD's border; the others are its own.",
+    "p_wgrad", "Colours of this widget's animated border. 'Default' is Accent Flow, independent of the macro HUD's gradient.",
+    "p_wsel", "Pick which widget the background, border and size settings below apply to. Each widget keeps its own.",
+    "t_wbg", "Turn off to remove the card behind this widget, so only the keys, mouse or graph are drawn on screen.",
+    "t_wborder", "Turns the border around this widget on or off. The border style is chosen under Misc, Overlay.",
+    "s_wscale", "Makes this widget bigger or smaller.",
+    "t_wmbtn", "A small mouse picture that lights up the left, right and middle buttons, the scroll wheel and the two side buttons.",
+    "t_wmouse", "A small card with a 5 second graph of how fast you move the mouse.",
+    "t_widle", "Keys and mouse buttons get a soft, moving gradient outline even when nothing is pressed (uses the widget's gradient). Off by default.",
+    "t_wstrafer", "A small card showing what the auto strafer is doing: left or right over the last 5 seconds and how often it switches.",
+    "t_phud", "A small separate card with your graphics card's load, temperature and memory. It is its own HUD, not part of the macro HUD. You can drag it with the mouse while the menu is open.",
+    "p_phudpos", "Which screen corner the performance HUD sits in. Dragging it with the mouse overrides this until you pick a corner again.",
+    "g_load", "How busy your graphics card is right now.",
+    "g_temp", "Graphics card temperature.",
+    "g_vram", "Video memory in use out of the total on your card.",
+    "s_op", "How see-through the macro HUD is.",
+    "v_name", "Name used when you save a config.",
+    "b_save", "Saves all your settings under the name above.",
+    "p_cfg", "Click to pick a saved config and load it right away.",
+    "b_del", "Deletes the selected config.",
+    "b_reset", "Puts every setting back to its default.")
+
+SPTipText(id)
+{
+    global SPTips
+    if (SPTips.Has(id))
+        return SPTips[id]
+    if (SubStr(id, 1, 2) = "k_")
+        return "Click, then press a key or mouse button to bind it. ESC clears the bind. Keys already in use are rejected."
+    return ""
+}
+
+SPTipNorm(id)
+{
+    if (SubStr(id, 1, 4) = "tip:")
+        id := SubStr(id, 5)
+    if (id != "" && SPTipText(id) = "" && SubStr(id, -1) = "n" && SPTipText(SubStr(id, 1, -1)) != "")
+        id := SubStr(id, 1, -1)
+    return id
+}
+
+; A floating card with the description of the row under the mouse; shows after a short hover.
+SPDrawTip()
+{
+    global NLHoverId, SPTipId, SPTipSince, SPTipRect, SPTipLast, NLDown, SPDD, NLEditIH, NLNum, NLW, NLH, NLMx, NLAnimating
+    global NLAlphaPage, NLFontSm, SPX
+    hid := SPTipNorm(NLHoverId)
+    if (hid != SPTipId) {
+        SPTipId := hid
+        SPTipSince := A_TickCount
+    }
+    want := (hid != "" && SPTipText(hid) != "" && SPTipRect.Has(hid) && !NLDown && !IsObject(SPDD) && !IsObject(NLEditIH) && !IsObject(NLNum))
+    waiting := want && (A_TickCount - SPTipSince < 450)
+    if (waiting)
+        NLAnimating := true
+    t := NLLerp("tipx", (want && !waiting) ? 1 : 0, 0.28)
+    if (want)
+        SPTipLast := hid
+    if (t <= 0.01 || SPTipLast = "" || !SPTipRect.Has(SPTipLast))
+        return
+    id := SPTipLast
+    txt := SPTipText(id)
+    tw := 300
+    cpl := 38
+    lines := 0
+    for part in StrSplit(txt, "`n")
+        lines += Max(1, Ceil(StrLen(part) / cpl))
+    th := 22 + lines * 16
+    r := SPTipRect[id]
+    ty := r[2] + r[4] + 8
+    if (ty + th > NLH - 10)
+        ty := r[2] - th - 8
+    tx := Max(r[1], Min(NLW - tw - 16, NLMx - 24))
+    ty += (1 - t) * 6
+    NLAlphaPage := t
+    NLRR(tx - 1, ty + 3, tw + 2, th, 13, NLC(0, 0, 0, 60))
+    NLRR(tx, ty, tw, th, 12, SPCol("Card"))
+    NLRR(tx, ty, tw, th, 12, SPCol("Hover", 150))
+    NLRRLine(tx, ty, tw, th, 12, SPCol("Border"))
+    NLDisc(tx + 20, ty + 20, 8, NLAccent(45))
+    NLText("i", tx + 12, ty + 12, NLAccent(), NLFontSm, 16, 16, 1, 1)
+    NLText(txt, tx + 38, ty + 11, SPCol("Text2"), NLFontSm, tw - 52, th - 16, 0, 0, true)
+    NLAlphaPage := 1.0
+}
+
+; ---------- widgets ----------
+SPCard(hoverId, h, tid := "")
+{
+    global SPX, SPY, SPW, NLHoverId, SPTipRect
+    if (tid = "")
+        tid := hoverId
+    if (tid != "") {
+        SPTipRect[tid] := [SPX, SPY, SPW, h]
+        SPHit("tip:" tid, SPX, SPY, SPW, h, 0)
+    }
+    hv := (hoverId = "") ? 0 : NLLerp("c" hoverId, (NLHoverId = hoverId) ? 1 : 0, 0.2)
+    NLRR(SPX, SPY, SPW, h, 12, SPMix("Card", "Hover", hv))
+    NLRRLine(SPX, SPY, SPW, h, 12, SPCol("Border"))
+    return hv
+}
+
+SPSection(title)
+{
+    global SPX, SPY, NLFontB
+    NLText(title, SPX + 4, SPY, SPCol("Text"), NLFontB, 300, 22, 0, 1)
+    SPY += 30
+}
+
+SPToggleRow(id, label, on, fn, generic := false)
+{
+    global SPX, SPY, SPW, NLFontUI
+    t := NLLerp(id, on ? 1 : 0, 0.1)
+    SPCard(id, 48)
+    NLText(label, SPX + 16, SPY, SPCol("Text"), NLFontUI, SPW - 90, 48, 0, 1)
+    fx := SPX + SPW - 16 - 44, fy := SPY + 12
+    NLRR(fx, fy, 44, 24, 12, SPAccMix("Off", t))
+    NLDisc(fx + 12 + 20 * t, fy + 12, 9.5, NLC(255, 255, 255))
+    SPHit(id, SPX, SPY, SPW, 48, SPToggleAct.Bind(fn, label, on, generic))
+    SPY += 58
+}
+
+SPSliderRow(id, label, minv, maxv, val, setter)
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm, NLNum, NLDragSlider
+    dragging := IsObject(NLDragSlider) && NLDragSlider.id = id
+    if (dragging)
+        val := NLDragSlider.last
+    t := NLLerp(id, (Max(minv, Min(maxv, val)) - minv) / (maxv - minv), dragging ? 0.3 : 0.125)
+    SPCard("", 66, id)
+    NLText(label, SPX + 16, SPY + 8, SPCol("Text"), NLFontUI, SPW - 120, 26, 0, 1)
+    nx := SPX + SPW - 16 - 58, ny := SPY + 10
+    typing := IsObject(NLNum) && NLNum.id = id
+    NLRR(nx, ny, 58, 24, 8, SPCol("Pill"))
+    NLRRLine(nx, ny, 58, 24, 8, typing ? SPAccMix("Border", 1) : SPCol("Border"))
+    NLText(typing ? NLNum.buf . (Mod(A_TickCount // 500, 2) = 0 ? "|" : "") : String(val), nx, ny, SPCol("Text"), NLFontSm, 58, 24, 1, 1)
+    SPHit(id "n", nx - 2, ny - 2, 62, 28, NLNumStart.Bind(id, minv, maxv, setter))
+    tx := SPX + 18, tw := SPW - 36, ty := SPY + 47
+    NLRR(tx, ty, tw, 4, 2, SPCol("Track"))
+    NLRR(tx, ty, Max(3, tw * t), 4, 2, SPAccMix("Thumb", 1))
+    NLDisc(tx + tw * t, ty + 2, 7, SPCol("Thumb"))
+    SPHit(id, tx - 10, SPY + 36, tw + 20, 28, "slider", {id: id, min: minv, max: maxv, tx: tx, tw: tw, setter: setter, last: val})
+    SPY += 76
+}
+
+SPKeyRow(id, label, key, btnCtrl, starter)
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm, NLHoverId
+    listening := InStr(btnCtrl.Text, "Press") ? true : false
+    SPCard(id, 48)
+    NLText(label, SPX + 16, SPY, SPCol("Text"), NLFontUI, SPW - 140, 48, 0, 1)
+    bx := SPX + SPW - 16 - 92, by := SPY + 10
+    NLRR(bx, by, 92, 28, 8, SPCol("Pill"))
+    NLRRLine(bx, by, 92, 28, 8, listening ? SPAccMix("Border", 1) : SPCol("Border"))
+    NLText(listening ? "press a key" : (key = "" ? "NONE" : StrUpper(KeyNameCore(key))), bx, by, listening ? SPAccMix("Text", 1) : SPCol("Text2"), NLFontSm, 92, 28, 1, 1)
+    SPHit(id, SPX, SPY, SPW, 48, starter)
+    SPY += 58
+}
+
+SPValueRow(id, label, text, fn)
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm
+    SPCard(id, 48)
+    NLText(label, SPX + 16, SPY, SPCol("Text"), NLFontUI, SPW - 240, 48, 0, 1)
+    bx := SPX + SPW - 16 - 200, by := SPY + 10
+    NLRR(bx, by, 200, 28, 8, SPCol("Pill"))
+    NLRRLine(bx, by, 200, 28, 8, SPCol("Border"))
+    NLText(text, bx + 10, by, SPCol("Text"), NLFontSm, 180, 28, 0, 1)
+    SPHit(id, SPX, SPY, SPW, 48, fn)
+    SPY += 58
+}
+
+SPDropRow(id, label, ddl, after := 0)
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm, NLFontIcon, NLHoverId, SPDD
+    SPCard("", 48, id)
+    NLText(label, SPX + 16, SPY, SPCol("Text"), NLFontUI, SPW - 260, 48, 0, 1)
+    pw := 190
+    bx := SPX + SPW - 16 - pw, by := SPY + 10
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.2)
+    isOpen := IsObject(SPDD) && SPDD.id = id && SPDD.open
+    NLRR(bx, by, pw, 28, 8, SPMix("Pill", "Active", hv))
+    NLRRLine(bx, by, pw, 28, 8, isOpen ? SPAccMix("Border", 1) : SPCol("Border"))
+    txt := ddl.Text
+    NLText(txt = "" ? "none yet" : txt, bx + 12, by, txt = "" ? SPCol("Muted") : SPCol("Text"), NLFontSm, pw - 40, 28, 0, 1)
+    NLText(Chr(0x25BE), bx + pw - 26, by, SPCol("Muted"), NLFontIcon, 20, 28, 1, 1)
+    if (IsObject(SPDD) && SPDD.id = id)
+        SPDD.ax := bx, SPDD.ay := by, SPDD.aw := pw
+    SPHit(id, bx, by, pw, 28, SPOpenDD.Bind(id, ddl, after))
+    SPY += 58
+}
+
+; ---------- dropdown list (opens under the selector, animated) ----------
+Global SPDD := 0
+Global SPNavScroll := 0.0, SPNavScrollT := 0.0, SPNavH := 0
+Global SPLogoSel := SPLogoSelC()
+SetTimer(SPLogoTick, 66)
+
+SPOpenDD(id, ddl, after, *)
+{
+    global SPDD, NLAnim
+    if (IsObject(SPDD) && SPDD.id = id && SPDD.open) {
+        SPDD.open := false
+        NLRequest()
+        return
+    }
+    SPDD := {id: id, ddl: ddl, after: after, items: HasProp(ddl, "items") ? ddl.items : ControlGetItems(ddl), open: true, scroll: 0, ax: 0, ay: 0, aw: 190}
+    NLAnim["ddx"] := 0.0
+    NLRequest()
+}
+
+SPCloseDD(*)
+{
+    global SPDD
+    if (IsObject(SPDD))
+        SPDD.open := false
+    NLRequest()
+}
+
+SPPickDD(i, *)
+{
+    global SPDD
+    d := SPDD
+    if (!IsObject(d))
+        return
+    d.open := false
+    d.ddl.Choose(i)
+    if (d.after)
+        d.after.Call()
+    NLRequest()
+}
+
+SPDrawDD()
+{
+    global SPDD, NLG, NLW, NLH, NLAlphaPage, NLHoverId, NLFontSm
+    if (!IsObject(SPDD))
+        return
+    d := SPDD
+    t := NLLerp("ddx", d.open ? 1 : 0, 0.3)
+    if (!d.open && t <= 0.01) {
+        SPDD := 0
+        return
+    }
+    n := d.items.Length
+    rowH := 30
+    vis := Max(1, Min(n, 7))
+    fullH := vis * rowH + 8
+    h := fullH * t
+    x := d.ax, w := d.aw
+    y := d.ay + 32
+    if (y + fullH > NLH - 8 && d.ay - 4 - fullH > 70)
+        y := d.ay - 4 - h
+    NLAlphaPage := Min(1.0, t * 1.4)
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", Floor(x - 6), "Int", Floor(y - 2), "Int", w + 12, "Int", Ceil(h) + 8, "Int", 0)
+    NLRR(x - 1, y + 3, w + 2, fullH, 11, NLC(0, 0, 0, 55))
+    NLRR(x, y, w, fullH, 10, SPCol("Card"))
+    NLRR(x, y, w, fullH, 10, SPCol("Hover", 140))
+    NLRRLine(x, y, w, fullH, 10, SPCol("Border"))
+    Loop n {
+        i := A_Index
+        iy := y + 4 + (i - 1) * rowH - d.scroll
+        if (iy + rowH < y + 2 || iy > y + fullH - 2)
+            continue
+        sel := (d.ddl.Value = i)
+        hv := NLLerp("ddh" i, (NLHoverId = "ddi" i) ? 1 : 0, 0.25)
+        NLRR(x + 4, iy, w - 8, rowH - 2, 7, SPCol("Active", Round(255 * Max(sel ? 0.7 : 0, hv * 0.8))))
+        if (d.id = "logo" || d.id = "p_hudgrad") {
+            Loop 6 {
+                c := SPLogoRGB(i, A_Index, 6)
+                NLRR(x + 12 + (A_Index - 1) * 7, iy + 8, 7, 12, 2, NLC(c[1], c[2], c[3]))
+            }
+            NLText(d.items[i], x + 62, iy, sel ? SPAccMix("Text", 1) : SPCol("Text"), NLFontSm, w - 72, rowH - 2, 0, 1)
+        } else
+            NLText(d.items[i], x + 14, iy, sel ? SPAccMix("Text", 1) : SPCol("Text"), NLFontSm, w - 28, rowH - 2, 0, 1)
+    }
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+    NLAlphaPage := 1.0
+    if (d.open) {
+        NLAddHit("ddbg", 0, 0, NLW, NLH, SPCloseDD)
+        Loop n {
+            i := A_Index
+            iy := y + 4 + (i - 1) * rowH - d.scroll
+            if (iy < y + 2 || iy + rowH > y + fullH)
+                continue
+            NLAddHit("ddi" i, x + 4, iy, w - 8, rowH - 2, SPPickDD.Bind(i))
+        }
+    }
+}
+
+SPSwatchRow(id, label, hex, fn)
+{
+    global SPX, SPY, SPW, NLFontUI
+    SPCard(id, 48)
+    NLText(label, SPX + 16, SPY, SPCol("Text"), NLFontUI, SPW - 100, 48, 0, 1)
+    NLRR(SPX + SPW - 16 - 46, SPY + 12, 46, 24, 8, NLHexCol(hex))
+    NLRRLine(SPX + SPW - 16 - 46, SPY + 12, 46, 24, 8, SPCol("Border"))
+    SPHit(id, SPX, SPY, SPW, 48, fn)
+    SPY += 58
+}
+
+SPButtonRow(id, label, btn, fn)
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm, NLHoverId, NLActive, NLDown
+    SPCard("", 48, id)
+    NLText(label, SPX + 16, SPY, SPCol("Text"), NLFontUI, SPW - 160, 48, 0, 1)
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.2)
+    pressed := (NLDown && IsObject(NLActive) && NLActive.id = id) ? 1 : 0
+    bx := SPX + SPW - 16 - 110, by := SPY + 10
+    NLRR(bx, by, 110, 28, 8, SPMix("Pill", "Active", Min(1, hv + pressed * 0.6)))
+    NLRRLine(bx, by, 110, 28, 8, SPCol("Border"))
+    NLText(btn, bx, by, hv > 0.5 ? SPCol("Text") : SPCol("Text2"), NLFontSm, 110, 28, 1, 1)
+    SPHit(id, bx, by, 110, 28, fn)
+    SPY += 58
+}
+
+SPParaCard(text, h)
+{
+    global SPX, SPY, SPW, NLFontSm
+    SPCard("", h)
+    NLText(text, SPX + 16, SPY + 12, SPCol("Text2"), NLFontSm, SPW - 32, h - 24, 0, 0, true)
+    SPY += h + 10
+}
+
+; ---------- window ----------
+SPRender()
+{
+    global SPSkin
+    if (SPSkin = "hw") {
+        HWRender()
+        return
+    }
+    global NLG, NLW, NLH, NLAnimating, NLHits, NLHitsB, NLPageAnim, NLAlphaPage, CurrentTab, NLSubTab, NLHoverId
+    global NLFontUI, NLFontSm, NLFontB, NLFontH, NLFontIcon, SPX, SPY, SPW, SPVT, SPVB, SPScroll, SPScrollT, SPContentH, SPDark, SPAvatar, SPSavedAt, SPNavScroll, SPNavScrollT, SPNavH, SPTipRect
+    NLAnimating := false
+    NLHitsB := []
+    NLAlphaPage := 1.0
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", NLG, "UInt", 0)
+    NLWinXf()
+
+    NLPageAnim += (1.0 - NLPageAnim) * 0.06
+    if (NLPageAnim > 0.995)
+        NLPageAnim := 1.0
+    else
+        NLAnimating := true
+    SPScroll += (SPScrollT - SPScroll) * 0.25
+    if (Abs(SPScrollT - SPScroll) < 0.5)
+        SPScroll := SPScrollT
+    else
+        NLAnimating := true
+
+    sw := 224
+    NLRR(0, 0, NLW, NLH, 18, SPCol("Side"))
+    NLRR(sw, 0, NLW - sw, NLH, 18, SPCol("Win"))
+    NLRR(sw, 0, 30, NLH, 0, SPCol("Win"))
+    NLRRLine(0, 0, NLW, NLH, 18, SPCol("Border"))
+    NLLine(sw, 14, sw, NLH - 14, SPCol("Border"))
+
+    ; brand
+    ah := NLLerp("avh", (NLHoverId = "avatar" || NLHoverId = "avclear") ? 1 : 0, 0.2)
+    NLRR(22, 18, 62, 62, 16, SPCol("Card"))
+    if (SPAvatar)
+        SPDrawAvatar(22, 18, 62)
+    else
+        NLText("M", 22, 18, SPCol("Text"), NLFontH, 62, 62, 1, 1)
+    NLRRLine(22, 18, 62, 62, 16, SPMix("Border", "Muted", ah))
+    NLAddHit("avatar", 22, 18, 62, 62, SPPickAvatar)
+    if (!SPAvatar) {                                          ; a small plus shows that the picture can be changed
+        pa := 110 + Round(110 * ah)
+        NLDisc(74, 74, 8, NLAccent(Round(pa * 0.35)))
+        NLLineW(70.5, 74, 77.5, 74, NLAccent(pa), 1.8)
+        NLLineW(74, 70.5, 74, 77.5, NLAccent(pa), 1.8)
+    }
+    if (SPAvatar && ah > 0.05) {
+        NLDisc(80, 22, 8, SPCol("Text", Round(235 * ah)))
+        NLText(Chr(0x2715), 72, 14, SPCol("Win", Round(255 * ah)), NLFontSm, 16, 16, 1, 1)
+        NLAddHit("avclear", 72, 14, 16, 16, SPClearAvatar)
+    }
+    SPDrawLogo(96, 20)
+    NLAddHit("logo", 92, 18, 132, 36, SPOpenDD.Bind("logo", SPLogoSel, 0))
+    uw := NLTextW(A_UserName, NLFontSm)
+    NLRR(96, 55, uw + 32, 22, 11, SPCol("Active", 190))
+    NLDisc(108, 66, 3.2, NLAccent())
+    NLText(A_UserName, 119, 55, SPCol("Text"), NLFontSm, uw + 10, 22, 0, 1)
+
+    ; navigation
+    navTop := 92, navBot := NLH - 70
+    SPNavScroll += (SPNavScrollT - SPNavScroll) * 0.25
+    if (Abs(SPNavScrollT - SPNavScroll) < 0.5)
+        SPNavScroll := SPNavScrollT
+    else
+        NLAnimating := true
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", navTop, "Int", sw, "Int", navBot - navTop, "Int", 0)
+    y := 110 - SPNavScroll
+    NLText("MOVEMENT", 28, y, SPCol("Muted"), NLFontSm, 150, 18, 0, 1)
+    y += 24
+    y := SPNavItem(1, Chr(0x26A1), "Macros", y)
+    y := SPNavItem(2, Chr(0x2328), "Keybinds", y)
+    y += 8
+    NLText("UTILITY", 28, y, SPCol("Muted"), NLFontSm, 150, 18, 0, 1)
+    y += 24
+    y := SPNavItem(3, Chr(0x231B), "Lagswitch", y)
+    y += 8
+    NLText("SYSTEM", 28, y, SPCol("Muted"), NLFontSm, 150, 18, 0, 1)
+    y += 24
+    y := SPNavItem(4, Chr(0x2699), "Misc", y)
+    mo := NLLerp("miscx", (CurrentTab = 4) ? 1 : 0, 0.16)
+    if (mo > 0.01) {
+        NLAlphaPage := mo
+        names := ["Appearance", "Overlay", "Performance", "Input monitor", "Waifus"]
+        sy := y - 10 * (1 - mo)
+        NLLine(30, sy + 2, 30, sy + 2 + 144 * mo, SPCol("Border"))
+        for i, nm in names {
+            st := NLLerp("sub" i, (NLSubTab = i) ? 1 : 0, 0.15)
+            hv := NLLerp("subh" i, (NLHoverId = "sub" i) ? 1 : 0, 0.2)
+            iy := sy + (i - 1) * 32 * mo
+            NLRR(42, iy, sw - 54, 28, 9, SPCol("Active", Round(255 * Max(st, hv * 0.5))))
+            NLText(nm, 54, iy, (NLSubTab = i) ? SPCol("Text") : SPCol("Text2"), NLFontSm, 140, 28, 0, 1)
+            if (mo > 0.9)
+                SPNavHit("sub" i, 42, iy, sw - 54, 28, NLSetSub.Bind(i))
+        }
+        NLAlphaPage := 1.0
+        y += 164 * mo
+    }
+    y := SPNavItem(7, Chr(0x1F511), "System keybinds", y)
+    y := SPNavItem(5, Chr(0x2139), "Info", y)
+    y := SPNavItem(6, Chr(0x1F4BE), "Config", y)
+    SPNavH := y + SPNavScroll - 100 + 8
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+    navMax := Max(0, SPNavH - (navBot - 100))
+    if (SPNavScrollT > navMax)
+        SPNavScrollT := navMax
+    if (navMax > 0) {                                  ; thin scrollbar for the tab list
+        nh := Max(24, (navBot - navTop) * (navBot - 100) / Max(1, SPNavH))
+        nty := navTop + ((navBot - navTop) - nh) * (SPNavScroll / navMax)
+        hotN := (NLHoverId = "vs_nav" || (IsObject(NLDragVert) && NLDragVert.kind = "nav"))
+        NLRR(sw - 7 - (hotN ? 1 : 0), nty, hotN ? 5 : 3, nh, 2, SPCol("Muted", hotN ? 210 : 120))
+        NLAddHit("vs_nav", sw - 14, navTop, 14, navBot - navTop, "vscroll", {kind: "nav", top: navTop, trackH: navBot - navTop, thumbH: nh, max: navMax})
+    }
+
+    ; quick-save button (bottom left) with a "saved" celebration
+    SPDrawSaveButton(sw)
+
+    ; top bar: page title, theme switch, minimise, close
+    titles := ["Macros", "Keybinds", "Lagswitch", "Misc", "Info", "Config", "System keybinds"]
+    NLText(titles[CurrentTab], sw + 26, 22, SPCol("Text"), NLFontH, 300, 30, 0, 1)
+    tcx := NLW - 100, tcy := 37
+    th := NLLerp("theme", (NLHoverId = "theme") ? 1 : 0, 0.2)
+    tcol := SPMix("Text2", "Text", th)
+    if (SPDark) {
+        NLDisc(tcx, tcy, 7, tcol)
+        NLDisc(tcx + 4, tcy - 3, 6, SPCol("Win"))
+    } else {
+        NLDisc(tcx, tcy, 4.5, tcol)
+        Loop 8 {
+            a := (A_Index - 1) * 0.7853982
+            NLLine(tcx + Cos(a) * 8, tcy + Sin(a) * 8, tcx + Cos(a) * 11, tcy + Sin(a) * 11, tcol)
+        }
+    }
+    NLAddHit("theme", tcx - 14, tcy - 14, 28, 28, SPToggleTheme)
+    mh := NLLerp("min", (NLHoverId = "min") ? 1 : 0, 0.2)
+    ch := NLLerp("close", (NLHoverId = "close") ? 1 : 0, 0.2)
+    NLText(Chr(0x2013), NLW - 76, 24, SPMix("Text2", "Text", mh), NLFontUI, 24, 24, 1, 1)
+    NLText(Chr(0x2715), NLW - 46, 24, SPMix("Text2", "Text", ch), NLFontSm, 24, 24, 1, 1)
+    NLAddHit("min", NLW - 76, 24, 24, 24, MinimizeApp)
+    NLAddHit("close", NLW - 46, 24, 24, 24, NLQuit)
+
+    ; scrolling page content
+    SPVT := 66, SPVB := NLH - 14
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", sw, "Int", SPVT, "Int", NLW - sw, "Int", SPVB - SPVT, "Int", 0)
+    NLAlphaPage := NLPageAnim
+    SPX := sw + 26, SPW := NLW - sw - 56
+    SPY := 76 - SPScroll + 8 * (1 - NLPageAnim)
+    top := SPY
+    SPTipRect := Map()
+    SPTipRect["avatar"] := [22, 18, 62, 62]
+    SPTipRect["logo"] := [92, 18, 132, 36]
+    switch CurrentTab {
+        case 1: SPPageMacro()
+        case 2: SPPageBinds()
+        case 3: SPPageLag()
+        case 4: SPPageMisc()
+        case 5: SPPageInfo()
+        case 6: SPPageConfig()
+        case 7: SPPageSysKeys()
+    }
+    NLAlphaPage := 1.0
+    SPContentH := SPY - top + SPScroll
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+
+    viewH := SPVB - 76
+    if (SPContentH > viewH) {
+        maxS := SPContentH - viewH
+        thh := Max(30, viewH * viewH / SPContentH)
+        ty := 76 + (viewH - thh) * (SPScroll / maxS)
+        hot := (NLHoverId = "vs_page" || (IsObject(NLDragVert) && NLDragVert.kind = "page"))
+        NLRR(NLW - 18 - (hot ? 1 : 0), ty, hot ? 6 : 4, thh, 3, SPCol("Muted", hot ? 210 : 150))
+        NLAddHit("vs_page", NLW - 28, 76, 18, viewH, "vscroll", {kind: "page", top: 76, trackH: viewH, thumbH: thh, max: maxS})
+    }
+    SPDrawDD()
+    SPDrawTip()
+    if (IsObject(SPDD))
+        NLAnimating := true
+    NLHits := NLHitsB
+    NLPresent()
+}
+
+; Quick save (bottom-left button): overwrites the config you are working on, or saves under the Name box.
+Global SPSavedAt := -99999, SPSavedX := 100
+
+SPQuickSave(*)
+{
+    global SaveNameInput, ConfigDDL, SPSavedAt, SPSavedX, NLMx, ConfigDir, ConfigExt
+    if (Trim(SaveNameInput.Value) = "" && ConfigDDL.Text != "")
+        SaveNameInput.Value := ConfigDDL.Text
+    if (Trim(SaveNameInput.Value) = "")                ; nothing picked and no name typed: save under a default name instead of doing nothing
+        SaveNameInput.Value := "My config"
+    SaveConfig()
+    if (!FileExist(ConfigDir "\" SaveNameInput.Value ConfigExt)) {
+        SPToast("Could not save", 7401, "off", "Pick a name on the Config page and try again")
+        return
+    }
+    SPSavedAt := A_TickCount
+    SPSavedX := Max(24, Min(200, NLMx))
+    NLRequest()
+}
+
+; Loading a config also makes it the one the next save overwrites.
+SPLoadConfig(*)
+{
+    global SaveNameInput, ConfigDDL, SPQuiet
+    SPQuiet := true
+    LoadConfig()
+    SPQuiet := false
+    if (ConfigDDL.Text != "")
+        SaveNameInput.Value := ConfigDDL.Text
+}
+
+; Clicking a saved config loads it straight away.
+SPLoadCfg(i, *)
+{
+    global ConfigDDL
+    ConfigDDL.Choose(i)
+    LoadConfig()
+    NLRequest()
+}
+
+; One card per saved config; they pop in one after another when the Config page opens.
+SPConfigRow(i, name, sel)
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm, NLAlphaPage, NLPageAnim
+    tt := Max(0.0, Min(1.0, NLPageAnim * 1.5 - 0.09 * (i - 1)))
+    keep := NLAlphaPage
+    NLAlphaPage := keep * tt
+    sh := (1 - tt) * 16
+    SPY += sh
+    id := "pf" i
+    SPCard(id, 48)
+    NLText(name, SPX + 16, SPY, SPCol("Text"), NLFontUI, SPW - 160, 48, 0, 1)
+    pw := 86, px := SPX + SPW - 16 - pw, py := SPY + 12
+    if (sel) {
+        NLRR(px, py, pw, 24, 12, SPAccMix("Pill", 0.18))
+        NLText("selected", px, py, SPAccMix("Text", 1), NLFontSm, pw, 24, 1, 1)
+    } else
+        NLText("click to load", px - 14, py, SPCol("Muted"), NLFontSm, pw + 14, 24, 2, 1)
+    SPHit(id, SPX, SPY, SPW, 48, SPLoadCfg.Bind(i))
+    SPY += 58 - sh
+    NLAlphaPage := keep
+}
+
+; ---- animated gradient presets for the macro name (click the name to choose one) ----
+Global SPLogoIdx := 1
+
+class SPLogoSelC {
+    items := ["Accent Flow", "Aurora", "Sunset", "Ocean", "Fire", "Rainbow", "Candy", "Mono", "Static", "Flame"]
+    Value => SPLogoIdx
+    Choose(i) {
+        global SPLogoIdx
+        SPLogoIdx := i
+        SPSavePrefs()
+        NLRequest()
+    }
+}
+
+; the lists of colour stops are remembered (same list for the same preset, accent and theme), so the gradient drawing can
+; remember its colour tables per list too
+SPLogoStops(idx)
+{
+    global AccentColor
+    static memo := Map()
+    tc := SPPal("Text")
+    key := idx "|" AccentColor "|" tc[1] "," tc[2] "," tc[3] (idx = 8 ? "|" SPPal("Muted")[1] : "")
+    if (memo.Has(key))
+        return memo[key]
+    if (memo.Count > 300)
+        memo.Clear()
+    st := SPLogoStopsRaw(idx)
+    if (idx = 9)
+        st.DefineProp("isStatic", {value: true})        ; "Static": nothing moves, the drawing code leaves the gradient where it is
+    memo[key] := st
+    return memo[key]
+}
+
+SPLogoStopsRaw(idx)
+{
+    global AccentColor
+    ar := Integer("0x" SubStr(AccentColor, 1, 2)), ag := Integer("0x" SubStr(AccentColor, 3, 2)), ab := Integer("0x" SubStr(AccentColor, 5, 2))
+    tc := SPPal("Text")
+    switch idx {
+        case 1: return [[ar, ag, ab], [tc[1], tc[2], tc[3]]]
+        case 2: return [[16, 185, 129], [34, 211, 238], [99, 102, 241], [168, 85, 247]]
+        case 3: return [[251, 146, 60], [244, 63, 94], [168, 85, 247]]
+        case 4: return [[34, 211, 238], [59, 130, 246], [20, 184, 166]]
+        case 5: return [[250, 204, 21], [249, 115, 22], [239, 68, 68]]
+        case 6: return [[239, 68, 68], [250, 204, 21], [74, 222, 128], [34, 211, 238], [99, 102, 241], [217, 70, 239]]
+        case 7: return [[244, 114, 182], [125, 211, 252], [134, 239, 172]]
+        case 8: return [[tc[1], tc[2], tc[3]], [SPPal("Muted")[1], SPPal("Muted")[2], SPPal("Muted")[3]]]
+        case 10: return [[62, 230, 196], [34, 211, 238], [99, 102, 241], [168, 85, 247], [217, 70, 239], [168, 85, 247], [99, 102, 241], [34, 211, 238]]
+        default: return [[ar, ag, ab], [tc[1], tc[2], tc[3]]]
+    }
+}
+
+; colour of letter i (of n) for preset idx at the current time
+SPLogoRGB(idx, i, n)
+{
+    st := SPLogoStops(idx)
+    m := st.Length
+    if (idx = 9) {                                  ; static: plain accent -> text colour
+        f := Min(1.0, (i - 1) / (n - 1) * 1.15)
+        c1 := st[1], c2 := st[2]
+        return [Round(c1[1] + (c2[1] - c1[1]) * f), Round(c1[2] + (c2[2] - c1[2]) * f), Round(c1[3] + (c2[3] - c1[3]) * f)]
+    }
+    pos := (i - 1) / n - A_TickCount / 1000 * 0.32
+    pos := pos - Floor(pos)
+    q := pos * m
+    k := Floor(q)
+    fr := q - k
+    c1 := st[Mod(k, m) + 1], c2 := st[Mod(k + 1, m) + 1]
+    return [Round(c1[1] + (c2[1] - c1[1]) * fr), Round(c1[2] + (c2[2] - c1[2]) * fr), Round(c1[3] + (c2[3] - c1[3]) * fr)]
+}
+
+SPLogoTick()
+{
+    global NLShown, NLStyle, SPLogoIdx
+    if (NLShown && NLStyle = "sp" && SPLogoIdx != 9)
+        NLRequest()
+}
+
+; The macro name: spaced capitals filled with the chosen (moving) gradient.
+; One flame mass behind the whole name (like the EVADE logo): a few broad, curved, teardrop-shaped tongues of different heights that
+; lean and lick, in three layers (outer glow, body, bright core), coloured by the logo gradient.
+SPFlameWord(x, y, wtot, t)
+{
+    static fr := [0.02, 0.12, 0.23, 0.35, 0.47, 0.58, 0.70, 0.82, 0.93, 1.0], hh := [18, 27, 21, 31, 23, 30, 22, 29, 20, 17], bw := [9, 11, 10, 12, 10.5, 12, 10, 11.5, 9.5, 8]
+    stops := SPLogoStops(10)
+    for idx, f in fr {
+        ph := t * (2.1 + idx * 0.37) + idx * 1.7
+        life := 0.62 + 0.38 * Sin(ph)
+        h := hh[idx] * life + 3 * Sin(ph * 2.7)
+        h := Min(h, y + 8)                                    ; (never above the top edge of the window)
+        cx := x + f * wtot
+        lean := (3.2 + Mod(idx, 3)) * Sin(ph * 0.9 + 1.1)          ; how far the tip leans
+        col := SPStopsSample(stops, f * 0.8 + t * 0.07)
+        for layer in [[1.0, 62, 0], [0.72, 105, 0.35], [0.42, 150, 0.7]] {
+            k := layer[1]
+            c := [Round(col[1] + (255 - col[1]) * layer[3] * 0.55), Round(col[2] + (255 - col[2]) * layer[3] * 0.55), Round(col[3] + (255 - col[3]) * layer[3] * 0.55)]
+            pts := []
+            Loop 9 {
+                u := (A_Index - 1) / 8
+                wd := bw[idx] * k * (1 - u) ** 0.75 * (1 + 0.25 * Sin(ph * 3 + u * 5))
+                ctr := cx + lean * u * u
+                pts.Push(ctr - wd, y + 11 - h * k * u)
+            }
+            Loop 9 {
+                u := (9 - A_Index) / 8
+                wd := bw[idx] * k * (1 - u) ** 0.75 * (1 + 0.25 * Sin(ph * 3 + u * 5 + 1.3))
+                ctr := cx + lean * u * u
+                pts.Push(ctr + wd, y + 11 - h * k * u)
+            }
+            HWPoly(pts, NLC(c[1], c[2], c[3], layer[2]))
+        }
+    }
+}
+
+; a small glowing skull in the place of the 0
+SPSkull(cx, cy, c, t)
+{
+    pulse := 0.65 + 0.35 * Sin(t * 5)
+    bone := [Min(255, c[1] + 120), Min(255, c[2] + 120), Min(255, c[3] + 120)]
+    HWOval(cx, cy + 1, 11, 12, NLC(c[1], c[2], c[3], 40))
+    HWOval(cx, cy - 1, 7.4, 7.4, NLC(bone[1], bone[2], bone[3], 235))
+    NLRR(cx - 4.6, cy + 3.6, 9.2, 6.2, 2.4, NLC(bone[1], bone[2], bone[3], 235))
+    HWOval(cx - 3, cy - 0.6, 2.4, 2.8, NLC(10, 6, 26))
+    HWOval(cx + 3, cy - 0.6, 2.4, 2.8, NLC(10, 6, 26))
+    HWOval(cx - 3, cy - 0.6, 1.3, 1.5, NLC(255, 255, 255, Round(255 * pulse)))
+    HWOval(cx + 3, cy - 0.6, 1.3, 1.5, NLC(255, 255, 255, Round(255 * pulse)))
+    HWPoly([cx - 1.1, cy + 2.8, cx + 1.1, cy + 2.8, cx, cy + 1.2], NLC(10, 6, 26, 200))
+    Loop 3
+        NLLine(cx - 2.8 + (A_Index - 1) * 2.8, cy + 6.2, cx - 2.8 + (A_Index - 1) * 2.8, cy + 9.4, NLC(10, 6, 26, 150))
+}
+
+; The flame name is costly to draw (a lot of text outlines and flame shapes), so it is drawn into a small picture of its own
+; that is renewed up to about 35 times a second and put on the menu in one go.
+SPLogoCached(x, y)
+{
+    global NLG, NLAlphaPage
+    static pics := Map()
+    key := x "|" y
+    pic := pics.Get(key, 0)
+    if (!pic) {
+        ox := 24, cw := 232, ch := y + 46
+        dc := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+        bi := Buffer(40, 0)
+        NumPut("int", 40, bi, 0)
+        NumPut("int", cw, bi, 4)
+        NumPut("int", -ch, bi, 8)
+        NumPut("short", 1, bi, 12)
+        NumPut("short", 32, bi, 14)
+        bits := 0
+        hb := DllCall("CreateDIBSection", "Ptr", dc, "Ptr", bi, "UInt", 0, "Ptr*", &bits, "Ptr", 0, "UInt", 0, "Ptr")
+        DllCall("SelectObject", "Ptr", dc, "Ptr", hb)
+        g := 0, img := 0
+        DllCall("gdiplus\GdipCreateFromHDC", "Ptr", dc, "Ptr*", &g)
+        DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", g, "Int", 4)
+        DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", g, "Int", 4)
+        DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", cw, "Int", ch, "Int", cw * 4, "Int", 0xE200B, "Ptr", bits, "Ptr*", &img)
+        if (!g || !img)
+            return SPLogoBody(x, y)
+        pic := {g: g, img: img, ox: ox, t: -99999, cx: 0}
+        pics[key] := pic
+    }
+    if (A_TickCount - pic.t >= 28) {
+        pc := A_IsCritical
+        Critical                                         ; (the drawing handle is shared with the overlays' timers)
+        prevG := NLG, prevA := NLAlphaPage
+        NLG := pic.g
+        NLAlphaPage := 1.0
+        try {
+            DllCall("gdiplus\GdipGraphicsClear", "Ptr", pic.g, "UInt", 0)
+            pic.cx := SPLogoBody(pic.ox, y)
+        }
+        NLG := prevG
+        NLAlphaPage := prevA
+        Critical(pc ? "On" : "Off")
+        pic.t := A_TickCount
+    }
+    DllCall("gdiplus\GdipDrawImageI", "Ptr", NLG, "Ptr", pic.img, "Int", x - pic.ox, "Int", 0)
+    return x + (pic.cx - pic.ox)
+}
+
+SPDrawLogo(x, y)
+{
+    global NLFontLogo, SPLogoIdx, NLHoverId, SPDD, NLAlphaPage
+    n := StrLen("M0MENT4M")
+    cx := (SPLogoIdx = 10 && NLAlphaPage >= 0.999) ? SPLogoCached(x, y) : SPLogoBody(x, y)
+    if (NLHoverId = "logo" || (IsObject(SPDD) && SPDD.id = "logo" && SPDD.open)) {
+        c := SPLogoRGB(SPLogoIdx, 1, n)
+        NLLine(x, y + 31, cx - 2, y + 31, NLC(c[1], c[2], c[3], 150))
+    }
+    if (IsObject(SPDD) && SPDD.id = "logo")
+        SPDD.ax := x - 4, SPDD.ay := y + 6, SPDD.aw := 168
+}
+
+; the name itself (flame, letters); returns where it ends
+SPLogoBody(x, y)
+{
+    global NLFontLogo, SPLogoIdx
+    txt := "M0MENT4M"
+    n := StrLen(txt)
+    cx := x
+    flame := (SPLogoIdx = 10)
+    t := A_TickCount / 1000
+    if (flame) {
+        wtot := 0
+        Loop n
+            wtot += NLTextW(SubStr(txt, A_Index, 1), NLFontLogo) * 0.68 + 1.0
+        SPFlameWord(x, y + 6, wtot, t)
+    }
+    Loop n {
+        ch := SubStr(txt, A_Index, 1)
+        c := SPLogoRGB(SPLogoIdx, A_Index, n)
+        wch := NLTextW(ch, NLFontLogo) * 0.68
+        if (flame) {
+            if (A_Index = 2) {                                                 ; the 0 is a skull
+                SPSkull(cx + wch / 2 + 0.5, y + 19, c, t)
+            } else {
+                fl := 0.85 + 0.15 * Sin(t * 11 + A_Index * 1.3)               ; the outline flickers a little
+                ; dark letters with a glowing outline in the gradient colour (like the EVADE logo)
+                for d in [[-2.2, 0], [2.2, 0], [0, -2.2], [0, 2.2]]
+                    NLText(ch, cx + d[1], y + d[2], NLC(c[1], c[2], c[3], 38), NLFontLogo, 40, 36, 0, 1)
+                for d in [[-1.2, -1.2], [1.2, -1.2], [-1.2, 1.2], [1.2, 1.2], [-1.4, 0], [1.4, 0], [0, -1.4], [0, 1.4]]
+                    NLText(ch, cx + d[1], y + d[2], NLC(Round(c[1] * fl), Round(c[2] * fl), Round(c[3] * fl)), NLFontLogo, 40, 36, 0, 1)
+                NLText(ch, cx, y, NLC(14, 7, 32), NLFontLogo, 40, 36, 0, 1)
+            }
+        } else {
+            NLText(ch, cx, y + 1, NLC(c[1], c[2], c[3], 55), NLFontLogo, 40, 36, 0, 1)
+            NLText(ch, cx, y, NLC(c[1], c[2], c[3]), NLFontLogo, 40, 36, 0, 1)
+        }
+        cx += wch + 1.0
+    }
+    return cx
+}
+
+; line with round caps and a custom width
+NLLineW(x1, y1, x2, y2, argb, wd)
+{
+    global NLG
+    DllCall("gdiplus\GdipDrawLine", "Ptr", NLG, "Ptr", NLPen(argb, wd, 1), "Float", x1, "Float", y1, "Float", x2, "Float", y2)
+}
+
+SPEase(x) => 1 - (1 - Max(0.0, Min(1.0, x))) ** 3
+
+; Bottom-left "Save config" button. After a click: the accent colour sweeps across, a ripple spreads from the
+; cursor, the check mark draws itself, sparks fly out, and the label slides from "Save config" to "Saved" and back.
+SPDrawSaveButton(sw)
+{
+    global NLG, NLW, NLH, NLHoverId, NLAnimating, NLFontUI, NLFontIcon, SPSavedAt, SPSavedX
+    by := NLH - 56
+    T := A_TickCount - SPSavedAt
+    active := (T >= 0 && T < 2100)
+    sv := NLLerp("qsave", (NLHoverId = "qsave") ? 1 : 0, 0.2)
+    NLLine(14, by - 8, sw - 14, by - 8, SPCol("Border"))
+    NLRR(12, by, 200, 40, 12, SPMix("Card", "Active", sv))
+    st := 0.0
+    if (active) {
+        NLAnimating := true
+        ein := SPEase(T / 380)
+        out := (T > 1550) ? SPEase((T - 1550) / 500) : 0.0
+        fade := 1 - out
+        st := ein * fade
+        ; accent sweep
+        NLRR(12, by, Max(2, 200 * ein), 40, 12, NLAccent(Round(70 * fade)))
+        ; ripple from the click, clipped to the button
+        path := NLPath(12, by, 200, 40, 12)
+        DllCall("gdiplus\GdipSetClipPath", "Ptr", NLG, "Ptr", path, "Int", 0)
+        rr := SPEase(T / 650) * 230
+        if (T < 650)
+            NLDisc(SPSavedX, by + 20, rr, NLAccent(Round(60 * (1 - T / 650))))
+        DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+        DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+        NLRRLine(12, by, 200, 40, 12, NLAccent(Round(230 * fade)))
+        ; glow ring that pulses outwards
+        if (T < 700) {
+            g := SPEase(T / 700)
+            NLRRLine(12 - g * 5, by - g * 5, 200 + g * 10, 40 + g * 10, 12 + g * 4, NLAccent(Round(140 * (1 - g))))
+        }
+    } else {
+        NLRRLine(12, by, 200, 40, 12, SPCol("Border"))
+    }
+    ; icon: floppy glyph fades out while the check draws itself
+    cx := 35, cy := by + 20
+    tcol := SPMix("Text2", "Text", sv)
+    NLText(Chr(0x1F4BE), 22, by, tcol, NLFontIcon, 26, 40, 1, 1)
+    if (active && st > 0) {
+        NLRR(cx - 11, cy - 11, 22, 22, 6, SPCol("Card", Round(255 * st)))
+        p := Max(0.0, Min(1.0, (T - 120) / 330)) * fade
+        if (p > 0) {
+            ; two strokes: down-right (first 40 %), then up-right (last 60 %)
+            q1 := Min(1.0, p / 0.4), q2 := Max(0.0, (p - 0.4) / 0.6)
+            ax := cx - 6, ay := cy, kx := cx - 2, ky := cy + 5, ex := cx + 7, ey := cy - 5
+            NLLineW(ax, ay, ax + (kx - ax) * q1, ay + (ky - ay) * q1, NLAccent(), 2.4)
+            if (q2 > 0)
+                NLLineW(kx, ky, kx + (ex - kx) * q2, ky + (ey - ky) * q2, NLAccent(), 2.4)
+        }
+        ; sparks
+        if (T < 800) {
+            k := SPEase(T / 800)
+            Loop 8 {
+                ang := (A_Index - 1) * 0.7853982 + 0.3
+                d := 9 + k * 24
+                NLDisc(cx + Cos(ang) * d, cy + Sin(ang) * d, 2.6 * (1 - k) + 0.4, NLAccent(Round(230 * (1 - k))))
+            }
+        }
+    }
+    ; label slides: "Save config" up and out, "Saved" up and in
+    NLText("Save config", 56, by - 12 * st, SPMix("Text2", "Text", sv, Round(255 * (1 - st))), NLFontUI, 140, 40, 0, 1)
+    if (st > 0)
+        NLText("Saved", 56, by + 12 * (1 - st), NLAccent(Round(255 * st)), NLFontUI, 140, 40, 0, 1)
+    NLAddHit("qsave", 12, by, 200, 40, SPQuickSave)
+}
+
+SPNavHit(id, x, y, w, h, fn)
+{
+    global NLH
+    y1 := Max(y, 92), y2 := Min(y + h, NLH - 70)
+    if (y2 > y1)
+        NLAddHit(id, x, y1, w, y2 - y1, fn)
+}
+
+SPNavItem(n, icon, label, y)
+{
+    global CurrentTab, NLHoverId, NLFontUI, NLFontB, NLFontIcon
+    id := "tab" n
+    t := NLLerp(id, (CurrentTab = n) ? 1 : 0, 0.22)
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.25)
+    NLRR(12, y, 200, 36, 12, SPCol("Active", Round(255 * Max(t, hv * 0.55))))
+    NLText(icon, 22, y, SPMix("Muted", "Text", t), NLFontIcon, 26, 36, 1, 1)
+    NLText(label, 56, y, SPMix("Text2", "Text", t), (CurrentTab = n) ? NLFontB : NLFontUI, 140, 36, 0, 1)
+    SPNavHit(id, 12, y, 200, 36, NLGoTab.Bind(n))
+    return y + 40
+}
+
+; ---------- pages ----------
+SPPageMacro()
+{
+    SPSection("Movement")
+    SPToggleRow("t_slide", "Infinite Slide", IsSlideChecked, ToggleSlideBox)
+    SPToggleRow("t_bhop", "Auto Bunnyhop", IsBhopChecked, ToggleBhopBox)
+    SPToggleRow("t_strafe", "Auto Strafer", IsStrafeChecked, ToggleStrafeBox)
+    SPToggleRow("t_edash", "EDash", IsComboChecked, ToggleComboBox)
+    SPSection("Utility")
+    SPToggleRow("t_cspam", "Crouch Spam", IsCSpamChecked, ToggleCSpamBox)
+    SPToggleRow("t_click", "Auto Clicker", IsClickChecked, ToggleClickBox)
+    SPToggleRow("t_spin", "Spinbot", IsSpinbotChecked, ToggleSpinbotBox)
+    SPSection("Options")
+    SPToggleRow("t_behind", "Slide turn camera", IsSlideBehindChecked, ToggleSlideBehindBox)
+    SPSliderRow("s_turn", "Turn amount", 200, 4000, SlideTurnAmount, NLSetTurn)
+    SPToggleRow("t_hold", "Bhop hold", IsBhopHoldChecked, ToggleBhopHoldBox)
+    SPToggleRow("t_edstrafe", "E-Dash autostrafer", IsEDashStrafe, ToggleEDashStrafe, true)
+    SPSliderRow("s_cs", "Crouch speed", 10, 200, CSpamSpeed, NLSetCSpam)
+    SPSliderRow("s_ck", "Clicker speed", 1, 200, ClickSpeed, NLSetClick)
+}
+
+SPPageBinds()
+{
+    SPSection("Macro keys")
+    SPKeyRow("k_slide", "Slide", TriggerKey, BtnSlideKey, StartBindSlide)
+    SPKeyRow("k_bhop", "Bunnyhop", BhopKey, BtnBhopKey, StartBindBhop)
+    SPKeyRow("k_hold", "Bhop hold", BhopHoldKey, BtnBhopHoldKey, StartBindBhopHold)
+    SPKeyRow("k_strafe", "Strafer", StrafeKey, BtnStrafeKey, StartBindStrafe)
+    SPKeyRow("k_edash", "EDash", ComboKey, BtnComboKey, StartBindCombo)
+    SPKeyRow("k_cspam", "Crouch spam", CSpamKey, BtnCSpamKey, StartBindCSpam)
+    SPKeyRow("k_click", "Auto clicker", ClickKey, BtnClickKey, StartBindClick)
+    SPKeyRow("k_spin", "Spinbot", SpinbotKey, BtnSpinbotKey, StartBindSpinbot)
+    SPSection("How to bind")
+    SPParaCard("Click a key box, then press a key or mouse button. ESC clears the bind. A key that another bind already uses is rejected.", 70)
+    cf := KeyConflictList()
+    if (cf.Length > 0)
+        SPParaCard("Warning: " cf[1] " share a key." (cf.Length > 1 ? " (+" (cf.Length - 1) " more)" : ""), 48)
+}
+
+; A card with a label, a value and a bar (used for the live graphics card readouts).
+; a bar filled with the performance HUD's gradient (the colours run along the full bar, so the fill shows part of it)
+SPGradBarFill(x, y, w, h, r, fw, gi)
+{
+    global NLG
+    brush := SPGradBrush(x, y, w, 0, SPLogoStops(gi), A_TickCount / 1000 * 0.3, 1.0)
+    DllCall("gdiplus\GdipFillPath", "Ptr", NLG, "Ptr", brush, "Ptr", NLPathK(x, y, fw, h, r))
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+SPStatRow(id, label, valText, frac, col)
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm
+    SPCard("", 62, id)
+    NLText(label, SPX + 16, SPY + 6, SPCol("Text"), NLFontUI, SPW - 200, 30, 0, 1)
+    NLText(valText, SPX + SPW - 216, SPY + 6, SPCol("Text2"), NLFontUI, 200, 30, 2, 1)
+    tx := SPX + 18, tw := SPW - 36, ty := SPY + 42
+    NLRR(tx, ty, tw, 5, 2.5, SPCol("Track"))
+    f := NLLerp("st" id, Max(0.0, Min(1.0, frac)), 0.25)
+    if (col)
+        NLRR(tx, ty, Max(5.0, tw * f), 5, 2.5, col)
+    else
+        SPGradBarFill(tx, ty, tw, 5, 2.5, Max(5.0, tw * f), PHStyle.grad ? PHStyle.grad : 1)
+    SPY += 72
+}
+
+SPPagePerf()
+{
+    global GpuLoad, GpuTemp, GpuUsed, GpuTotal, GpuLast, PHudOn, WH, FpsShowStats
+    ok := GpuInit()
+    if (ok && A_TickCount - GpuLast > 900) {
+        GpuLast := A_TickCount
+        GpuPoll()
+    }
+    SPSection("Performance HUD")
+    SPToggleRow("t_phud", "Show a small performance HUD", PHudOn, PHudToggle, true)
+    SPDropRow("p_phudpos", "Performance HUD position", PHudPosSel)
+    SPSection("Performance HUD style")
+    SPRowsHudStyle(PHStyle, PHBorderSel, PHGradSel, "ph")
+    SPSection("FPS counter")
+    SPButtonRow("b_fpsinst", FpsInstalled() ? "FPS counter installed (PresentMon " FpsVer ")" : "Install the FPS counter (PresentMon)", FpsInstalled() ? "Reinstall" : "Install", FpsInstallBtn)
+    SPToggleRow("t_wfps", "Show the FPS HUD", WH["fps"].on, FpsToggle, true)
+    SPToggleRow("t_fpsstats", "Show 1% low and frame time", FpsShowStats, FpsToggleStats, true)
+    SPSection("FPS HUD style")
+    SPRowsHudStyle(WH["fps"], FpsBorderSel, FpsGradSel, "fh")
+    SPParaCard("Status: " FpsStatusText() ". It reads Roblox's frame times through Windows with Intel's PresentMon (nothing is put into Roblox) and needs administrator permission once per session. ", 76)
+    SPSection("NVIDIA graphics card")
+    if (!ok) {
+        SPParaCard("No NVIDIA graphics card was found, so there is nothing to show here.", 48)
+        return
+    }
+    tcol := (GpuTemp >= 85) ? NLC(240, 96, 96) : 0
+    SPStatRow("g_load", "GPU load", GpuLoad " %", GpuLoad / 100, 0)
+    SPStatRow("g_temp", "Temperature", GpuTemp " " Chr(0xB0) "C", GpuTemp / 90, tcol)
+    SPStatRow("g_vram", "Video memory", Round(GpuUsed / 1024, 1) " / " Round(GpuTotal / 1024, 1) " GB", GpuUsed / GpuTotal, 0)
+    SPParaCard("Read straight from the NVIDIA driver once per second.", 44)
+}
+
+SPPageSysKeys()
+{
+    SPSection("System keybinds")
+    SPKeyRow("k_reload", "Reload", ReloadKey, BtnReloadKey, StartBindReload)
+    SPKeyRow("k_min", "Hide menu", MinimizeKey, BtnMinimizeKey, StartBindMinimize)
+    SPKeyRow("k_lock", "Macro lock", MacroLockKey, BtnMacroLockKey, StartBindMacroLock)
+    SPKeyRow("k_exit", "Exit", ExitKey, BtnExitKey, StartBindExit)
+    SPSection("Quick actions")
+    SPButtonRow("b_sysreload", "Reload the script", "Reload", ReloadAction)
+    SPButtonRow("b_syshide", "Hide this menu (show it again with its key or the tray icon)", "Hide", MinimizeApp)
+    SPButtonRow("b_syslock", IsMacrosLocked ? "Macros are locked" : "Lock every macro", IsMacrosLocked ? "Unlock" : "Lock", MacroLockToggle)
+    SPButtonRow("b_sysexit", "Close the script", "Exit", ExitWithAnimation)
+    SPSection("What they do")
+    SPParaCard("Reload restarts the script.`nHide menu shows or hides this window (the tray icon works too).`nMacro lock turns every macro off; press it again to restore them.`nExit closes the script.", 100)
+}
+
+SPPageLag()
+{
+    SPSection("Lagswitch")
+    SPKeyRow("k_lag", "Trigger key", LagKey, BtnLagKey, StartBindLag)
+    SPSliderRow("s_freeze", "Freeze (ms)", 1, 1000, FreezeDuration, NLSetFreeze)
+    SPToggleRow("t_lprec", "High precision", IsLagPrecisionChecked, ToggleLagPrecisionBox)
+    SPToggleRow("t_lhold", "Hold to freeze", IsLagHoldChecked, ToggleLagHoldBox)
+    SPButtonRow("b_test", "Test the freeze", "Test", TestFreeze)
+    SPParaCard(StatusText.Text, 48)
+    SPParaCard("Use it in private servers only.", 48)
+    SPSection("Effects")
+    SPToggleRow("t_lburst", "Tick mode", IsLagBurstChecked, ToggleLagBurstBox)
+    SPSliderRow("s_burst", "Ticks", 1, 20, LagBurstCount, NLSetBurst)
+    SPSliderRow("s_burstgap", "Pause between ticks (ms)", 20, 1000, LagBurstGap, NLSetBurstGap)
+    SPSection("Screen shake")
+    SPToggleRow("t_shake", "Shake the screen while frozen", ShakeOn, ToggleShake, true)
+    SPDropRow("p_shakewhere", "Shake on", ShakeWhereSel)
+    SPDropRow("p_shakestyle", "Shake style", ShakeStyleSel)
+    SPSliderRow("s_shakeamt", "Shake strength", 1, 100, ShakeAmt, SetShakeAmt)
+    SPToggleRow("t_shakesync", "Shake exactly as long as the freeze", ShakeSyncLen, ToggleShakeSync, true)
+    SPSliderRow("s_shakelen", "Shake lasts at least (ms)", 0, 2000, ShakeLen, SetShakeLen)
+    SPButtonRow("b_shaketest", "Try the shake", "Shake", ShakeTest)
+    SPSection("Freeze effect")
+    SPRowsFreeze()
+}
+
+SPRowsFreeze()
+{
+    SPToggleRow("t_lvig", "Screen effect on freeze", IsLagVignetteChecked, ToggleLagVignetteBox)
+    SPDropRow("p_vstyle", "Effect style", VigStyleSel)
+    SPDropRow("p_vgrad", "Colour", VigGradSel)
+    SPSwatchRow("c_vig", "Solid colour", VignetteColor, OpenVignetteColorPicker)
+    SPToggleRow("t_vanim", "Animate the colours", VigAnim, VigToggleAnim, true)
+    SPSliderRow("s_vspd", "Animation speed", 1, 10, VigAnimSpd, VigSetSpd)
+    SPSliderRow("s_thick", "Glow size", 2, 30, VignetteThickness, NLSetThick)
+    SPSliderRow("s_vstay", "Effect stays (ms)", 200, 5000, VigMinShow, VigSetStay)
+    SPSliderRow("s_vint", "Intensity", 10, 100, VigIntensity, VigSetInt)
+    SPSliderRow("s_vtint", "Screen tint", 0, 40, VigTint, VigSetTint)
+    SPToggleRow("t_vpill", "Countdown pill", VigPillOn, VigTogglePill, true)
+    SPToggleRow("t_vpillalways", "Keep the pill on screen", PillAlways, VigTogglePillAlways, true)
+    SPToggleRow("t_bpill", "Count down again for every tick", BurstSyncPill, ToggleBurstSyncPill, true)
+    SPRowsHudStyle(PillStyle, PillBorderSel, PillGradSel, "pl")
+    SPToggleRow("t_vsound", "Sound cue", VigSound, VigToggleSound, true)
+    SPDropRow("p_vsoundsel", "Sound", VigSoundSel)
+    SPToggleRow("t_bsound", "Play the sound for every tick", BurstSyncSound, ToggleBurstSyncSound, true)
+    SPSliderRow("s_vvol", "Volume (%)", 0, 100, VigVol, VigSetVol)
+    SPButtonRow("b_vsoundtest", "Play the sound", "Play", VigSoundTest)
+    SPButtonRow("b_vprev", "Try the effect without freezing", "Preview", VigPreview)
+}
+
+SPPageMisc()
+{
+    global NLSubTab, ThemeDDL, DesignDDL, HudPosDDL, HudOpacitySlider
+    if (NLSubTab = 1) {
+        SPSection("Colors")
+        SPSwatchRow("c_acc", "Accent / text", AccentColor, OpenColorPicker)
+        SPSwatchRow("c_bg", "Text background", BgColor, OpenBgColorPicker)
+        SPSwatchRow("c_icon", "Icon / button", IconBgColor, OpenIconBgColorPicker)
+        SPSwatchRow("c_panel", "Menu background", PanelColor, OpenPanelColorPicker)
+        SPButtonRow("b_resetcol", "Reset colours", "Reset", ResetDesignColors)
+        SPSection("Presets")
+        SPDropRow("p_theme", "Theme", ThemeDDL)
+        SPButtonRow("b_theme", "Apply the theme", "Apply", ApplyThemePreset)
+        SPDropRow("p_design", "Design", DesignDDL)
+        SPButtonRow("b_design", "Apply the design", "Apply", ApplyDesignPreset)
+        SPToggleRow("t_follow", "Change the colours too", ColorsFollow, ToggleColorsFollow, true)
+        SPSection("Menu background")
+        SPToggleRow("t_mblur", "Blur the game behind the menu", MenuBlurOn, ToggleMenuBlur, true)
+        SPSliderRow("s_mdim", "Darken the background (%)", 0, 90, MenuBlurDim, SetMenuBlurDim)
+        SPDropRow("p_mfx", "Effect behind the menu", MenuFxSel)
+        SPSliderRow("s_mfxamt", "Effect amount", 10, 100, MenuFxAmt, SetMenuFxAmt)
+    } else if (NLSubTab = 2) {
+        SPSection("Overlay")
+        SPRowsOverlay()
+        SPParaCard("The Macro HUD is a small always-on-top list that lights up for every running macro. Status popups show ON/OFF toasts at the bottom of the screen.", 70)
+        SPSection("Notification style")
+        SPRowsHudStyle(NotifStyle, NotifBorderSel, NotifGradSel, "nt")
+    } else if (NLSubTab = 3) {
+        SPPagePerf()
+    } else if (NLSubTab = 4) {
+        SPPageLive()
+    } else {
+        SPPageCompanion()
+    }
+}
+
+TikTokOpen(*)
+{
+    try Run("https://www.tiktok.com/@yoshimixu3")
+}
+
+; the facts a bug report needs, on the clipboard (no user name, no key logs)
+CopyDiagnostics(*)
+{
+    global CurrentDesign, TargetProcess, HkHelperOK, FxHelperPid, ConfigDir, ConfigExt, ConfigVersion
+    global IsSlideChecked, IsBhopChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked
+    global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey, LagKey
+    global FreezeDuration, IsLagBurstChecked, LagBurstCount, LagBurstGap, IsLagHoldChecked, IsLagPrecisionChecked, VigStyle, ShakeOn, ShakeStyle
+    t := "M0MENT4M 2.0 diagnostics`n"
+    t .= "Config version: " ConfigVersion "`n"
+    t .= "Time: " FormatTime(, "yyyy-MM-dd HH:mm") "`n"
+    t .= "Windows: " A_OSVersion (A_Is64bitOS ? " 64-bit" : " 32-bit") "`n"
+    t .= "AutoHotkey: " A_AhkVersion (A_IsAdmin ? " (admin)" : " (not admin)") "`n"
+    t .= "Screen: " A_ScreenWidth "x" A_ScreenHeight " at " A_ScreenDPI " dpi`n"
+    t .= "Design: " CurrentDesign "`n"
+    t .= "Folder: " StrReplace(AppDir, EnvGet("USERPROFILE"), "%USERPROFILE%") "`n"
+    t .= "Game process (" TargetProcess "): " (ProcessExist(TargetProcess) ? "running" : "not running") "`n"
+    t .= "Hotkey helper: " (HkHelperOK ? "running" : "NOT running") "`n"
+    t .= "Menu effects helper: " ((FxHelperPid && ProcessExist(FxHelperPid)) ? "running" : "off") "`n"
+    on := ""
+    for pr in [["slide", IsSlideChecked], ["bhop", IsBhopChecked], ["strafer", IsStrafeChecked], ["edash", IsComboChecked], ["crouch spam", IsCSpamChecked], ["clicker", IsClickChecked], ["spinbot", IsSpinbotChecked]]
+        on .= pr[2] ? (on = "" ? "" : ", ") pr[1] : ""
+    t .= "Macros on: " (on = "" ? "none" : on) "`n"
+    t .= "Keys: slide " FormatKeyName(TriggerKey) ", bhop " FormatKeyName(BhopKey) ", hold " FormatKeyName(BhopHoldKey) ", strafer " FormatKeyName(StrafeKey) ", edash " FormatKeyName(ComboKey) ", crouch " FormatKeyName(CSpamKey) ", clicker " FormatKeyName(ClickKey) ", spinbot " FormatKeyName(SpinbotKey) ", lag " FormatKeyName(LagKey) "`n"
+    cf := KeyConflictList()
+    t .= "Key conflicts: " (cf.Length ? cf[1] (cf.Length > 1 ? " (+" (cf.Length - 1) " more)" : "") : "none") "`n"
+    t .= "Lagswitch: " FreezeDuration " ms, " (IsLagBurstChecked ? "ticks " LagBurstCount " (gap " LagBurstGap " ms)" : "single") ", hold " (IsLagHoldChecked ? "on" : "off") ", precision " (IsLagPrecisionChecked ? "on" : "off") ", effect style " VigStyle ", shake " (ShakeOn ? "on (style " ShakeStyle ")" : "off") "`n"
+    n := 0
+    Loop Files, ConfigDir "\*" ConfigExt
+        n += 1
+    t .= "Saved configs: " n "`n"
+    A_Clipboard := t
+    ShowStatus("DIAGNOSTICS COPIED", "0x082A13", 200, true)
+}
+
+KofiOpen(*)
+{
+    try Run("https://ko-fi.com/yeko03")
+}
+
+DiscordOpen(*)
+{
+    try Run("https://discord.gg/r95ZjED2js")
+}
+
+SPPageInfo()
+{
+    global SPX, SPY, SPW, NLFontUI, NLFontSm, NLHoverId
+    SPSection("About")
+    SPCard("", 200)
+    NLText(p5b.Text, SPX + 16, SPY + 12, SPCol("Text"), NLFontUI, SPW - 32, 22, 0, 1)
+    NLText(p5d.Text, SPX + 16, SPY + 40, SPCol("Text2"), NLFontSm, SPW - 32, 56, 0, 0, true)
+    NLText(p5f.Text, SPX + 16, SPY + 100, (NLHoverId = "ttlink") ? SPCol("Text") : SPCol("Muted"), NLFontSm, SPW - 32, 18, 0, 1)
+    NLAddHit("ttlink", SPX + 16, SPY + 100, SPW - 32, 18, TikTokOpen)
+    hov := (NLHoverId = "dclink")
+    NLText(p5g.Text, SPX + 16, SPY + 120, hov ? SPCol("Text") : SPCol("Muted"), NLFontSm, SPW - 32, 24, 0, 0, true)
+    NLAddHit("dclink", SPX + 16, SPY + 120, SPW - 32, 22, DiscordOpen)
+    NLText(p5k.Text, SPX + 16, SPY + 146, (NLHoverId = "kflink") ? SPCol("Text") : SPCol("Muted"), NLFontSm, SPW - 32, 18, 0, 1)
+    NLAddHit("kflink", SPX + 16, SPY + 146, SPW - 32, 18, KofiOpen)
+    NLText(p5h.Text, SPX + 16, SPY + 170, SPCol("Muted"), NLFontSm, SPW - 32, 18, 0, 1)
+    SPY += 210
+    SPButtonRow("b_diag", "Copy diagnostics (for bug reports)", "Copy", CopyDiagnostics)
+    SPSection("Changelog")
+    SPParaCard(p5patch.Text, 270)
+}
+
+SPPageConfig()
+{
+    global ConfigDDL, SaveNameInput, NLEditIH
+    SPSection("Configs")
+    SPDropRow("p_cfg", "Config (click to load)", ConfigDDL, SPLoadConfig)
+    editing := IsObject(NLEditIH)
+    SPValueRow("v_name", "Name", SaveNameInput.Value . (editing && Mod(A_TickCount // 500, 2) = 0 ? "|" : ""), NLRename)
+    SPButtonRow("b_save", "Save under this name", "Save", SaveConfig)
+    SPButtonRow("b_del", ConfigDDL.Text = "" ? "Delete the selected config" : "Delete " ConfigDDL.Text, "Delete", DeleteConfig)
+    SPButtonRow("b_reset", "Restore every default", "Reset", ResetDefaults)
+    SPButtonRow("b_export", "Copy this config to the clipboard (to share it)", "Copy", ExportConfig)
+    SPButtonRow("b_import", "Import a config from the clipboard", "Import", ImportConfig)
+    SPSection("Notes")
+    SPParaCard("Click a config above to load it. Configs are JSON files in the configs folder and store every macro option, keybind, color, theme and the design.", 70)
+}
+
+; ===== M0MENT4M design: slide-in notification cards (bottom left) =====
+; the look of the cards (Misc > Overlay > Notification style); saved in the configs with the widget looks
+Global NotifStyle := {id: "notif", bg: true, border: true, scale: 100, bstyle: 0, grad: 0}
+Global TW := 560, TH := 460, TMemDC := 0, TBmp := 0, TG := 0, TGui := "", TList := [], TTimerOn := false
+
+SPToast(text, key := 0, kindOver := "", subOver := "")
+{
+    global TList, TTimerOn, TH, ShowStatusNotifs
+    if (!ShowStatusNotifs)          ; the "Status popups" switch turns every card off
+        return
+    NLGdipInit()
+    t := StrReplace(StrReplace(text, "`r"), "`n", " ")
+    title := t, sub := "", kind := "info"
+    if (kindOver != "") {
+        title := t, sub := subOver, kind := kindOver
+    } else if (RegExMatch(t, "^(.*) ALREADY USED: (.*)$", &mm)) {
+        title := "Key already used", sub := mm[1] " is bound to " mm[2], kind := "off"
+    } else if (RegExMatch(t, "^(.*?):\s*(.+)$", &m)) {
+        title := m[1]
+        rest := Trim(m[2])
+        if (StrUpper(rest) = "ON")
+            sub := "Enabled", kind := "on"
+        else if (StrUpper(rest) = "OFF")
+            sub := "Disabled", kind := "off"
+        else if (StrUpper(rest) = "LOCKED")
+            title := "Macros locked", sub := "", kind := "off"
+        else if (StrUpper(rest) = "RESTORED")
+            title := "Macros on", sub := "", kind := "on"
+        else
+            sub := rest
+    }
+    if (kindOver = "" && !InStr(t, "ALREADY USED"))
+        title := StrTitle(StrLower(Trim(title)))
+    if (key) {
+        for it in TList {
+            if (it.key = key) {
+                it.title := title, it.sub := sub, it.kind := kind
+                it.t0 := Min(it.t0, A_TickCount - 500) + 0
+                it.t0 := A_TickCount - 500
+                SPToastStart()
+                return
+            }
+        }
+    }
+    TList.InsertAt(1, {key: key, title: title, sub: sub, kind: kind, t0: A_TickCount, dur: 2400, y: TH - 72})
+    while (TList.Length > 4)
+        TList.Pop()
+    SPToastStart()
+}
+
+SPToastStart()
+{
+    global TGui, TW, TH, TTimerOn, TMemDC, TBmp, TG
+    if (!IsObject(TGui)) {
+        TGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M toasts")
+        TMemDC := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+        bi := Buffer(40, 0)
+        NumPut("int", 40, bi, 0)
+        NumPut("int", TW, bi, 4)
+        NumPut("int", -TH, bi, 8)
+        NumPut("short", 1, bi, 12)
+        NumPut("short", 32, bi, 14)
+        pBits := 0
+        TBmp := DllCall("CreateDIBSection", "Ptr", TMemDC, "Ptr", bi, "UInt", 0, "Ptr*", &pBits, "Ptr", 0, "UInt", 0, "Ptr")
+        DllCall("SelectObject", "Ptr", TMemDC, "Ptr", TBmp)
+        DllCall("gdiplus\GdipCreateFromHDC", "Ptr", TMemDC, "Ptr*", &TG)
+        DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", TG, "Int", 4)
+        DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", TG, "Int", 4)
+        TGui.Show("x0 y" (A_ScreenHeight - TH - 40) " w" TW " h" TH " NA")
+    } else
+        TGui.Show("NA")
+    if (!TTimerOn) {
+        TTimerOn := true
+        SetTimer(SPToastTick, 16)
+    }
+    SPToastRender()
+}
+
+SPToastTick()
+{
+    global TList, TGui, TTimerOn
+    Critical
+    now := A_TickCount
+    i := TList.Length
+    while (i >= 1) {
+        it := TList[i]
+        if (now - it.t0 > it.dur + 420)
+            TList.RemoveAt(i)
+        i--
+    }
+    if (TList.Length = 0) {
+        SetTimer(SPToastTick, 0)
+        TTimerOn := false
+        TGui.Hide()
+        return
+    }
+    SPToastRender()
+}
+
+; Critical keeps another timer from touching the shared drawing handle halfway through, but it must not
+; leak into the thread that called us (it would stop timers from running while that thread sleeps).
+SPToastRender()
+{
+    pc := A_IsCritical
+    Critical
+    try SPToastRenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+SPToastRenderInner()
+{
+    global TList, TG, TW, TH, TMemDC, TGui, NLG, NLAlphaPage, NLFontB, NLFontSm, NLFontIcon
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := TG
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", TG, "UInt", 0)
+    now := A_TickCount
+    cw := 316, chh := 58
+    ns := NotifStyle
+    sc := ns.scale / 100
+    gi := ns.grad ? ns.grad : 1
+    gst := SPLogoStops(gi)
+    nbs := ns.bstyle ? ns.bstyle : 1
+    for i, it in TList {
+        target := TH - 16 - chh * sc - (i - 1) * 68 * sc
+        it.y += (target - it.y) * 0.3
+        el := now - it.t0
+        tin := Max(0.0, Min(1.0, el / 480))
+        e := 1 + 2.70158 * (tin - 1) ** 3 + 1.70158 * (tin - 1) ** 2
+        tout := (el > it.dur) ? Min(1.0, (el - it.dur) / 400) : 0.0
+        tout := tout * tout
+        slide := (cw + 30) * sc
+        x := 24 - (1 - e) * slide - tout * slide
+        y := it.y
+        NLAlphaPage := Min(1.0, tin * 2.5) * (1 - tout)
+        DllCall("gdiplus\GdipResetWorldTransform", "Ptr", TG)
+        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", TG, "Float", x, "Float", y, "Int", 0)
+        DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", TG, "Float", sc, "Float", sc, "Int", 0)
+        x := 0, y := 0
+        if (ns.bg) {
+            NLRR(x - 1, y + 3, cw + 2, chh, 15, NLC(0, 0, 0, 50))
+            NLRR(x, y, cw, chh, 14, SPCol("Card"))
+        }
+        if (ns.border) {
+            if (nbs <= 2) {
+                NLRRLine(x, y, cw, chh, 14, nbs = 2 ? NLAccent(210) : SPCol("Border"))
+            } else {
+                if (ns.bg)
+                    NLRRLine(x, y, cw, chh, 14, SPCol("Border", 120))
+                SPGradBorder(x + 1, y + 1, cw - 2, chh - 2, 13, SPLogoStops(nbs = 4 ? 6 : gi), A_TickCount / 1000 * 0.3, 2)
+            }
+        }
+        ; with a gradient chosen the icon, the title and the time bar take its (moving) colours
+        tc := ns.grad ? SPStopsSample(gst, A_TickCount / 1000 * 0.12 + i * 0.1) : 0
+        ; icon bubble
+        if (it.kind = "off") {
+            col := NLC(240, 96, 96), colSoft := NLC(240, 96, 96, 40)
+        } else if (tc) {
+            col := NLC(tc[1], tc[2], tc[3]), colSoft := NLC(tc[1], tc[2], tc[3], 40)
+        } else {
+            col := NLAccent(), colSoft := NLAccent(40)
+        }
+        NLDisc(x + 30, y + 29, 15, colSoft)
+        if (it.kind = "on") {
+            NLLineW(x + 23, y + 29.5, x + 28, y + 34.5, col, 2.4)
+            NLLineW(x + 28, y + 34.5, x + 37.5, y + 23.5, col, 2.4)
+        } else if (it.kind = "key") {
+            NLRRLine(x + 21, y + 22, 18, 14, 4, col)
+            NLLineW(x + 25, y + 31, x + 35, y + 31, col, 2)
+        } else if (it.kind = "off") {
+            NLLineW(x + 24.5, y + 23.5, x + 35.5, y + 34.5, col, 2.4)
+            NLLineW(x + 35.5, y + 23.5, x + 24.5, y + 34.5, col, 2.4)
+        } else {
+            NLDisc(x + 30, y + 22.5, 1.8, col)
+            NLLineW(x + 30, y + 27, x + 30, y + 36, col, 2.4)
+        }
+        tcol := tc ? NLC(tc[1], tc[2], tc[3]) : SPCol("Text")
+        if (it.sub = "") {
+            NLText(it.title, x + 58, y + 4, tcol, NLFontB, cw - 72, chh - 8, 0, 1)
+        } else {
+            NLText(it.title, x + 58, y + 9, tcol, NLFontB, cw - 72, 20, 0, 1)
+            NLText(it.sub, x + 58, y + 29, SPCol("Text2"), NLFontSm, cw - 72, 18, 0, 1)
+        }
+        ; time bar
+        rem := Max(0.0, 1 - el / it.dur)
+        NLRR(x + 16, y + chh - 6, (cw - 32) * rem, 2.5, 1.25, tc ? NLC(tc[1], tc[2], tc[3], 150) : ((it.kind = "off") ? NLC(240, 96, 96, 150) : NLAccent(150)))
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", TG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    sz := Buffer(8, 0)
+    NumPut("Int", TW, sz, 0)
+    NumPut("Int", TH, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", TGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", TMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; ===== Screen shake while the game is frozen =====
+; The game cannot change while it is frozen, so a picture of it is taken the moment the freeze starts and shaken (zoomed a tiny bit and moved
+; around a few pixels) in a window right over the game. The window is gone again the moment the freeze ends.
+Global ShakeOn := false, ShakeStyle := 1, ShakeAmt := 40, ShakeWhere := 1, ShakeLen := 400, ShakeSyncLen := false, ShakeState := 0, ShakeMagOK := 0
+
+class ShakeWhereSelC {
+    items := ["The game picture", "The whole screen"]
+    Value => ShakeWhere
+    Text => this.items[ShakeWhere]
+    Choose(i) {
+        global ShakeWhere
+        ShakeWhere := i
+        NLRequest()
+    }
+}
+Global ShakeWhereSel := ShakeWhereSelC()
+
+class ShakeStyleSelC {
+    items := ["Jitter", "Impact", "Wobble", "Punch", "Heartbeat", "Earthquake", "Kick", "Drunk sway", "Roll", "Vertical roll", "Glitch slices", "RGB split", "Zoom blur"]
+    Value => ShakeStyle
+    Text => this.items[ShakeStyle]
+    Choose(i) {
+        global ShakeStyle
+        ShakeStyle := i
+        NLRequest()
+    }
+}
+Global ShakeStyleSel := ShakeStyleSelC()
+
+ToggleShake(*)
+{
+    global ShakeOn
+    ShakeOn := !ShakeOn
+    NLRequest()
+}
+
+ToggleShakeSync(*)
+{
+    global ShakeSyncLen
+    ShakeSyncLen := !ShakeSyncLen
+    NLRequest()
+}
+
+SetShakeLen(v)
+{
+    global ShakeLen
+    ShakeLen := v
+}
+
+SetShakeAmt(v)
+{
+    global ShakeAmt
+    ShakeAmt := v
+}
+
+; (the shake itself runs in the helper program: it takes a picture of the game and shakes that picture in a window of its own)
+ShakeStart(force := false, minLen := -1)
+{
+    global ShakeOn, ShakeAmt, ShakeStyle, ShakeWhere, ShakeLen, ShakeSyncLen, FxView, GAME_EXE, NLGui
+    if (!ShakeOn && !force)
+        return
+    if (!FxView)
+        return
+    ; the screen the shake happens on: the one the game is on, the one the menu is on, or all of them
+    target := WinExist(GAME_EXE)
+    if (!target)
+        target := IsObject(NLGui) ? NLGui.Hwnd : 0
+    NumPut("Int", (ShakeWhere = 1 && target && target = WinExist(GAME_EXE)) ? 1 : 2, FxView, 36)
+    NumPut("Ptr", target, FxView, 40)
+    NumPut("Int", ShakeStyle, FxView, 24)
+    NumPut("Int", ShakeAmt, FxView, 28)
+    NumPut("Int", (minLen >= 0) ? minLen : (ShakeSyncLen ? 0 : ShakeLen), FxView, 48)
+    NumPut("UInt", A_TickCount, FxView, 32)
+    NumPut("Int", 1, FxView, 20)
+}
+
+ShakeStop(*)
+{
+    global FxView
+    if (FxView)
+        NumPut("Int", 0, FxView, 20)
+}
+
+ShakeTest(*)
+{
+    global FxHelperPid
+    if (!FxHelperPid || !ProcessExist(FxHelperPid)) {
+        FxHelperStart()
+        SetTimer(ShakeTest, -1000)                           ; (the helper needs a moment to start)
+        return
+    }
+    ShakeStart(true)
+    SetTimer(ShakeStop, -900)
+}
+
+; ===== Menu background: the game behind the menu can be blurred, and drifting effects can play behind the menu =====
+; Only while the menu is open. This is done by a second small program (tools\fxhelper.ahk) with its own windows, so that drawing it never
+; takes time away from the menu, the widgets or the companion. Two click-through windows sit between the game and the menu: the lower one
+; lets Windows blur what is behind it, the upper one carries the darkening and the effect. Everything is off by default.
+Global MenuBlurOn := false, MenuBlurDim := 30, MenuFxIdx := 1, MenuFxAmt := 50
+Global MFParts := Map(), MFDimDone := -1                    ; (kept so older code that clears them still works)
+Global FxMapH := 0, FxView := 0, FxHelperPid := 0, FxLastSig := "", MenuFxHold := false
+
+class MenuFxSelC {
+    items := ["Off", "Embers", "Snow", "Rain", "Fireflies", "Stars", "Bats"]
+    Value => MenuFxIdx
+    Text => this.items[MenuFxIdx]
+    Choose(i) {
+        global MenuFxIdx
+        MenuFxIdx := i
+        NLRequest()
+    }
+}
+Global MenuFxSel := MenuFxSelC()
+
+ToggleMenuBlur(*)
+{
+    global MenuBlurOn
+    MenuBlurOn := !MenuBlurOn
+    NLRequest()
+}
+
+SetMenuBlurDim(v)
+{
+    global MenuBlurDim
+    MenuBlurDim := v
+}
+
+SetMenuFxAmt(v)
+{
+    global MenuFxAmt
+    MenuFxAmt := v
+}
+
+FxHelperSrc()
+{
+    return "
+    (
+#Requires AutoHotkey v2.0
+#SingleInstance Off
+#NoTrayIcon
+Persistent
+mainPid := Integer(A_Args[1])
+sw := A_ScreenWidth
+sh := A_ScreenHeight
+DllCall('LoadLibrary', 'Str', 'gdiplus')
+si := Buffer(24, 0)
+NumPut('UInt', 1, si, 0)
+tok := 0
+DllCall('gdiplus\GdiplusStartup', 'Ptr*', &tok, 'Ptr', si, 'Ptr', 0)
+hMap := DllCall('OpenFileMappingW', 'UInt', 4, 'Int', 0, 'Str', 'M0M_FX_' mainPid, 'Ptr')
+pView := hMap ? DllCall('MapViewOfFile', 'Ptr', hMap, 'UInt', 4, 'UInt', 0, 'UInt', 0, 'UPtr', 64, 'Ptr') : 0
+mbGui := 0
+mfGui := 0
+dc := 0
+G := 0
+shownBlur := false
+shownFx := false
+placed := 0
+lastFx := 0
+sigDone := ''
+parts := Map()
+brushes := Map()
+idleSince := 0
+shaking := false
+shkFailed := false
+shkMin := 0
+shkMode := 1
+shkTarget := 0
+shkT0 := 0
+sDC := 0
+sBmp := 0
+oDC := 0
+oBmp := 0
+shkHost := 0
+shkL := 0
+shkT := 0
+shkW := 0
+shkH := 0
+shkLev := 0.0
+shkEnd := 0
+shkDx := 0.0
+shkDy := 0.0
+shkLast := 0
+shkKick := 1
+cDC := [0, 0, 0]
+cBmp := [0, 0, 0]
+slices := []
+sliceLast := 0
+SetTimer(Tick, 16)
+SetTimer(Watch, 1500)
+SetTimer(ShakeTick, 16)
+
+Watch() {
+    global idleSince
+    if (!ProcessExist(mainPid))
+        ExitApp
+    ; nothing to show and no shake switched on for a while: this program is not needed, it closes (the main script starts it again when it is)
+    if (pView && !NumGet(pView, 0, 'Int') && !NumGet(pView, 44, 'Int') && !shaking) {
+        if (!idleSince)
+            idleSince := A_TickCount
+        else if (A_TickCount - idleSince > 20000)
+            ExitApp
+    } else
+        idleSince := 0
+}
+
+Ensure() {
+    global mbGui, mfGui, dc, G
+    if (IsObject(mfGui))
+        return
+    mbGui := Gui('+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale', 'M0MENT4M blur')
+    mbGui.BackColor := '000000'
+    mbGui.Show('Hide x0 y0 w' sw ' h' sh)
+    DllCall('SetLayeredWindowAttributes', 'Ptr', mbGui.Hwnd, 'UInt', 0, 'UChar', 255, 'UInt', 2)
+    accent := Buffer(16, 0)
+    NumPut('Int', 3, accent, 0)
+    data := Buffer(8 + A_PtrSize * 2, 0)
+    NumPut('Int', 19, data, 0)
+    NumPut('Ptr', accent.Ptr, data, A_PtrSize)
+    NumPut('UInt', 16, data, A_PtrSize * 2)
+    DllCall('user32\SetWindowCompositionAttribute', 'Ptr', mbGui.Hwnd, 'Ptr', data)
+    mfGui := Gui('+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale', 'M0MENT4M menu effect')
+    dc := DllCall('CreateCompatibleDC', 'Ptr', 0, 'Ptr')
+    bi := Buffer(40, 0)
+    NumPut('int', 40, bi, 0)
+    NumPut('int', sw, bi, 4)
+    NumPut('int', -sh, bi, 8)
+    NumPut('short', 1, bi, 12)
+    NumPut('short', 32, bi, 14)
+    bits := 0
+    bmp := DllCall('CreateDIBSection', 'Ptr', dc, 'Ptr', bi, 'UInt', 0, 'Ptr*', &bits, 'Ptr', 0, 'UInt', 0, 'Ptr')
+    DllCall('SelectObject', 'Ptr', dc, 'Ptr', bmp)
+    DllCall('gdiplus\GdipCreateFromHDC', 'Ptr', dc, 'Ptr*', &G)
+    DllCall('gdiplus\GdipSetSmoothingMode', 'Ptr', G, 'Int', 4)
+}
+
+; both windows go right below the lowest window of the main script (so its widgets, HUD and menu stay above them), and above the game
+Place() {
+    h := DllCall('GetTopWindow', 'Ptr', 0, 'Ptr')
+    lowest := 0
+    guard := 0
+    while (h && guard < 800) {
+        guard += 1
+        if (h != mfGui.Hwnd && h != mbGui.Hwnd && DllCall('IsWindowVisible', 'Ptr', h)) {
+            if (DllCall('GetWindowLongPtr', 'Ptr', h, 'Int', -20, 'Ptr') & 8) {
+                wp := 0
+                DllCall('GetWindowThreadProcessId', 'Ptr', h, 'UInt*', &wp)
+                if (wp = mainPid)
+                    lowest := h
+            }
+        }
+        h := DllCall('GetWindow', 'Ptr', h, 'UInt', 2, 'Ptr')
+    }
+    after := lowest ? lowest : -1
+    if (shownFx) {
+        DllCall('SetWindowPos', 'Ptr', mfGui.Hwnd, 'Ptr', after, 'Int', 0, 'Int', 0, 'Int', 0, 'Int', 0, 'UInt', 19)
+        after := mfGui.Hwnd
+    }
+    if (shownBlur)
+        DllCall('SetWindowPos', 'Ptr', mbGui.Hwnd, 'Ptr', after, 'Int', 0, 'Int', 0, 'Int', 0, 'Int', 0, 'UInt', 19)
+}
+
+Tick() {
+    global shownBlur, shownFx, placed, lastFx, sigDone
+    if (!pView)
+        return
+    vis := NumGet(pView, 0, 'Int')
+    blur := NumGet(pView, 4, 'Int')
+    dim := NumGet(pView, 8, 'Int')
+    idx := NumGet(pView, 12, 'Int')
+    amt := NumGet(pView, 16, 'Int')
+    needBlur := vis && blur
+    needFx := vis && (idx > 1 || (blur && dim > 0))
+    if (!needBlur && !needFx) {
+        if (shownBlur || shownFx) {
+            mbGui.Hide()
+            mfGui.Hide()
+            shownBlur := false
+            shownFx := false
+        }
+        return
+    }
+    Ensure()
+    if (needBlur && !shownBlur) {
+        mbGui.Show('NA')
+        shownBlur := true
+        placed := 0
+    } else if (!needBlur && shownBlur) {
+        mbGui.Hide()
+        shownBlur := false
+    }
+    if (needFx && !shownFx) {
+        mfGui.Show('x0 y0 w' sw ' h' sh ' NA')
+        shownFx := true
+        placed := 0
+        sigDone := ''
+    } else if (!needFx && shownFx) {
+        mfGui.Hide()
+        shownFx := false
+    }
+    if (A_TickCount - placed > 1000) {
+        placed := A_TickCount
+        Place()
+    }
+    if (idx > 1) {
+        if (A_TickCount - lastFx >= 30) {
+            lastFx := A_TickCount
+            Render(blur, dim, idx, amt)
+        }
+    } else {
+        sig := blur '|' dim
+        if (sig != sigDone) {
+            sigDone := sig
+            Render(blur, dim, idx, amt)
+        }
+    }
+}
+
+Argb(a, c) {
+    return ((a & 255) << 24) | (c[1] << 16) | (c[2] << 8) | c[3]
+}
+
+Brush(argb) {
+    global brushes
+    if (brushes.Has(argb))
+        return brushes[argb]
+    if (brushes.Count > 3000) {
+        for k, b in brushes
+            DllCall('gdiplus\GdipDeleteBrush', 'Ptr', b)
+        brushes := Map()
+    }
+    b := 0
+    DllCall('gdiplus\GdipCreateSolidFill', 'UInt', argb, 'Ptr*', &b)
+    brushes[argb] := b
+    return b
+}
+
+Disc(x, y, d, argb) {
+    argb := (argb & 0xFFFFFF) | (((argb >> 24) & 0xF8) << 24)
+    DllCall('gdiplus\GdipFillEllipse', 'Ptr', G, 'Ptr', Brush(argb), 'Float', x - d / 2, 'Float', y - d / 2, 'Float', d, 'Float', d)
+}
+
+Pen(argb, wd) {
+    pn := 0
+    DllCall('gdiplus\GdipCreatePen1', 'UInt', argb, 'Float', wd, 'Int', 2, 'Ptr*', &pn)
+    return pn
+}
+
+Render(blur, dim, idx, amt) {
+    DllCall('gdiplus\GdipGraphicsClear', 'Ptr', G, 'UInt', 0)
+    if (blur && dim > 0) {
+        DllCall('gdiplus\GdipFillRectangleI', 'Ptr', G, 'Ptr', Brush(Argb(Round(dim * 2.3), [8, 8, 14])), 'Int', 0, 'Int', 0, 'Int', sw, 'Int', sh)
+    }
+    t := A_TickCount
+    n := Round(20 + amt * 1.5)
+    switch idx {
+        case 2: Embers(n, t)
+        case 3: Snow(n, t)
+        case 4: Rain(n, t)
+        case 5: Fireflies(n, t)
+        case 6: Stars(n, t)
+        case 7: Bats(n, t)
+    }
+    sz := Buffer(8, 0)
+    NumPut('Int', sw, sz, 0)
+    NumPut('Int', sh, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut('UChar', 255, bf, 2)
+    NumPut('UChar', 1, bf, 3)
+    DllCall('UpdateLayeredWindow', 'Ptr', mfGui.Hwnd, 'Ptr', 0, 'Ptr', 0, 'Ptr', sz, 'Ptr', dc, 'Ptr', src, 'UInt', 0, 'Ptr', bf, 'UInt', 2)
+}
+
+Part(idx, n) {
+    global parts
+    key := idx '|' n
+    if (parts.Has(key))
+        return parts[key]
+    parts := Map()
+    pt := {x: [], y: [], k: [], a: []}
+    Loop n {
+        pt.x.Push(Random(0, sw))
+        pt.y.Push(Random(0, sh))
+        pt.k.Push(Random(0, 1000) / 1000)
+        pt.a.Push(Random(0, 1000) / 1000)
+    }
+    parts[key] := pt
+    return pt
+}
+
+Embers(n, t) {
+    pt := Part(2, n)
+    Loop n {
+        i := A_Index
+        k := pt.k[i]
+        v := 40 + 130 * pt.a[i]
+        y := Mod(Mod(pt.y[i] - v * t / 1000, sh + 40) + sh + 40, sh + 40) - 20
+        x := pt.x[i] + (10 + 36 * k) * Sin(t / 750 + k * 6.28)
+        fl := 0.6 + 0.4 * Sin(t / 95 + k * 20)
+        sz := 2.5 + 4 * pt.a[i]
+        c := [255, Round(110 + 120 * k), Round(30 + 50 * k)]
+        Disc(x, y, sz * 3.6, Argb(Round(34 * fl), c))
+        Disc(x, y, sz * 1.9, Argb(Round(100 * fl), c))
+        Disc(x, y, sz, Argb(Round(255 * fl), [255, 220, 150]))
+    }
+}
+
+Snow(n, t) {
+    pt := Part(3, n)
+    Loop n {
+        i := A_Index
+        k := pt.k[i]
+        v := 30 + 70 * pt.a[i]
+        y := Mod(pt.y[i] + v * t / 1000, sh + 20) - 10
+        x := pt.x[i] + (14 + 22 * k) * Sin(t / 1100 + k * 6.28)
+        sz := 2 + 3.5 * pt.a[i]
+        Disc(x, y, sz * 2.2, Argb(40, [225, 240, 255]))
+        Disc(x, y, sz, Argb(Round(150 + 90 * pt.a[i]), [240, 248, 255]))
+    }
+}
+
+Rain(n, t) {
+    pt := Part(4, n)
+    pen1 := Pen(Argb(70, [170, 200, 255]), 1.2)
+    pen2 := Pen(Argb(120, [200, 220, 255]), 1.6)
+    Loop n {
+        i := A_Index
+        v := 650 + 500 * pt.a[i]
+        y := Mod(pt.y[i] + v * t / 1000, sh + 80) - 40
+        x := Mod(pt.x[i] + 0.18 * v * t / 1000, sw + 60) - 30
+        ln := 14 + 22 * pt.k[i]
+        DllCall('gdiplus\GdipDrawLine', 'Ptr', G, 'Ptr', (pt.k[i] > 0.6) ? pen2 : pen1, 'Float', x, 'Float', y, 'Float', x - ln * 0.18, 'Float', y - ln)
+    }
+    DllCall('gdiplus\GdipDeletePen', 'Ptr', pen1)
+    DllCall('gdiplus\GdipDeletePen', 'Ptr', pen2)
+}
+
+Fireflies(n0, t) {
+    n := Max(8, Round(n0 * 0.45))
+    pt := Part(5, n)
+    Loop n {
+        i := A_Index
+        k := pt.k[i]
+        x := pt.x[i] + 90 * Sin(t / (2300 + k * 1700) + k * 11)
+        y := pt.y[i] + 60 * Cos(t / (2900 + k * 1300) + k * 7)
+        gl := 0.5 + 0.5 * Sin(t / (520 + k * 520) + k * 9)
+        c := [200 + Round(40 * k), 255, 90 + Round(60 * pt.a[i])]
+        Disc(x, y, 26, Argb(Round(26 * gl), c))
+        Disc(x, y, 13, Argb(Round(80 * gl), c))
+        Disc(x, y, 4.5, Argb(Round(120 + 135 * gl), [250, 255, 190]))
+    }
+}
+
+Stars(n0, t) {
+    n := Round(n0 * 1.2)
+    pt := Part(6, n)
+    Loop n {
+        i := A_Index
+        k := pt.k[i]
+        tw := 0.5 + 0.5 * Sin(t / (320 + k * 600) + k * 20)
+        sz := 1.2 + 2.2 * pt.a[i]
+        Disc(pt.x[i], pt.y[i], sz * 3, Argb(Round(26 * tw), [200, 220, 255]))
+        Disc(pt.x[i], pt.y[i], sz, Argb(Round(70 + 185 * tw), [235, 242, 255]))
+    }
+    cyc := Mod(t, 6500)
+    if (cyc < 650) {
+        q := cyc / 650
+        x0 := sw * 0.25 + Mod(Floor(t / 6500) * 397, sw * 0.5)
+        y0 := sh * 0.12 + Mod(Floor(t / 6500) * 131, sh * 0.25)
+        x := x0 + q * sw * 0.22
+        y := y0 + q * sh * 0.14
+        a := Round(230 * Sin(q * 3.14159))
+        Loop 12 {
+            f := A_Index / 12
+            Disc(x - f * sw * 0.07, y - f * sh * 0.045, 4 * (1 - f * 0.6), Argb(Round(a * (1 - f)), [235, 242, 255]))
+        }
+    }
+}
+
+Bats(n0, t) {
+    n := Max(2, Round(n0 / 9))
+    pt := Part(7, n)
+    Loop n {
+        i := A_Index
+        k := pt.k[i]
+        dir := (Mod(i, 2) = 0) ? 1 : -1
+        sp := 70 + 90 * pt.a[i]
+        x := Mod(Mod(pt.x[i] + dir * sp * t / 1000, sw + 240) + sw + 240, sw + 240) - 120
+        y := pt.y[i] * 0.8 + 45 * Sin(t / 900 + k * 9) + 30 * Sin(t / 330 + k * 4)
+        s := 15 + 17 * pt.a[i]
+        fl := Sin(t / 85 + k * 12)
+        up := s * (0.2 + 0.55 * (0.5 + 0.5 * fl))
+        pts := Buffer(8 * 16, 0)
+        pl := [[0, -s * 0.05], [dir * s * 0.45, -up], [dir * s * 0.85, -up * 0.55 + s * 0.1], [dir * s * 1.1, s * 0.2], [dir * s * 0.75, s * 0.08], [dir * s * 0.55, s * 0.3], [dir * s * 0.28, s * 0.1], [0, s * 0.18]]
+        pr := [[0, -s * 0.05], [-dir * s * 0.45, -up], [-dir * s * 0.85, -up * 0.55 + s * 0.1], [-dir * s * 1.1, s * 0.2], [-dir * s * 0.75, s * 0.08], [-dir * s * 0.55, s * 0.3], [-dir * s * 0.28, s * 0.1], [0, s * 0.18]]
+        for side in [pl, pr] {
+            Loop 8 {
+                NumPut('Float', x + side[A_Index][1], pts, (A_Index - 1) * 8)
+                NumPut('Float', y + side[A_Index][2], pts, (A_Index - 1) * 8 + 4)
+            }
+            DllCall('gdiplus\GdipFillPolygon2', 'Ptr', G, 'Ptr', Brush(Argb(224, [118, 72, 190])), 'Ptr', pts, 'Int', 8)
+        }
+        Disc(x, y + s * 0.05, s * 0.42, Argb(240, [150, 100, 225]))
+        Disc(x - s * 0.1, y - s * 0.14, s * 0.12, Argb(255, [255, 230, 120]))
+        Disc(x + s * 0.1, y - s * 0.14, s * 0.12, Argb(255, [255, 230, 120]))
+    }
+}
+
+ShakeReset() {
+    global shkEnd, shaking, shkHost, sDC, sBmp, oDC, oBmp, cDC, cBmp
+    if (IsObject(shkHost))
+        shkHost.Hide()
+    for i in [1, 2, 3] {
+        if (cDC[i])
+            DllCall('DeleteDC', 'Ptr', cDC[i])
+        if (cBmp[i])
+            DllCall('DeleteObject', 'Ptr', cBmp[i])
+        cDC[i] := 0
+        cBmp[i] := 0
+    }
+    for h in [sDC, oDC]
+        if (h)
+            DllCall('DeleteDC', 'Ptr', h)
+    for h in [sBmp, oBmp]
+        if (h)
+            DllCall('DeleteObject', 'Ptr', h)
+    sDC := 0
+    oDC := 0
+    sBmp := 0
+    oBmp := 0
+    shaking := false
+    shkEnd := 0
+}
+
+MakeDib(w, h, &dcOut, &bmpOut) {
+    dcOut := DllCall('CreateCompatibleDC', 'Ptr', 0, 'Ptr')
+    bi := Buffer(40, 0)
+    NumPut('int', 40, bi, 0)
+    NumPut('int', w, bi, 4)
+    NumPut('int', -h, bi, 8)
+    NumPut('short', 1, bi, 12)
+    NumPut('short', 32, bi, 14)
+    bits := 0
+    bmpOut := DllCall('CreateDIBSection', 'Ptr', dcOut, 'Ptr', bi, 'UInt', 0, 'Ptr*', &bits, 'Ptr', 0, 'UInt', 0, 'Ptr')
+    DllCall('SelectObject', 'Ptr', dcOut, 'Ptr', bmpOut)
+}
+
+; the window of this script's that sits lowest of its topmost windows (the shaken picture goes just below it)
+LowestOfMain(skip) {
+    h := DllCall('GetTopWindow', 'Ptr', 0, 'Ptr')
+    lowest := 0
+    guard := 0
+    while (h && guard < 800) {
+        guard += 1
+        if (h != skip && (!IsObject(mfGui) || h != mfGui.Hwnd) && (!IsObject(mbGui) || h != mbGui.Hwnd) && DllCall('IsWindowVisible', 'Ptr', h)) {
+            if (DllCall('GetWindowLongPtr', 'Ptr', h, 'Int', -20, 'Ptr') & 8) {
+                wp := 0
+                DllCall('GetWindowThreadProcessId', 'Ptr', h, 'UInt*', &wp)
+                if (wp = mainPid)
+                    lowest := h
+            }
+        }
+        h := DllCall('GetWindow', 'Ptr', h, 'UInt', 2, 'Ptr')
+    }
+    return lowest
+}
+
+; While the game is frozen its picture does not change, so a picture of it is taken once and shaken in a window that lies exactly over it.
+; mode 1: only the picture of the game window (the widgets, the HUD and the menu stay where they are, above it)
+; mode 2: the whole screen the game is on (everything shakes, the countdown and the like wait until the shake is over)
+ShakeBegin() {
+    global shkHost, shkL, shkT, shkW, shkH, sDC, sBmp, oDC, oBmp, shkMode, shkTarget, cDC, cBmp
+    mode := NumGet(pView, 36, 'Int')
+    target := NumGet(pView, 40, 'Ptr')
+    rc := Buffer(16, 0)
+    if (mode = 1 && target) {
+        DllCall('GetWindowRect', 'Ptr', target, 'Ptr', rc)
+    } else {
+        mon := DllCall('MonitorFromWindow', 'Ptr', target, 'UInt', 2, 'Ptr')
+        mi := Buffer(40, 0)
+        NumPut('UInt', 40, mi, 0)
+        DllCall('GetMonitorInfoW', 'Ptr', mon, 'Ptr', mi)
+        DllCall('RtlMoveMemory', 'Ptr', rc, 'Ptr', mi.Ptr + 4, 'UPtr', 16)
+    }
+    shkL := NumGet(rc, 0, 'Int')
+    shkT := NumGet(rc, 4, 'Int')
+    shkW := NumGet(rc, 8, 'Int') - shkL
+    shkH := NumGet(rc, 12, 'Int') - shkT
+    if (shkW < 200 || shkH < 200)
+        return false
+    shkMode := (mode = 1 && target) ? 1 : 2
+    shkTarget := target
+    MakeDib(shkW, shkH, &sDC, &sBmp)
+    MakeDib(shkW, shkH, &oDC, &oBmp)
+    if (!ShakeGrab())
+        return false
+    if (NumGet(pView, 24, 'Int') = 12)
+        ShakeChannels()
+    if (!IsObject(shkHost)) {
+        shkHost := Gui('+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale', 'M0MENT4M shake')
+        shkHost.Show('Hide x0 y0 w100 h100')
+    }
+    shkHost.Move(shkL, shkT, shkW, shkH)
+    DllCall('SetStretchBltMode', 'Ptr', oDC, 'Int', 4)
+    DllCall('StretchBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', sDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'UInt', 0x00CC0020)
+    ShakePush()
+    shkHost.Show('NA')
+    if (mode = 1) {
+        low := LowestOfMain(shkHost.Hwnd)
+        DllCall('SetWindowPos', 'Ptr', shkHost.Hwnd, 'Ptr', low ? low : -1, 'Int', 0, 'Int', 0, 'Int', 0, 'Int', 0, 'UInt', 19)
+    } else
+        DllCall('SetWindowPos', 'Ptr', shkHost.Hwnd, 'Ptr', -1, 'Int', 0, 'Int', 0, 'Int', 0, 'Int', 0, 'UInt', 19)
+    return true
+}
+
+; a picture of the game (or of its screen) into the stored one
+ShakeGrab() {
+    got := false
+    if (shkMode = 1)
+        got := DllCall('PrintWindow', 'Ptr', shkTarget, 'Ptr', sDC, 'UInt', 2)
+    if (!got) {
+        scr := DllCall('GetDC', 'Ptr', 0, 'Ptr')
+        got := DllCall('BitBlt', 'Ptr', sDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', scr, 'Int', shkL, 'Int', shkT, 'UInt', 0x00CC0020)
+        DllCall('ReleaseDC', 'Ptr', 0, 'Ptr', scr)
+    }
+    return got
+}
+
+ShakePush() {
+    sz := Buffer(8, 0)
+    NumPut('Int', shkW, sz, 0)
+    NumPut('Int', shkH, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut('UChar', 255, bf, 2)
+    DllCall('UpdateLayeredWindow', 'Ptr', shkHost.Hwnd, 'Ptr', 0, 'Ptr', 0, 'Ptr', sz, 'Ptr', oDC, 'Ptr', src, 'UInt', 0, 'Ptr', bf, 'UInt', 2)
+}
+
+ShakeTick() {
+    global shkDx, shkDy, shkLast, shaking, shkT0, shkFailed, shkMin, shkKick
+    if (!pView)
+        return
+    active := NumGet(pView, 20, 'Int')
+    if (!active) {
+        shkFailed := false
+        if (!shaking)
+            return
+        if (A_TickCount - shkT0 >= shkMin) {                 ; the freeze is over and the shake has run for as long as asked
+            ShakeReset()
+            return
+        }
+        if (!ShakeGrab()) {                                  ; the game is running again: its picture is renewed every time (about 20 times a second)
+            ShakeReset()
+            return
+        }
+    }
+    if (shkFailed)
+        return
+    if (!shaking) {
+        shkMin := NumGet(pView, 48, 'Int')
+        shkKick := -shkKick
+        if (!ShakeBegin()) {
+            ShakeReset()
+            shkFailed := true
+            return
+        }
+        shaking := true
+        shkT0 := A_TickCount
+    }
+    style := NumGet(pView, 24, 'Int')
+    strength := NumGet(pView, 28, 'Int')
+    now := A_TickCount
+    T := Max(0, now - shkT0)
+    if (style >= 4) {
+        ShakeFancy(style, T, strength / 100, 4 + strength * 0.36)
+        return
+    }
+    amp0 := 4 + strength * 0.36
+    env := Min(1.0, 0.35 + T / 50)
+    amp := amp0 * env
+    levMax := 1 + 2 * (amp0 + 4) / shkH
+    if (style = 1) {
+        if (now - shkLast >= 30) {
+            shkLast := now
+            shkDx := Random(-1000, 1000) / 1000 * amp
+            shkDy := Random(-1000, 1000) / 1000 * amp
+        }
+    } else if (style = 2) {
+        dec := Exp(-T / 280)
+        shkDx := amp0 * dec * Sin(T / 17)
+        shkDy := amp0 * dec * Cos(T / 21)
+    } else {
+        shkDx := amp * Sin(T / 64)
+        shkDy := amp * 0.7 * Sin(T / 85 + 1)
+    }
+    lev := 1 + (levMax - 1) * env
+    srcW := shkW / lev
+    srcH := shkH / lev
+    x := Max(0, Min(shkW - srcW, (shkW - srcW) / 2 + shkDx))
+    y := Max(0, Min(shkH - srcH, (shkH - srcH) / 2 + shkDy))
+    DllCall('StretchBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', sDC, 'Int', Round(x), 'Int', Round(y), 'Int', Round(srcW), 'Int', Round(srcH), 'UInt', 0x00CC0020)
+    ShakePush()
+}
+
+; the picture of the game split into its red, green and blue parts (made once; the RGB split only moves them)
+ShakeChannels() {
+    global cDC, cBmp, sDC, shkW, shkH
+    for i, col in [0x0000FF, 0x00FF00, 0xFF0000] {
+        MakeDib(shkW, shkH, &d, &b)
+        br := DllCall('CreateSolidBrush', 'UInt', col, 'Ptr')
+        old := DllCall('SelectObject', 'Ptr', d, 'Ptr', br, 'Ptr')
+        DllCall('BitBlt', 'Ptr', d, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', sDC, 'Int', 0, 'Int', 0, 'UInt', 0x00C000CA)
+        DllCall('SelectObject', 'Ptr', d, 'Ptr', old)
+        DllCall('DeleteObject', 'Ptr', br)
+        cDC[i] := d
+        cBmp[i] := b
+    }
+}
+
+; zoom a little and move: lev is the zoom, dx / dy the shift in pixels, peak the biggest shift (the zoom keeps the edges covered)
+ShakeDraw(dx, dy, z, peak) {
+    lev := (1 + 2 * (peak + 4) / shkH) * (1 + z)
+    srcW := shkW / lev
+    srcH := shkH / lev
+    x := Max(0, Min(shkW - srcW, (shkW - srcW) / 2 + dx))
+    y := Max(0, Min(shkH - srcH, (shkH - srcH) / 2 + dy))
+    DllCall('StretchBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', sDC, 'Int', Round(x), 'Int', Round(y), 'Int', Round(srcW), 'Int', Round(srcH), 'UInt', 0x00CC0020)
+}
+
+ShakeFancy(style, T, k, a) {
+    global sliceLast, slices, shkKick
+    env := Min(1.0, 0.35 + T / 50)
+    if (style = 4) {                                           ; Punch: a quick zoom in that settles
+        e := Exp(-T / 170)
+        z := k * 0.13 * e * Min(1.0, T / 14) + 0.012
+        ShakeDraw(Random(-1000, 1000) / 1000 * a * 0.35 * Exp(-T / 220), Random(-1000, 1000) / 1000 * a * 0.35 * Exp(-T / 220), z, a * 0.35)
+    } else if (style = 5) {                                    ; Heartbeat: two thumps, then a pause
+        p := Mod(T, 820)
+        b1 := Exp(-p / 85)
+        b2 := (p > 230) ? Exp(-(p - 230) / 100) : 0
+        ShakeDraw(0, 0, k * 0.085 * (b1 + 0.65 * b2) + 0.01, 0)
+    } else if (style = 6) {                                    ; Earthquake: a heavy sway with a fast rumble
+        dx := a * 1.7 * Sin(T / 41) * Sin(T / 157 + 0.8) * env
+        dy := (a * 0.8 * Sin(T / 27) + Random(-1000, 1000) / 1000 * a * 0.25) * env
+        ShakeDraw(dx, dy, 0.01, a * 2.0)
+    } else if (style = 7) {                                    ; Kick: one hard shove that springs back (left, then right, then left...)
+        e := Exp(-T / 150)
+        ShakeDraw(shkKick * a * 2.2 * e * Cos(T / 55), a * 0.35 * e * Sin(T / 35), k * 0.03 * e, a * 2.3)
+    } else if (style = 8) {                                    ; Drunk sway: slow and floaty
+        ShakeDraw(a * 1.5 * Sin(T / 310) * env, a * 0.9 * Sin(T / 410 + 1) * env, k * 0.045 * (0.5 + 0.5 * Sin(T / 520)), a * 1.6)
+    } else if (style = 9) {                                    ; Roll: the picture tilts and swings
+        th := k * 0.09 * Sin(T / 240) * env + 0.004 * Sin(T / 53)
+        c := Cos(th)
+        sn := Sin(th)
+        sc := c + Abs(sn) * Max(shkW / shkH, shkH / shkW) + 0.02
+        hw := shkW / 2 * sc
+        hh := shkH / 2 * sc
+        cx := shkW / 2
+        cy := shkH / 2
+        pts := Buffer(24, 0)
+        NumPut('Int', Round(cx + c * -hw - sn * -hh), pts, 0)
+        NumPut('Int', Round(cy + sn * -hw + c * -hh), pts, 4)
+        NumPut('Int', Round(cx + c * hw - sn * -hh), pts, 8)
+        NumPut('Int', Round(cy + sn * hw + c * -hh), pts, 12)
+        NumPut('Int', Round(cx + c * -hw - sn * hh), pts, 16)
+        NumPut('Int', Round(cy + sn * -hw + c * hh), pts, 20)
+        DllCall('PatBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'UInt', 0x42)
+        DllCall('PlgBlt', 'Ptr', oDC, 'Ptr', pts, 'Ptr', sDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', 0, 'Int', 0, 'Int', 0)
+    } else if (style = 10) {                                   ; Vertical roll: the picture scrolls up like a TV that lost its sync
+        yo := Mod(Round(T * (0.35 + k * 1.1) * shkH / 1000), shkH)
+        DllCall('BitBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH - yo, 'Ptr', sDC, 'Int', 0, 'Int', yo, 'UInt', 0x00CC0020)
+        if (yo > 0)
+            DllCall('BitBlt', 'Ptr', oDC, 'Int', 0, 'Int', shkH - yo, 'Int', shkW, 'Int', yo, 'Ptr', sDC, 'Int', 0, 'Int', 0, 'UInt', 0x00CC0020)
+    } else if (style = 11) {                                   ; Glitch slices: strips of the picture jump sideways
+        if (slices.Length = 0 || T - sliceLast >= 60) {
+            sliceLast := T
+            slices := []
+            Loop Random(4, 8 + Round(k * 8)) {
+                hgt := Random(6, 20 + Round(k * 80))
+                slices.Push([Random(0, Max(1, shkH - hgt)), hgt, Round(Random(-1000, 1000) / 1000 * (a * 3.2 + 12))])
+            }
+        }
+        DllCall('BitBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', sDC, 'Int', 0, 'Int', 0, 'UInt', 0x00CC0020)
+        for sl in slices
+            DllCall('BitBlt', 'Ptr', oDC, 'Int', sl[3], 'Int', sl[1], 'Int', shkW, 'Int', sl[2], 'Ptr', sDC, 'Int', 0, 'Int', sl[1], 'UInt', 0x00CC0020)
+    } else if (style = 12) {                                   ; RGB split: the colour channels slide apart
+        if (!cDC[1])
+            ShakeChannels()
+        d := Round(a * 0.5 * (0.4 + 0.6 * Abs(Sin(T / 55))) + Random(0, 1000) / 1000 * a * 0.15)
+        DllCall('PatBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'UInt', 0x42)
+        DllCall('BitBlt', 'Ptr', oDC, 'Int', -d, 'Int', Random(-2, 2), 'Int', shkW, 'Int', shkH, 'Ptr', cDC[1], 'Int', 0, 'Int', 0, 'UInt', 0x00CC0020)
+        DllCall('BitBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', cDC[2], 'Int', 0, 'Int', 0, 'UInt', 0x00EE0086)
+        DllCall('BitBlt', 'Ptr', oDC, 'Int', d, 'Int', Random(-2, 2), 'Int', shkW, 'Int', shkH, 'Ptr', cDC[3], 'Int', 0, 'Int', 0, 'UInt', 0x00EE0086)
+    } else {                                                   ; Zoom blur: copies of the picture, each a bit bigger, blended
+        zp := k * 0.16 * Exp(-T / 230) * Min(1.0, T / 12) + 0.006
+        DllCall('StretchBlt', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', sDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'UInt', 0x00CC0020)
+        Loop 4 {
+            lev := 1 + zp * A_Index / 4
+            sw := shkW / lev
+            sh := shkH / lev
+            DllCall('msimg32\AlphaBlend', 'Ptr', oDC, 'Int', 0, 'Int', 0, 'Int', shkW, 'Int', shkH, 'Ptr', sDC, 'Int', Round((shkW - sw) / 2), 'Int', Round((shkH - sh) / 2), 'Int', Round(sw), 'Int', Round(sh), 'UInt', 85 << 16)
+        }
+    }
+    ShakePush()
+}
+    )"
+}
+
+FxHelperStart()
+{
+    global FxHelperPid, FxMapH, FxView
+    if (!FxView) {
+        FxMapH := DllCall("CreateFileMappingW", "Ptr", -1, "Ptr", 0, "UInt", 4, "UInt", 0, "UInt", 64, "Str", "M0M_FX_" DllCall("GetCurrentProcessId"), "Ptr")
+        if (FxMapH)
+            FxView := DllCall("MapViewOfFile", "Ptr", FxMapH, "UInt", 0xF001F, "UInt", 0, "UInt", 0, "UPtr", 64, "Ptr")
+    }
+    if (!FxView)
+        return
+    dir := AppDir "\tools"
+    try DirCreate(dir)
+    try {
+        f := FileOpen(dir "\fxhelper.ahk", "w", "UTF-8")
+        f.Write(FxHelperSrc())
+        f.Close()
+        pid := 0
+        Run('"' A_AhkPath '" "' dir '\fxhelper.ahk" ' DllCall("GetCurrentProcessId"), dir, "Hide", &pid)
+        FxHelperPid := pid
+    } catch {
+        FxHelperPid := 0
+    }
+}
+
+FxHelperStop(*)
+{
+    global FxHelperPid
+    if (FxHelperPid)
+        try ProcessClose(FxHelperPid)
+}
+OnExit(FxHelperStop)
+
+; tells the helper what to show; the helper itself is only started once something is switched on
+MenuFxSync()
+{
+    global NLShown, isAppMinimized, MenuBlurOn, MenuBlurDim, MenuFxIdx, MenuFxAmt, FxHelperPid, FxView, FxLastSig, MenuFxHold
+    global ShakeOn
+    vis := (NLShown && !isAppMinimized && !MenuFxHold) ? 1 : 0
+    want := (vis && (MenuBlurOn || MenuFxIdx > 1)) || ShakeOn
+    if (want && (!FxHelperPid || !ProcessExist(FxHelperPid))) {
+        FxHelperStart()
+        FxLastSig := ""
+    }
+    if (!FxView)
+        return
+    sig := vis "|" (MenuBlurOn ? 1 : 0) "|" MenuBlurDim "|" MenuFxIdx "|" MenuFxAmt "|" (ShakeOn ? 1 : 0)
+    if (sig = FxLastSig)
+        return
+    FxLastSig := sig
+    NumPut("Int", vis, FxView, 0)
+    NumPut("Int", MenuBlurOn ? 1 : 0, FxView, 4)
+    NumPut("Int", MenuBlurDim, FxView, 8)
+    NumPut("Int", MenuFxIdx, FxView, 12)
+    NumPut("Int", MenuFxAmt, FxView, 16)
+    NumPut("Int", ShakeOn ? 1 : 0, FxView, 44)
+}
+SetTimer(MenuFxSync, 50)
+
+; ===== Macro HUD: a small click-through card that shows which macros are running =====
+Global HUDW := 156, HUDMAXH := 242, HudH := 242
+Global HudGui := "", HudMemDC := 0, HudBmp := 0, HudG := 0
+Global HudVisible := false, HudBusy := false, HudTimerOn := false
+Global HudAnim := Map(), HudFlashAt := Map(), HudPrev := Map()
+; user options (kept in configs\ui.ini)
+Global HudGradIdx := 1, GpuOK := 0, GpuDev := 0, GpuLoad := 0, GpuTemp := 0, GpuUsed := 0, GpuTotal := 1, HudBorderIdx := 3, HudCompact := false, HudShowKeys := false, HudCustom := false, HudCX := 8, HudCY := 80
+Global HudMoving := false
+
+class SPHudC {
+    Hwnd => IsObject(HudGui) ? HudGui.Hwnd : 0
+    Show(opts := "") {
+        x := 8, y := 80
+        if (RegExMatch(opts, "x(-?\d+)", &mx))
+            x := Integer(mx[1])
+        if (RegExMatch(opts, "y(-?\d+)", &my))
+            y := Integer(my[1])
+        HudShowAt(x, y)
+    }
+    Hide() {
+        HudHide()
+    }
+}
+
+; the look of the macro HUD: the card of this script, or a box like the indicators of a well known cheat menu
+Global HudStyleIdx := 1
+class HudStyleSelC {
+    items := ["Default", "Skeet", "Neverlose"]
+    Value => HudStyleIdx
+    Text => this.items[HudStyleIdx]
+    Choose(i) {
+        global HudStyleIdx
+        HudStyleIdx := i
+        SPSavePrefs()
+        HudRequest()
+        NLRequest()
+    }
+}
+Global HudStyleSel := HudStyleSelC()
+
+class HudBorderSelC {
+    items := ["Off", "Accent", "Animated gradient", "Rainbow"]
+    Value => HudBorderIdx
+    Text => this.items[HudBorderIdx]
+    Choose(i) {
+        global HudBorderIdx
+        HudBorderIdx := i
+        SPSavePrefs()
+        HudRequest()
+    }
+}
+Global HudBorderSel := HudBorderSelC()
+
+; the HUD has its own gradient, separate from the one on the macro name
+class HudGradSelC {
+    items := ["Accent Flow", "Aurora", "Sunset", "Ocean", "Fire", "Rainbow", "Candy", "Mono", "Static"]
+    Value => HudGradIdx
+    Text => this.items[HudGradIdx]
+    Choose(i) {
+        global HudGradIdx
+        HudGradIdx := i
+        SPSavePrefs()
+        HudRequest()
+    }
+}
+Global HudGradSel := HudGradSelC()
+
+; GPU load, temperature and memory straight from the NVIDIA driver (nvml.dll). A call takes a fraction of a millisecond.
+GpuInit()
+{
+    global GpuOK, GpuDev
+    if (GpuOK != 0)
+        return GpuOK = 1
+    GpuOK := -1
+    try {
+        if (!DllCall("LoadLibrary", "Str", "nvml.dll", "Ptr"))
+            return false
+        if (DllCall("nvml\nvmlInit_v2", "Int") != 0)
+            return false
+        dev := 0
+        if (DllCall("nvml\nvmlDeviceGetHandleByIndex_v2", "UInt", 0, "Ptr*", &dev, "Int") != 0)
+            return false
+        GpuDev := dev
+        GpuOK := 1
+        return true
+    }
+    return false
+}
+
+GpuPoll()
+{
+    global GpuDev, GpuLoad, GpuTemp, GpuUsed, GpuTotal
+    if (!GpuInit())
+        return
+    u := Buffer(8, 0), m := Buffer(24, 0), tmp := 0
+    if (DllCall("nvml\nvmlDeviceGetUtilizationRates", "Ptr", GpuDev, "Ptr", u, "Int") = 0)
+        GpuLoad := NumGet(u, 0, "UInt")
+    if (DllCall("nvml\nvmlDeviceGetTemperature", "Ptr", GpuDev, "Int", 0, "UInt*", &tmp, "Int") = 0)
+        GpuTemp := tmp
+    if (DllCall("nvml\nvmlDeviceGetMemoryInfo", "Ptr", GpuDev, "Ptr", m, "Int") = 0) {
+        GpuTotal := Max(1, NumGet(m, 0, "UInt64") / 1048576)
+        GpuUsed := NumGet(m, 16, "UInt64") / 1048576
+    }
+}
+
+Global GpuLast := 0
+
+GpuTick()
+{
+    global NLShown, NLStyle, CurrentTab, NLSubTab, GpuLast, LayoutMode
+    if (LayoutMode != "nl" && CurrentTab = 7 && GpuInit()) {
+        GpuPoll()
+        GpuLast := A_TickCount
+        AdvRefresh()
+        return
+    }
+    if (NLShown && ((NLStyle = "sp" && CurrentTab = 4 && NLSubTab = 3) || ((NLStyle = "nl" || NLStyle = "fat") && CurrentTab = 7))) {   ; the Performance page is showing live values
+        GpuPoll()
+        GpuLast := A_TickCount
+        NLRequest()
+    }
+}
+SetTimer(GpuTick, 1000)
+
+HudToggleCompact(*)
+{
+    global HudCompact
+    HudCompact := !HudCompact
+    SPSavePrefs()
+    HudRequest()
+}
+
+HudToggleKeys(*)
+{
+    global HudShowKeys
+    HudShowKeys := !HudShowKeys
+    SPSavePrefs()
+    HudRequest()
+}
+
+; While the menu is open the HUD can be grabbed with the mouse and dropped anywhere. Outside of that it stays
+; completely click-through so it never gets in the way of the game.
+Global HudClickThru := true, HudDragOff := 0
+OnMessage(0x0020, HudOnSetCursor)
+
+HudOnSetCursor(wParam, lParam, msg, hwnd)
+{
+    global HudGui, HudClickThru
+    if (!IsObject(HudGui) || hwnd != HudGui.Hwnd || HudClickThru)
+        return
+    DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32646, "Ptr"))
+    return 1
+}
+
+HudDragTick()
+{
+    global HudGui, HudVisible, HudMoving, HudClickThru, HudDragOff, HudCX, HudCY, HudCustom, HUDW, HudH, isAppMinimized
+    static wasDown := false
+    if (!HudVisible || !IsObject(HudGui)) {
+        HudMoving := false
+        return
+    }
+    menuOpen := !isAppMinimized
+    if (menuOpen = HudClickThru) {
+        HudClickThru := !menuOpen
+        try WinSetExStyle(menuOpen ? "-0x20" : "+0x20", "ahk_id " HudGui.Hwnd)
+    }
+    if (!menuOpen) {
+        if (HudMoving) {
+            HudMoving := false
+            HudDragOff := 0
+        }
+        wasDown := false
+        return
+    }
+    pt := Buffer(8, 0)
+    DllCall("GetCursorPos", "Ptr", pt)
+    mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
+    down := (DllCall("GetAsyncKeyState", "Int", 0x01, "Short") & 0x8000) ? true : false
+    if (HudMoving) {
+        if (down) {
+            x := Max(0, Min(A_ScreenWidth - HUDW, mx - HudDragOff.x))
+            y := Max(0, Min(A_ScreenHeight - HudH, my - HudDragOff.y))
+            HudGui.Move(x, y)
+            HudRequest()
+        } else {
+            HudMoving := false
+            HudGui.GetPos(&gx, &gy)
+            HudCX := gx, HudCY := gy, HudCustom := true
+            SPSavePrefs()
+            HudRequest()
+        }
+    } else if (down && !wasDown) {
+        HudGui.GetPos(&gx, &gy, &gw, &gh)
+        if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh) {
+            HudMoving := true
+            HudDragOff := {x: mx - gx, y: my - gy}
+        }
+    }
+    wasDown := down
+}
+
+HudEnsure()
+{
+    global HudGui, HudMemDC, HudBmp, HudG, HUDW, HUDMAXH
+    if (IsObject(HudGui))
+        return
+    NLGdipInit()
+    HudGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M hud")
+    HudMemDC := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+    bi := Buffer(40, 0)
+    NumPut("int", 40, bi, 0)
+    NumPut("int", HUDW, bi, 4)
+    NumPut("int", -HUDMAXH, bi, 8)
+    NumPut("short", 1, bi, 12)
+    NumPut("short", 32, bi, 14)
+    pBits := 0
+    HudBmp := DllCall("CreateDIBSection", "Ptr", HudMemDC, "Ptr", bi, "UInt", 0, "Ptr*", &pBits, "Ptr", 0, "UInt", 0, "Ptr")
+    DllCall("SelectObject", "Ptr", HudMemDC, "Ptr", HudBmp)
+    DllCall("gdiplus\GdipCreateFromHDC", "Ptr", HudMemDC, "Ptr*", &HudG)
+    DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", HudG, "Int", 4)
+    DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", HudG, "Int", 4)
+}
+
+; ===== Appear animation of the HUDs: when one is switched on it fades in and grows a little (about 0.4 s) =====
+Global HAnimAt := Map(), HLeave := Map()
+
+HAnimStart(key)
+{
+    global HAnimAt, HLeave
+    if (HLeave.Has(key))
+        HLeave.Delete(key)                   ; switched on again while it was still fading out
+    HAnimAt[key] := A_TickCount
+    SetTimer(HAnimDrive, 16)
+}
+
+; switching a HUD off: it fades out first (about 0.25 s), then fn really hides it
+HAnimLeave(key, fn)
+{
+    global HLeave, HAnimAt
+    if (HLeave.Has(key))
+        return
+    if (HAnimAt.Has(key))
+        HAnimAt.Delete(key)
+    HLeave[key] := {t0: A_TickCount, fn: fn}
+    SetTimer(HAnimDrive, 16)
+}
+
+; 0 .. 1 while the animation runs, 1 when it is over (or was never started); runs backwards while it fades out
+HAnimAp(key)
+{
+    global HAnimAt, HLeave
+    if (HLeave.Has(key)) {
+        t := (A_TickCount - HLeave[key].t0) / 250
+        return (t >= 1) ? 0.0 : (1 - t) ** 2
+    }
+    at := HAnimAt.Get(key, 0)
+    if (!at)
+        return 1.0
+    t := (A_TickCount - at) / 380
+    if (t >= 1)
+        return 1.0
+    return 1 - (1 - t) ** 3
+}
+
+; draws the frames of every HUD that is still animating (the HUDs only redraw by themselves when something changes)
+HAnimDrive()
+{
+    global HAnimAt, HLeave, WH
+    keys := []
+    for k, at in HAnimAt
+        keys.Push(k)
+    for k, lv in HLeave
+        keys.Push(k)
+    if (keys.Length = 0) {
+        SetTimer(HAnimDrive, 0)
+        return
+    }
+    for k in keys {
+        leaving := HLeave.Has(k)
+        done := leaving ? (A_TickCount - HLeave[k].t0) >= 250 : (HAnimAt.Has(k) && (A_TickCount - HAnimAt[k]) >= 380)
+        if (leaving && done) {
+            fn := HLeave[k].fn
+            HLeave.Delete(k)
+            try fn()
+            continue
+        }
+        try {
+            if (k = "hud")
+                HudRender()
+            else if (k = "perf")
+                PHudRender()
+            else if (k = "comp")
+                CompRender()
+            else if (WH.Has(k))
+                WHudRender(WH[k])
+        }
+        if (done && HAnimAt.Has(k))
+            HAnimAt.Delete(k)
+    }
+}
+
+; the card grows from 86 % to full size around the point (cx, cy) while it fades in: call it instead of the plain scale
+HAnimXf(G, cx, cy, sc, ap)
+{
+    k := 0.86 + 0.14 * ap
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", G, "Float", cx * sc, "Float", cy * sc, "Int", 0)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", G, "Float", sc * k, "Float", sc * k, "Int", 0)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", G, "Float", -cx, "Float", -cy, "Int", 0)
+}
+
+HudShowAt(x, y)
+{
+    global HudGui, HudVisible, HUDW, HudH
+    HudEnsure()
+    HudVisible := true
+    HAnimStart("hud")
+    HudGui.Show("x" x " y" y " w" HUDW " h" HudH " NA")
+    HudRender()
+    HudKickTimer()
+    SetTimer(HudDragTick, 20)
+}
+
+HudHide()
+{
+    global HudVisible, HudGui
+    if (HudVisible && IsObject(HudGui))
+        HAnimLeave("hud", HudHideNow)
+    else
+        HudHideNow()
+}
+
+HudHideNow()
+{
+    global HudGui, HudVisible, HudTimerOn
+    HudVisible := false
+    SetTimer(HudDragTick, 0)
+    if (IsObject(HudGui))
+        HudGui.Hide()
+    if (HudTimerOn) {
+        SetTimer(HudTick, 0)
+        HudTimerOn := false
+    }
+}
+
+HudKickTimer()
+{
+    global HudBusy, HudTimerOn, HudVisible
+    if (HudVisible && HudBusy && !HudTimerOn) {
+        HudTimerOn := true
+        SetTimer(HudTick, 33)
+    }
+}
+
+; Called whenever a macro starts or stops (or an option changes).
+HudRequest()
+{
+    global HudVisible
+    if (!HudVisible)
+        return
+    HudRender()
+    HudKickTimer()
+}
+
+HudFlash(i)
+{
+    global HudFlashAt
+    HudFlashAt[i] := A_TickCount
+    HudRequest()
+}
+
+HudTick()
+{
+    global HudBusy, HudTimerOn, HudVisible
+    if (!HudVisible) {
+        SetTimer(HudTick, 0)
+        HudTimerOn := false
+        return
+    }
+    HudRender()
+    if (!HudBusy) {
+        SetTimer(HudTick, 0)
+        HudTimerOn := false
+        return
+    }
+    static period := 33
+    want := isAppMinimized ? 33 : 66        ; slower while the menu is open
+    if (want != period) {
+        period := want
+        SetTimer(HudTick, want)
+    }
+}
+
+; points along a rounded rectangle, used for the moving border
+; colour and position tables of a gradient (per list of stops and alpha), built once
+SPGradTable(stops, a)
+{
+    static cache := Map()
+    key := ObjPtr(stops) ":" a
+    if (cache.Has(key))
+        return cache[key]
+    if (cache.Count > 800)
+        cache.Clear()
+    m := stops.Length
+    n := m + 1
+    cols := Buffer(4 * n), pos := Buffer(4 * n)
+    Loop n {
+        c := stops[Mod(A_Index - 1, m) + 1]
+        NumPut("UInt", (a << 24) | (c[1] << 16) | (c[2] << 8) | c[3], cols, (A_Index - 1) * 4)
+        NumPut("Float", (A_Index - 1) / m, pos, (A_Index - 1) * 4)
+    }
+    cache[key] := {m: m, n: n, cols: cols, pos: pos, stops: stops}      ; (the list is kept alive: its address is the key)
+    return cache[key]
+}
+
+; Moving gradient outline of a rounded rectangle: one gradient pen, one stroke.
+SPGradBorder(x, y, w, h, r, stops, tt, wd)
+{
+    global NLG, NLAlphaPage
+    a := Max(0, Min(255, Round(255 * NLAlphaPage)))
+    tb := SPGradTable(stops, a)
+    m := tb.m, n := tb.n, cols := tb.cols, pos := tb.pos
+    p1 := Buffer(8), p2 := Buffer(8)
+    NumPut("Float", x, p1, 0), NumPut("Float", y, p1, 4)
+    NumPut("Float", x + w, p2, 0), NumPut("Float", y + h, p2, 4)
+    brush := 0
+    DllCall("gdiplus\GdipCreateLineBrush", "Ptr", p1, "Ptr", p2, "UInt", NumGet(cols, 0, "UInt"), "UInt", NumGet(cols, 4 * m, "UInt"), "Int", 0, "Ptr*", &brush)
+    DllCall("gdiplus\GdipSetLinePresetBlend", "Ptr", brush, "Ptr", cols, "Ptr", pos, "Int", n)
+    f := stops.HasProp("isStatic") ? 0 : tt - Floor(tt)
+    DllCall("gdiplus\GdipTranslateLineTransform", "Ptr", brush, "Float", -f * w, "Float", -f * h, "Int", 0)
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen2", "Ptr", brush, "Float", wd, "Int", 2, "Ptr*", &pen)
+    DllCall("gdiplus\GdipDrawPath", "Ptr", NLG, "Ptr", pen, "Ptr", NLPathK(x, y, w, h, r))
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+; Moving gradient fill of a rounded rectangle (alpha 0..1 on top of the current page alpha).
+SPGradBrush(x, y, w, h, stops, tt, alpha)
+{
+    global NLAlphaPage
+    a := Max(0, Min(255, Round(255 * NLAlphaPage * alpha)))
+    tb := SPGradTable(stops, a)
+    m := tb.m, n := tb.n, cols := tb.cols, pos := tb.pos
+    p1 := Buffer(8), p2 := Buffer(8)
+    NumPut("Float", x, p1, 0), NumPut("Float", y, p1, 4)
+    NumPut("Float", x + w, p2, 0), NumPut("Float", y + h, p2, 4)
+    brush := 0
+    DllCall("gdiplus\GdipCreateLineBrush", "Ptr", p1, "Ptr", p2, "UInt", NumGet(cols, 0, "UInt"), "UInt", NumGet(cols, 4 * m, "UInt"), "Int", 0, "Ptr*", &brush)
+    DllCall("gdiplus\GdipSetLinePresetBlend", "Ptr", brush, "Ptr", cols, "Ptr", pos, "Int", n)
+    f := stops.HasProp("isStatic") ? 0 : tt - Floor(tt)
+    DllCall("gdiplus\GdipTranslateLineTransform", "Ptr", brush, "Float", -f * w, "Float", -f * h, "Int", 0)
+    return brush
+}
+
+SPGradFill(x, y, w, h, r, stops, tt, alpha)
+{
+    global NLG, NLAlphaPage
+    a := Max(0, Min(255, Round(255 * NLAlphaPage * alpha)))
+    tb := SPGradTable(stops, a)
+    m := tb.m, n := tb.n, cols := tb.cols, pos := tb.pos
+    p1 := Buffer(8), p2 := Buffer(8)
+    NumPut("Float", x, p1, 0), NumPut("Float", y, p1, 4)
+    NumPut("Float", x + w, p2, 0), NumPut("Float", y + h, p2, 4)
+    brush := 0
+    DllCall("gdiplus\GdipCreateLineBrush", "Ptr", p1, "Ptr", p2, "UInt", NumGet(cols, 0, "UInt"), "UInt", NumGet(cols, 4 * m, "UInt"), "Int", 0, "Ptr*", &brush)
+    DllCall("gdiplus\GdipSetLinePresetBlend", "Ptr", brush, "Ptr", cols, "Ptr", pos, "Int", n)
+    f := stops.HasProp("isStatic") ? 0 : tt - Floor(tt)
+    DllCall("gdiplus\GdipTranslateLineTransform", "Ptr", brush, "Float", -f * w, "Float", -f * h, "Int", 0)
+    DllCall("gdiplus\GdipFillPath", "Ptr", NLG, "Ptr", brush, "Ptr", NLPathK(x, y, w, h, r))
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+HudPerimeter(x, y, w, h, r)
+{
+    static cache := Map()
+    key := w "," h "," r
+    if (cache.Has(key)) {
+        out := []
+        for q in cache[key]
+            out.Push([q[1] + x, q[2] + y])
+        return out
+    }
+    ox := x, oy := y
+    x := 0, y := 0
+    if (cache.Count > 60)
+        cache.Clear()
+    pts := []
+    sx := w - 2 * r, sy := h - 2 * r
+    arc := 3.14159265 * r / 2
+    total := 2 * sx + 2 * sy + 4 * arc
+    n := 84
+    Loop n {
+        d := (A_Index - 1) / n * total
+        if (d < sx) {
+            pts.Push([x + r + d, y])
+        } else if ((d -= sx) < arc) {
+            a := d / r - 1.57079633
+            pts.Push([x + w - r + r * Cos(a), y + r + r * Sin(a)])
+        } else if ((d -= arc) < sy) {
+            pts.Push([x + w, y + r + d])
+        } else if ((d -= sy) < arc) {
+            a := d / r
+            pts.Push([x + w - r + r * Cos(a), y + h - r + r * Sin(a)])
+        } else if ((d -= arc) < sx) {
+            pts.Push([x + w - r - d, y + h])
+        } else if ((d -= sx) < arc) {
+            a := 1.57079633 + d / r
+            pts.Push([x + r + r * Cos(a), y + h - r + r * Sin(a)])
+        } else if ((d -= arc) < sy) {
+            pts.Push([x, y + h - r - d])
+        } else {
+            d -= sy
+            a := 3.14159265 + d / r
+            pts.Push([x + r + r * Cos(a), y + r + r * Sin(a)])
+        }
+    }
+    cache[key] := pts
+    out := []
+    for q in pts
+        out.Push([q[1] + ox, q[2] + oy])
+    return out
+}
+
+SPStopsSample(st, pos)
+{
+    if (st.HasProp("isStatic"))
+        return [st[1][1], st[1][2], st[1][3]]
+    m := st.Length
+    pos := pos - Floor(pos)
+    q := pos * m
+    k := Floor(q)
+    fr := q - k
+    c1 := st[Mod(k, m) + 1], c2 := st[Mod(k + 1, m) + 1]
+    return [Round(c1[1] + (c2[1] - c1[1]) * fr), Round(c1[2] + (c2[2] - c1[2]) * fr), Round(c1[3] + (c2[3] - c1[3]) * fr)]
+}
+
+HudKeyFor(i)
+{
+    global TriggerKey, BhopKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey, MacroLockKey
+    k := [TriggerKey, BhopKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey, MacroLockKey][i]
+    return (k = "") ? "-" : StrUpper(KeyNameCore(k))
+}
+
+; Critical keeps another timer from touching the shared drawing handle halfway through, but it must not
+; leak into the thread that called us (it would stop timers from running while that thread sleeps).
+HudRender()
+{
+    pc := A_IsCritical
+    Critical
+    try HudRenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+HudRenderInner()
+{
+    global HudG, HudMemDC, HudGui, HudVisible, HudAnim, HudFlashAt, HudPrev, HudBusy, HudOpacity, HUDW, HUDMAXH, HudH
+    global HudBorderIdx, HudGradIdx, HudCompact, HudShowKeys, HudMoving, HudCustom, HudPosition
+    global NLG, NLAlphaPage, NLFontSm, NLFontUI, SPLogoIdx
+    global isMacroRunning, isBhopRunning, isStrafeActive, isComboRunning, isCSpamRunning, isClickRunning, isSpinbotRunning, IsMacrosLocked
+    if (!HudVisible || !IsObject(HudGui))
+        return
+    states := [isMacroRunning, isBhopRunning, isStrafeActive, isComboRunning, isCSpamRunning, isClickRunning, isSpinbotRunning, IsMacrosLocked]
+    labels := ["Slide", "Bhop", "Strafer", "EDash", "Crouch", "Clicker", "Spinbot", "Lock"]
+    if (HudStyleIdx = 2) {
+        HudRenderSkeet(states, labels)
+        return
+    }
+    if (HudStyleIdx = 3) {
+        HudRenderNL(states, labels)
+        return
+    }
+    now := A_TickCount
+    busy := false
+    ; --- animate each row and work out the card height
+    cy := 12
+    anyOn := false
+    ev := []
+    Loop 8 {
+        i := A_Index
+        st := states[i] ? 1 : 0
+        if (st)
+            anyOn := true
+        if (st && !(HudPrev.Has(i) && HudPrev[i]))
+            HudFlashAt[i] := now
+        HudPrev[i] := st
+        t := HudAnim.Has(i) ? HudAnim[i] : st
+        t += (st - t) * 0.3
+        if (Abs(st - t) < 0.02)
+            t := st
+        else
+            busy := true
+        HudAnim[i] := t
+        vis := HudCompact ? st : 1
+        key := "v" i
+        e := HudAnim.Has(key) ? HudAnim[key] : vis
+        e += (vis - e) * 0.3
+        if (Abs(vis - e) < 0.02)
+            e := vis
+        else
+            busy := true
+        HudAnim[key] := e
+        ev.Push(e)
+        cy += 27 * e
+    }
+    idle := HudCompact && !anyOn
+    ia := HudAnim.Has("idle") ? HudAnim["idle"] : (idle ? 1 : 0)
+    ia += ((idle ? 1 : 0) - ia) * 0.3
+    if (Abs((idle ? 1 : 0) - ia) < 0.02)
+        ia := idle ? 1 : 0
+    else
+        busy := true
+    HudAnim["idle"] := ia
+    cy += 27 * ia
+    H := Max(46, Min(HUDMAXH, Round(cy + 12)))
+    if (H != HudH) {
+        HudH := H
+        if (InStr(HudPosition, "Bottom") && !HudCustom && !HudMoving)
+            HudGui.Move(, A_ScreenHeight - 8 - H, HUDW, H)
+        else
+            HudGui.Move(, , HUDW, H)
+    }
+    ; --- draw
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := HudG
+    hap := HAnimAp("hud")
+    base := Max(0.2, HudOpacity / 255) * hap
+    NLAlphaPage := base
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", HudG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", HudG, "UInt", 0)
+    if (hap < 1)
+        HAnimXf(HudG, HUDW / 2, H / 2, 1.0, hap)
+    NLRR(1, 5, HUDW - 2, H - 6, 18, NLC(0, 0, 0, 45))
+    NLRR(3, 3, HUDW - 6, H - 8, 16, SPCol("Card"))
+    bs := HudMoving ? 4 : HudBorderIdx
+    if (bs <= 1 || bs = 2) {
+        NLRRLine(3, 3, HUDW - 6, H - 8, 16, bs = 2 ? NLAccent(210) : SPCol("Border"))
+    } else {
+        NLRRLine(3, 3, HUDW - 6, H - 8, 16, SPCol("Border", 120))
+        stops := SPLogoStops(HudMoving ? 6 : (bs = 4 ? 6 : HudGradIdx))
+        SPGradBorder(4, 4, HUDW - 8, H - 10, 15, stops, now / 1000 * 0.3, 2.2)
+        busy := true
+    }
+    ; the gradient picked for the HUD also colours the running macros (Accent Flow keeps the plain accent colour)
+    gst := (HudGradIdx > 1) ? SPLogoStops(HudGradIdx) : 0
+    ry := 12
+    for i, lab in labels {
+        e := ev[i]
+        if (e < 0.03)
+            continue
+        NLAlphaPage := base * e
+        st := states[i] ? 1 : 0
+        t := HudAnim[i]
+        red := (i = 8)
+        col := red ? NLC(240, 96, 96) : NLAccent()
+        rc := 0
+        if (gst && !red) {
+            rc := SPStopsSample(gst, now / 1000 * 0.12 + i * 0.11)
+            col := NLC(rc[1], rc[2], rc[3])
+        }
+        if (t > 0.01) {
+            if (rc) {
+                SPGradFill(11, ry, HUDW - 22, 23, 9, gst, now / 1000 * 0.3 - i * 0.1, 0.2 * t)
+                busy := true
+            } else
+                NLRR(11, ry, HUDW - 22, 23, 9, red ? NLC(240, 96, 96, Round(40 * t)) : NLAccent(Round(40 * t)))
+        }
+        fa := now - (HudFlashAt.Has(i) ? HudFlashAt[i] : -9999)
+        if (fa < 520) {
+            NLRR(11, ry, HUDW - 22, 23, 9, NLC(255, 255, 255, Round(100 * (1 - fa / 520))))
+            busy := true
+        }
+        cx := 26, cyy := ry + 11.5
+        if (st) {
+            busy := true
+            pulse := 0.5 + 0.5 * Sin(now / 260 + i)
+            NLDisc(cx, cyy, 4 + 3.2 * pulse, rc ? NLC(rc[1], rc[2], rc[3], 55) : (red ? NLC(240, 96, 96, 55) : NLAccent(55)))
+        }
+        NLDisc(cx, cyy, 3.6, SPCol("Off"))
+        if (t > 0.01)
+            NLDisc(cx, cyy, 3.6, rc ? NLC(rc[1], rc[2], rc[3], Round(255 * t)) : (red ? NLC(240, 96, 96, Round(255 * t)) : NLAccent(Round(255 * t))))
+        nc := SPStopsSample(SPLogoStops(HudGradIdx), now / 1000 * 0.12 + i * 0.11)         ; the names take the colour of the HUD's gradient
+        NLText(lab, 40, ry, NLC(nc[1], nc[2], nc[3], Round(150 + 105 * t)), NLFontUI, 80, 23, 0, 1)
+        if (HudShowKeys)
+            NLText(HudKeyFor(i), HUDW - 62, ry, SPMix("Muted", "Text2", t), NLFontSm, 44, 23, 2, 1)
+        else if (t > 0.05)
+            NLText("ON", HUDW - 56, ry, rc ? NLC(rc[1], rc[2], rc[3], Round(255 * t)) : (red ? NLC(240, 96, 96, Round(255 * t)) : NLAccent(Round(255 * t))), NLFontSm, 38, 23, 2, 1)
+        ry += 27 * e
+    }
+    if (ia > 0.03) {
+        NLAlphaPage := base * ia
+        NLText("No macros running", 14, ry, SPCol("Muted"), NLFontSm, HUDW - 28, 23, 1, 1)
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", HudG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    HudBusy := busy
+    sz := Buffer(8, 0)
+    NumPut("Int", HUDW, sz, 0)
+    NumPut("Int", H, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", HudGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", HudMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; ----- the Skeet look of the macro HUD: a dark box with a coloured line on top, one row per running macro: name on the left, [On] on the right -----
+Global SkPatCache := Map(), SkFont := 0
+
+SkOutline(x, y, w, h, c, s := 1)
+{
+    NLRR(x, y, w, s, 0, c)
+    NLRR(x, y + h - s, w, s, 0, c)
+    NLRR(x, y + s, s, h - s * 2, 0, c)
+    NLRR(x + w - s, y + s, s, h - s * 2, 0, c)
+}
+
+; the dotted dark background: a small 4 x 4 picture that is repeated (one per opacity, so the HUD opacity applies to it as well)
+SkPattern(a)
+{
+    global SkPatCache
+    if (SkPatCache.Has(a))
+        return SkPatCache[a].tex
+    if (SkPatCache.Count > 80) {
+        for k, o in SkPatCache {
+            DllCall("gdiplus\GdipDeleteBrush", "Ptr", o.tex)
+            DllCall("gdiplus\GdipDisposeImage", "Ptr", o.img)
+        }
+        SkPatCache := Map()
+    }
+    buf := Buffer(64, 0)
+    Loop 16 {
+        px := Mod(A_Index - 1, 4), py := (A_Index - 1) // 4
+        dark := (px = 1 && py <= 2) || (px = 3 && (py = 0 || py >= 2))
+        v := dark ? 13 : 21
+        NumPut("UInt", (a << 24) | (v << 16) | (v << 8) | v, buf, (A_Index - 1) * 4)
+    }
+    img := 0, tex := 0
+    DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", 4, "Int", 4, "Int", 16, "Int", 0x26200A, "Ptr", buf, "Ptr*", &img)
+    DllCall("gdiplus\GdipCreateTexture", "Ptr", img, "Int", 0, "Ptr*", &tex)
+    SkPatCache[a] := {tex: tex, img: img, buf: buf}
+    return tex
+}
+
+HudRenderSkeet(states, labels)
+{
+    global HudG, HudMemDC, HudGui, HudH, HUDW, HudOpacity, HudBusy, HudPosition, HudCustom, HudMoving, NLG, NLAlphaPage, HudShowKeys, HudCompact, SkFont
+    if (!SkFont)
+        SkFont := NLMakeFont("Verdana", 11, 0)
+    ; "Compact" lists only the running macros, otherwise every macro is listed (the running ones lit)
+    rows := []
+    for i, st in states {
+        if (st || !HudCompact)
+            rows.Push(i)
+    }
+    n := rows.Length
+    showEmpty := (n = 0)                            ; (compact and nothing running: the box stays, with a short note)
+    cnt := showEmpty ? 1 : n
+    cw := 140
+    ch := 19 + 13 * cnt
+    H := (cnt > 0) ? Min(HUDMAXH, ch + 16) : 46
+    if (H != HudH) {
+        HudH := H
+        if (InStr(HudPosition, "Bottom") && !HudCustom && !HudMoving)
+            HudGui.Move(, A_ScreenHeight - 8 - H, HUDW, H)
+        else
+            HudGui.Move(, , HUDW, H)
+    }
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := HudG
+    hap := HAnimAp("hud")
+    base := Max(0.2, HudOpacity / 255) * hap
+    NLAlphaPage := base
+    a := Round(255 * base)
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", HudG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", HudG, "UInt", 0)
+    if (hap < 1)
+        HAnimXf(HudG, HUDW / 2, H / 2, 1.0, hap)
+    if (cnt > 0) {
+        x := 8, y := 8
+        SkOutline(x, y, cw, ch, NLC(18, 18, 18), 1)
+        SkOutline(x + 1, y + 1, cw - 2, ch - 2, NLC(62, 62, 62), 1)
+        SkOutline(x + 2, y + 2, cw - 4, ch - 4, NLC(44, 44, 44), 3)
+        SkOutline(x + 5, y + 5, cw - 10, ch - 10, NLC(62, 62, 62), 1)
+        DllCall("gdiplus\GdipFillRectangleI", "Ptr", HudG, "Ptr", SkPattern(a), "Int", x + 6, "Int", y + 6, "Int", cw - 12, "Int", ch - 12)
+        ; the coloured line on top (blue - purple - yellow), and a faint second line under it
+        w1 := (cw - 14) // 2, w2 := cw - 14 - w1
+        VigGradRect(HudG, x + 7, y + 7, w1, 1, VigARGB(a, [59, 175, 222]), VigARGB(a, [202, 70, 205]), 0)
+        VigGradRect(HudG, x + 7 + w1, y + 7, w2, 1, VigARGB(a, [202, 70, 205]), VigARGB(a, [201, 227, 58]), 0)
+        VigGradRect(HudG, x + 7, y + 8, w1, 1, VigARGB(Round(a * 0.2), [59, 175, 222]), VigARGB(Round(a * 0.2), [202, 70, 205]), 0)
+        VigGradRect(HudG, x + 7 + w1, y + 8, w2, 1, VigARGB(Round(a * 0.2), [202, 70, 205]), VigARGB(Round(a * 0.2), [201, 227, 58]), 0)
+        if (showEmpty) {
+            NLText("No macros running", x + 10, y + 10, NLC(150, 150, 150), SkFont, cw - 20, 13, 0, 1)
+        } else {
+            ry := y + 10
+            for k, i in rows {
+                on := states[i] ? true : false
+                red := (i = 8)
+                NLText(labels[i], x + 10, ry, on ? NLC(255, 255, 255) : NLC(140, 140, 140), SkFont, cw - 60, 13, 0, 1)
+                tail := HudShowKeys ? "[" HudKeyFor(i) "]" : (on ? "[On]" : "[Off]")
+                NLText(tail, x + cw - 10 - 60, ry, on ? (red ? NLC(240, 96, 96) : NLC(126, 195, 12)) : NLC(120, 120, 120), SkFont, 60, 13, 2, 1)
+                ry += 13
+            }
+        }
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", HudG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    HudBusy := (hap < 1)
+    sz := Buffer(8, 0)
+    NumPut("Int", HUDW, sz, 0)
+    NumPut("Int", H, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", HudGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", HudMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; ----- the Neverlose look of the macro HUD: a flat dark bar (blue icon + title) with a light, see-through list under it -----
+Global NLHudFontT := 0, NLHudFontR := 0
+
+HudRenderNL(states, labels)
+{
+    global HudG, HudMemDC, HudGui, HudH, HUDW, HudOpacity, HudBusy, HudPosition, HudCustom, HudMoving, NLG, NLAlphaPage, HudShowKeys, HudCompact, NLHudFontT, NLHudFontR
+    if (!NLHudFontT) {
+        NLHudFontT := NLMakeFont("Calibri", 14, 1)
+        NLHudFontR := NLMakeFont("Calibri", 12, 0)
+    }
+    rows := []
+    for i, st in states {
+        if (st || !HudCompact)
+            rows.Push(i)
+    }
+    showEmpty := (rows.Length = 0)
+    cnt := showEmpty ? 1 : rows.Length
+    bw := 150
+    bh := 24 + 20 * (cnt - 1) + 4                    ; (the list under the bar: 20 per row)
+    H := Min(HUDMAXH, 4 + 25 + bh + 4)
+    if (H != HudH) {
+        HudH := H
+        if (InStr(HudPosition, "Bottom") && !HudCustom && !HudMoving)
+            HudGui.Move(, A_ScreenHeight - 8 - H, HUDW, H)
+        else
+            HudGui.Move(, , HUDW, H)
+    }
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := HudG
+    hap := HAnimAp("hud")
+    base := Max(0.2, HudOpacity / 255) * hap
+    NLAlphaPage := base
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", HudG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", HudG, "UInt", 0)
+    if (hap < 1)
+        HAnimXf(HudG, HUDW / 2, H / 2, 1.0, hap)
+    x := 3, y := 4
+    blue := NLC(0, 130, 255)
+    NLRR(x, y, bw, 25, 0, NLC(11, 11, 20, 200))                         ; the bar
+    ix := x + 7, iy := y + 8                                              ; a small keyboard as the icon
+    NLRRLine(ix, iy, 16, 10, 2, blue)
+    Loop 3
+        NLRR(ix + 3 + (A_Index - 1) * 4, iy + 3, 2, 2, 0, blue)
+    NLRR(ix + 4, iy + 6.5, 8, 1.5, 0, blue)
+    NLText("Macros", x + 30, y + 1, NLC(255, 255, 255), NLHudFontT, 100, 23, 0, 1)
+    NLRR(x, y + 25, bw, bh, 0, NLC(11, 11, 20, 120))                     ; (a dark base under the list, so the text can be read on a bright game scene)
+    NLRR(x, y + 25, bw, bh, 0, NLC(200, 200, 200, 15))                   ; the list
+    if (showEmpty) {
+        NLText("No macros running", x + 5, y + 27, NLC(170, 170, 175), NLHudFontR, bw - 10, 16, 0, 1)
+    } else {
+        ry := y + 27
+        for k, i in rows {
+            on := states[i] ? true : false
+            NLText(labels[i], x + 5, ry, on ? NLC(255, 255, 255) : NLC(135, 135, 145), NLHudFontR, bw - 60, 16, 0, 1)
+            tail := HudShowKeys ? HudKeyFor(i) : (on ? "on" : "off")
+            NLText(tail, x + bw - 6 - 54, ry, on ? NLC(255, 255, 255) : NLC(110, 110, 120), NLHudFontR, 54, 16, 2, 1)
+            ry += 20
+        }
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", HudG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    HudBusy := (hap < 1)
+    sz := Buffer(8, 0)
+    NumPut("Int", HUDW, sz, 0)
+    NumPut("Int", H, sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", HudGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", HudMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; ===== Freeze effect: a soft full-screen glow (several styles) plus an optional countdown pill =====
+Global VigDbg := "", VigMinShow := 500, VigAnim := false, VigAnimSpd := 5, VigPhase := 0.0, VigStyle := 1, VigIntensity := 80, VigGrad := 1, VigTint := 0, VigPillOn := true, VigSound := false
+Global VigLastText := "", VigStops := "", VigGui := "", VigDC := 0, VigBmp := 0, VigG := 0, VigSig := "", VigState := 0, VigTimerOn := false
+Global VigPGui := "", VigPDC := 0, VigPBmp := 0, VigPG := 0
+Global VigDirty := true, VigLastA := -1          ; (the picture of the effect changed / the last opacity that was applied)
+Global VigPillX := 0, VigPillY := 34, VigPillCustom := false, VigPillPrev := false, VigPillThru := true, VigPillDrag := 0
+; the countdown card has its own look (background, border, gradient, size), separate from every other HUD
+Global PillStyle := {id: "pill", bg: true, border: true, scale: 100, bstyle: 0, grad: 0, fill: 1}
+Global PillAlways := false, VigPillOff := false      ; (VigPillOff: the script is closing / reloading, the card fades away)
+PillW() => Round(250 * PillStyle.scale / 100)
+PillH() => Round(64 * PillStyle.scale / 100)
+PillBs() => PillStyle.bstyle ? PillStyle.bstyle : 3
+
+class VigStyleSelC {
+    items := ["Glow", "Pulse", "Scanlines", "Glitch", "Frost", "Hard border", "Shockwave", "Chromatic split", "Radar sweep", "Heartbeat", "Lightning", "Hourglass", "Closing in", "Embers"]
+    Value => VigStyle
+    Text => this.items[VigStyle]
+    Choose(i) {
+        global VigStyle
+        VigStyle := i
+        SPSavePrefs()
+    }
+}
+Global VigStyleSel := VigStyleSelC()
+
+class VigGradSelC {
+    items := ["Solid color", "Accent Flow", "Aurora", "Sunset", "Ocean", "Fire", "Rainbow", "Candy", "Mono"]
+    Value => VigGrad
+    Text => this.items[VigGrad]
+    Choose(i) {
+        global VigGrad
+        VigGrad := i
+        SPSavePrefs()
+    }
+}
+Global VigGradSel := VigGradSelC()
+
+VigSetInt(v) {
+    global VigIntensity
+    VigIntensity := v
+    SPSavePrefs()
+}
+
+VigSetTint(v) {
+    global VigTint
+    VigTint := v
+    SPSavePrefs()
+}
+
+VigSetVol(v) {
+    global VigVol
+    VigVol := v
+}
+
+VigSetStay(v) {
+    global VigMinShow
+    VigMinShow := v
+    SPSavePrefs()
+}
+
+VigToggleAnim(*) {
+    global VigAnim
+    VigAnim := !VigAnim
+    SPSavePrefs()
+}
+
+VigSetSpd(v) {
+    global VigAnimSpd
+    VigAnimSpd := v
+    SPSavePrefs()
+}
+
+; Sounds for the freeze cue: a few built-in beep patterns, or any .wav / .mp3 of your own
+class VigSoundSelC {
+    __New() {
+        this.items := ["Beep", "Double beep", "Rising chirp", "Falling chirp", "Soft tick"]
+        this.files := Map()
+        this.items.Push("Custom file...")
+        this.custom := this.items.Length
+        this.items.Push("Multiple sounds...")
+        this.multi := this.items.Length
+    }
+    Value => Min(VigSoundIdx, this.items.Length)
+    Text {
+        get {
+            global VigSoundIdx, VigSoundFile, VigMulti
+            if (VigSoundIdx = this.custom && VigSoundFile != "") {
+                SplitPath(VigSoundFile, &nm)
+                return "Custom: " nm
+            }
+            if (VigSoundIdx = this.multi && VigMulti.Length > 0)
+                return "Random of " VigMulti.Length " sounds"
+            return this.items[VigSoundIdx]
+        }
+    }
+    Choose(i) {
+        global VigSoundIdx, VigSoundFile, NLGui, MenuFxHold, VigMulti
+        if (i = this.multi) {
+            try NLGui.Opt("-AlwaysOnTop")
+            MenuFxHold := true
+            paths := FileSelect("M3", , "Choose up to 10 sounds (hold Ctrl to pick several): one plays at random for each freeze", "Sounds (*.wav; *.mp3)")
+            MenuFxHold := false
+            try NLGui.Opt("+AlwaysOnTop")
+            if (!IsObject(paths) || paths.Length = 0) {
+                if (VigMulti.Length = 0)
+                    return
+            } else {
+                VigMulti := []
+                for f in paths {
+                    if (VigMulti.Length < 10)
+                        VigMulti.Push(f)
+                }
+                if (paths.Length > 10)
+                    try SPToast("Multiple sounds", 7502, "off", "Only the first 10 were kept")
+            }
+        }
+        if (i = this.custom) {
+            try NLGui.Opt("-AlwaysOnTop")
+            MenuFxHold := true
+            path := FileSelect(3, , "Choose a sound for the freeze cue", "Sounds (*.wav; *.mp3)")
+            MenuFxHold := false
+            try NLGui.Opt("+AlwaysOnTop")
+            if (path = "")
+                return
+            VigSoundFile := path
+        }
+        VigSoundIdx := i
+        VigSoundPlay(true)
+        NLRequest()
+    }
+}
+Global VigSoundSel := VigSoundSelC()
+
+; start = the sound when the freeze begins, otherwise the (lower) one when it ends. Files play only at the start.
+VigMultiText()
+{
+    global VigMulti
+    t := ""
+    for f in VigMulti
+        t .= (t = "" ? "" : "|") f
+    return t
+}
+
+; one of the picked sounds at random (never the same one twice in a row)
+VigMultiPick()
+{
+    global VigMulti, VigMultiLast
+    n := VigMulti.Length
+    if (n = 0)
+        return ""
+    k := Random(1, n)
+    if (n > 1 && k = VigMultiLast)
+        k := (k = n) ? 1 : k + 1
+    VigMultiLast := k
+    return VigMulti[k]
+}
+
+VigSoundPlay(start := true)
+{
+    global VigSoundIdx, VigSoundFile, VigSoundSel, VigVol
+    idx := VigSoundIdx
+    if (idx = VigSoundSel.custom || idx = VigSoundSel.multi || VigSoundSel.files.Has(idx)) {
+        if (start) {
+            f := (idx = VigSoundSel.multi) ? VigMultiPick() : (idx = VigSoundSel.custom) ? VigSoundFile : VigSoundSel.files[idx]
+            if (f != "")
+                VigPlayFile(f)
+        }
+        return
+    }
+    SetTimer(VigBeepPattern.Bind(idx, start), -1)
+}
+
+; a file at the chosen volume: Windows keeps one volume for this script's own sounds, so it is set just before playing
+VigPlayFile(f)
+{
+    global VigVol
+    try {
+        VigSetOutVol(VigVol)
+        if (StrLower(SubStr(f, -4)) = ".wav")
+            DllCall("winmm\PlaySoundW", "Str", f, "Ptr", 0, "UInt", 0x20003)     ; SND_FILENAME | SND_ASYNC | SND_NODEFAULT: returns at once, the freeze must not wait for the file
+        else
+            SoundPlay(f)
+    }
+}
+
+VigSetOutVol(pct)
+{
+    v := Round(65535 * (pct / 100) ** 1.6)
+    DllCall("winmm\waveOutSetVolume", "Ptr", 0, "UInt", v | (v << 16))
+}
+
+; the beep patterns are tiny sine tones built in memory, so their loudness can be set
+VigBeepPattern(idx, start)
+{
+    switch idx {
+        case 2:
+            tones := start ? [[900, 30], [1150, 30]] : [[560, 30]]
+        case 3:
+            tones := start ? [[700, 25], [900, 25], [1150, 25]] : [[900, 25], [620, 25]]
+        case 4:
+            tones := start ? [[1150, 25], [900, 25], [700, 25]] : [[620, 25], [900, 25]]
+        case 5:
+            tones := [[start ? 1600 : 1000, 12]]
+        default:
+            tones := [[start ? 900 : 560, 35]]
+    }
+    VigPlayTones(tones)
+}
+
+VigPlayTones(tones)
+{
+    global VigVol
+    static ring := [], slot := 0                  ; a sound that is still playing must keep its memory: use a few buffers in turn
+    rate := 22050
+    total := 0
+    for t in tones
+        total += Round(rate * t[2] / 1000)
+    amp := 30000 * (VigVol / 100) ** 1.6
+    slot := Mod(slot, 4) + 1
+    buf := Buffer(44 + total * 2, 0)
+    ring.Length := Max(ring.Length, slot)
+    ring[slot] := buf
+    NumPut("UInt", 0x46464952, buf, 0), NumPut("UInt", 36 + total * 2, buf, 4), NumPut("UInt", 0x45564157, buf, 8)
+    NumPut("UInt", 0x20746D66, buf, 12), NumPut("UInt", 16, buf, 16), NumPut("UShort", 1, buf, 20), NumPut("UShort", 1, buf, 22)
+    NumPut("UInt", rate, buf, 24), NumPut("UInt", rate * 2, buf, 28), NumPut("UShort", 2, buf, 32), NumPut("UShort", 16, buf, 34)
+    NumPut("UInt", 0x61746164, buf, 36), NumPut("UInt", total * 2, buf, 40)
+    pos := 44
+    for t in tones {
+        n := Round(rate * t[2] / 1000)
+        w := 6.283185307 * t[1] / rate
+        Loop n {
+            e := Min(1.0, A_Index / 80, (n - A_Index + 1) / 80)          ; short fade in / out, no clicks
+            NumPut("Short", Round(Sin(w * A_Index) * amp * e), buf, pos)
+            pos += 2
+        }
+    }
+    VigSetOutVol(100)                                                      ; (the tones are scaled themselves)
+    DllCall("winmm\PlaySoundW", "Ptr", buf, "Ptr", 0, "UInt", 0x5)         ; SND_MEMORY | SND_ASYNC
+}
+
+VigSoundTest(*)
+{
+    VigSoundPlay(true)
+    SetTimer(() => VigSoundPlay(false), -450)
+}
+
+ToggleBurstSyncSound(*) {
+    global BurstSyncSound
+    BurstSyncSound := !BurstSyncSound
+    NLRequest()
+}
+
+ToggleBurstSyncPill(*) {
+    global BurstSyncPill
+    BurstSyncPill := !BurstSyncPill
+    NLRequest()
+}
+
+VigToggleSound(*) {
+    global VigSound
+    VigSound := !VigSound
+    SPSavePrefs()
+}
+
+VigTogglePill(*) {
+    global VigPillOn
+    VigPillOn := !VigPillOn
+    SPSavePrefs()
+}
+
+VigPreview(*)
+{
+    ShowFreezeVignette(1400)
+    SetTimer(HideFreezeVignette, -1450)
+}
+
+VigMakeSurface(w, h, &dc, &bmp, &g)
+{
+    dc := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+    bi := Buffer(40, 0)
+    NumPut("int", 40, bi, 0)
+    NumPut("int", w, bi, 4)
+    NumPut("int", -h, bi, 8)
+    NumPut("short", 1, bi, 12)
+    NumPut("short", 32, bi, 14)
+    pBits := 0
+    bmp := DllCall("CreateDIBSection", "Ptr", dc, "Ptr", bi, "UInt", 0, "Ptr*", &pBits, "Ptr", 0, "UInt", 0, "Ptr")
+    DllCall("SelectObject", "Ptr", dc, "Ptr", bmp)
+    g := 0
+    DllCall("gdiplus\GdipCreateFromHDC", "Ptr", dc, "Ptr*", &g)
+    DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", g, "Int", 4)
+    DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", g, "Int", 4)
+}
+
+VigEnsure()
+{
+    global VigGui, VigDC, VigBmp, VigG, VigPGui, VigPDC, VigPBmp, VigPG
+    if (IsObject(VigGui))
+        return
+    NLGdipInit()
+    VigGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M freeze")
+    VigMakeSurface(A_ScreenWidth, A_ScreenHeight, &VigDC, &VigBmp, &VigG)
+    VigPGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M freeze pill")
+    VigMakeSurface(400, 103, &VigPDC, &VigPBmp, &VigPG)
+}
+
+VigARGB(a, c)
+{
+    return ((a & 255) << 24) | (c[1] << 16) | (c[2] << 8) | c[3]
+}
+
+VigGradRect(G, x, y, w, h, c1, c2, mode)
+{
+    if (w < 1 || h < 1)
+        return
+    rc := Buffer(16, 0)
+    NumPut("Int", x, rc, 0), NumPut("Int", y, rc, 4), NumPut("Int", w, rc, 8), NumPut("Int", h, rc, 12)
+    brush := 0
+    DllCall("gdiplus\GdipCreateLineBrushFromRectI", "Ptr", rc, "UInt", c1, "UInt", c2, "Int", mode, "Int", 0, "Ptr*", &brush)
+    DllCall("gdiplus\GdipFillRectangleI", "Ptr", G, "Ptr", brush, "Int", x, "Int", y, "Int", w, "Int", h)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+VigSolid(G, x, y, w, h, argb)
+{
+    brush := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+    DllCall("gdiplus\GdipFillRectangleI", "Ptr", G, "Ptr", brush, "Int", x, "Int", y, "Int", w, "Int", h)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+; colour at position pos (0..1 around the screen edge)
+VigColAt(pos)
+{
+    global VigGrad, VignetteColor, VigStops, VigAnim, VigPhase
+    if (!IsObject(VigStops)) {
+        return [Integer("0x" SubStr(VignetteColor, 1, 2)), Integer("0x" SubStr(VignetteColor, 3, 2)), Integer("0x" SubStr(VignetteColor, 5, 2))]
+    }
+    return SPStopsSample(VigStops, VigAnim ? pos - VigPhase : pos)
+}
+
+; soft glow around all four edges: two layered fades give a natural fall-off
+VigEdges(G, depth, peak)
+{
+    w := A_ScreenWidth, h := A_ScreenHeight
+    n := 28
+    for pass in [[1.0, 0.55], [0.42, 0.55]] {
+        d := Round(depth * pass[1])
+        a := Round(peak * pass[2])
+        Loop n {
+            i := A_Index
+            x0 := Floor((i - 1) * w / n), x1 := Floor(i * w / n)
+            ct := VigColAt((i - 0.5) / n * 0.25)
+            cb := VigColAt(0.75 - (i - 0.5) / n * 0.25)
+            VigGradRect(G, x0, 0, x1 - x0 + 1, d, VigARGB(a, ct), VigARGB(0, ct), 1)
+            VigGradRect(G, x0, h - d, x1 - x0 + 1, d, VigARGB(0, cb), VigARGB(a, cb), 1)
+            y0 := Floor((i - 1) * h / n), y1 := Floor(i * h / n)
+            cr := VigColAt(0.25 + (i - 0.5) / n * 0.25)
+            cl := VigColAt(1.0 - (i - 0.5) / n * 0.25)
+            VigGradRect(G, 0, y0, d, y1 - y0 + 1, VigARGB(a, cl), VigARGB(0, cl), 0)
+            VigGradRect(G, w - d, y0, d, y1 - y0 + 1, VigARGB(0, cr), VigARGB(a, cr), 0)
+        }
+    }
+}
+
+; ===== more freeze effects (styles 7 to 14) =====
+; Most of them are drawn again every few milliseconds while the freeze lasts (the game is paused then, so this costs no frames).
+; T = milliseconds since the freeze began, dur = how long it lasts (0 = as long as the key is held).
+
+; the pause (ms) between two pictures of a style that changes while the freeze runs (0 = one picture is enough)
+VigRedrawGap(style)
+{
+    switch style {
+        case 7: return 45
+        case 9: return 45
+        case 11: return 80
+        case 12: return 60
+        case 13: return 50
+        case 14: return 55
+    }
+    return 0
+}
+
+VigPen(G, argb, wd)
+{
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", wd, "Int", 2, "Ptr*", &pen)
+    return pen
+}
+
+VigRing(G, cx, cy, r, wd, argb)
+{
+    if (r < 2)
+        return
+    pen := VigPen(G, argb, wd)
+    DllCall("gdiplus\GdipDrawEllipse", "Ptr", G, "Ptr", pen, "Float", cx - r, "Float", cy - r, "Float", r * 2, "Float", r * 2)
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+}
+
+; rings leave the middle of the screen one after another, thinning and fading as they widen
+VigFxShockwave(G, w, h, depth, T)
+{
+    VigEdges(G, depth * 0.8, 170)
+    diag := Sqrt(w * w + h * h) / 2
+    Loop 4 {
+        k := A_Index
+        ph := T / 850 - (k - 1) * 0.24
+        if (ph < 0)
+            continue
+        ph := ph - Floor(ph)
+        e := 1 - (1 - ph) ** 3
+        col := VigColAt(k * 0.19 + ph * 0.3)
+        a := Round(215 * (1 - ph) ** 1.4)
+        r := e * diag * 1.08
+        VigRing(G, w / 2, h / 2, r, 5 + 22 * (1 - ph), VigARGB(Round(a * 0.18), col))
+        VigRing(G, w / 2, h / 2, r, 2 + 9 * (1 - ph), VigARGB(Round(a * 0.45), col))
+        VigRing(G, w / 2, h / 2, r, 1.5 + 3 * (1 - ph), VigARGB(a, [Min(255, col[1] + 35), Min(255, col[2] + 35), Min(255, col[3] + 35)]))
+    }
+}
+
+; red on the left and the top, cyan on the right and the bottom, with a faint copy of each a little further in (like a lens fringe)
+VigFxChromatic(G, w, h, depth)
+{
+    d := Round(depth * 0.7)
+    red := [255, 40, 70], cy := [0, 225, 255]
+    VigGradRect(G, 0, 0, d, h, VigARGB(215, red), VigARGB(0, red), 0)
+    VigGradRect(G, 0, 0, w, d, VigARGB(215, red), VigARGB(0, red), 1)
+    VigGradRect(G, w - d, 0, d, h, VigARGB(0, cy), VigARGB(215, cy), 0)
+    VigGradRect(G, 0, h - d, w, d, VigARGB(0, cy), VigARGB(215, cy), 1)
+    VigSolid(G, 5, 0, 3, h, VigARGB(190, cy))
+    VigSolid(G, 0, 5, w, 3, VigARGB(190, cy))
+    VigSolid(G, w - 8, 0, 3, h, VigARGB(190, red))
+    VigSolid(G, 0, h - 8, w, 3, VigARGB(190, red))
+}
+
+; a line turns around the middle of the screen and leaves a fading trail
+VigFxRadar(G, w, h, depth, T)
+{
+    VigEdges(G, depth * 0.6, 150)
+    cx := w / 2, cy := h / 2
+    diag := Sqrt(w * w + h * h) / 2
+    for f in [0.33, 0.66, 1.0]
+        VigRing(G, cx, cy, diag * f * 0.95, 1.5, VigARGB(46, VigColAt(f * 0.6)))
+    ang := Mod(T / 1000 * 330, 360)
+    Loop 14 {
+        i := A_Index
+        a := Round(120 * (1 - (i - 1) / 14) ** 1.6)
+        brush := 0
+        DllCall("gdiplus\GdipCreateSolidFill", "UInt", VigARGB(a, VigColAt(0.1 + i * 0.02)), "Ptr*", &brush)
+        DllCall("gdiplus\GdipFillPie", "Ptr", G, "Ptr", brush, "Float", cx - diag * 1.1, "Float", cy - diag * 1.1, "Float", diag * 2.2, "Float", diag * 2.2, "Float", ang - i * 3.2, "Float", 3.4)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+    }
+    r := diag * 1.1
+    pen := VigPen(G, VigARGB(230, VigColAt(0.05)), 2.4)
+    rad := ang * 0.01745329
+    DllCall("gdiplus\GdipDrawLine", "Ptr", G, "Ptr", pen, "Float", cx, "Float", cy, "Float", cx + r * Cos(rad), "Float", cy + r * Sin(rad))
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+}
+
+; the edge glow beats twice and rests (the opacity is driven by this in the timer)
+VigBeat(T)
+{
+    p := Mod(T, 950) / 950
+    a := Exp(-((p - 0.07) / 0.045) ** 2)
+    b := 0.78 * Exp(-((p - 0.25) / 0.055) ** 2)
+    return 0.3 + 0.7 * Max(a, b)
+}
+
+; jagged electric lines along the four edges, new ones every few frames
+VigFxLightning(G, w, h, depth)
+{
+    VigEdges(G, depth * 0.7, 150)
+    for e in [0, 1, 2, 3] {
+        len := (e < 2) ? w : h
+        steps := 34
+        pts := Buffer(steps * 8 + 8, 0)
+        inset := 7 + Random(0, 6)
+        Loop steps + 1 {
+            i := A_Index - 1
+            along := i / steps * len
+            off := inset + (Mod(i, 2) ? Random(-3, 22) : Random(0, 10))
+            switch e {
+                case 0: x := along, y := off
+                case 1: x := along, y := h - off
+                case 2: x := off, y := along
+                default: x := w - off, y := along
+            }
+            NumPut("Float", x, pts, i * 8)
+            NumPut("Float", y, pts, i * 8 + 4)
+        }
+        col := VigColAt(e * 0.25)
+        bright := [Min(255, col[1] + 110), Min(255, col[2] + 110), Min(255, col[3] + 110)]
+        for lay in [[9, 44, col], [4, 110, col], [1.8, 235, bright]] {
+            pen := VigPen(G, VigARGB(lay[2], lay[3]), lay[1])
+            DllCall("gdiplus\GdipDrawLines", "Ptr", G, "Ptr", pen, "Ptr", pts, "Int", steps + 1)
+            DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        }
+        Loop 3 {                                             ; short branches reaching into the screen
+            i := Random(2, steps - 2)
+            bx := NumGet(pts, i * 8, "Float"), by := NumGet(pts, i * 8 + 4, "Float")
+            dx := (e < 2) ? Random(-25, 25) : ((e = 2) ? Random(20, 70) : -Random(20, 70))
+            dy := (e >= 2) ? Random(-25, 25) : ((e = 0) ? Random(20, 70) : -Random(20, 70))
+            pen := VigPen(G, VigARGB(190, bright), 1.3)
+            DllCall("gdiplus\GdipDrawLine", "Ptr", G, "Ptr", pen, "Float", bx, "Float", by, "Float", bx + dx * 0.5 + Random(-8, 8), "Float", by + dy * 0.5 + Random(-8, 8))
+            DllCall("gdiplus\GdipDrawLine", "Ptr", G, "Ptr", pen, "Float", bx + dx * 0.5, "Float", by + dy * 0.5, "Float", bx + dx, "Float", by + dy)
+            DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        }
+    }
+}
+
+; two bars (top and bottom) that run empty towards the middle as the freeze runs out
+VigFxHourglass(G, w, h, depth, T, dur)
+{
+    VigEdges(G, depth * 0.45, 120)
+    if (dur > 0)
+        f := Max(0.0, Min(1.0, 1 - T / VigSpan(dur)))
+    else
+        f := 0.55 + 0.45 * Sin(T / 260)
+    bh := 9, pad := 14
+    for y in [pad, h - pad - bh] {
+        VigSolid(G, 0, y, w, bh, VigARGB(40, VigColAt(0.0)))
+        fw := Round(w * f)
+        x0 := Round((w - fw) / 2)
+        n := 40
+        Loop n {
+            i := A_Index
+            sx := x0 + Floor((i - 1) * fw / n), ex := x0 + Floor(i * fw / n)
+            VigSolid(G, sx, y, ex - sx + 1, bh, VigARGB(235, VigColAt((i - 0.5) / n * 0.5)))
+        }
+        if (fw > 4)
+            VigSolid(G, x0, y, 3, bh, VigARGB(255, [255, 255, 255]))
+    }
+}
+
+; the screen darkens from the corners towards the middle, like tunnel vision
+VigFxClosing(G, w, h, depth, T)
+{
+    p := Min(1.0, T / 480)
+    e := 1 - (1 - p) ** 3
+    base := VigColAt(0.0)
+    dark := [Round(base[1] * 0.15), Round(base[2] * 0.15), Round(base[3] * 0.15)]
+    rx := w * (0.80 - 0.34 * e)
+    ry := h * (0.80 - 0.30 * e)
+    cx := w / 2, cy := h / 2
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    DllCall("gdiplus\GdipAddPathEllipse", "Ptr", path, "Float", cx - rx, "Float", cy - ry, "Float", rx * 2, "Float", ry * 2)
+    DllCall("gdiplus\GdipSetClipPath", "Ptr", G, "Ptr", path, "Int", 4)                  ; 4 = leave the inside of the ellipse out
+    VigSolid(G, 0, 0, w, h, VigARGB(238, dark))
+    DllCall("gdiplus\GdipResetClip", "Ptr", G)
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+    Loop 12 {                                                ; a soft edge: darker rings fading inwards
+        k := A_Index
+        a := Round(238 * ((13 - k) / 13) ** 2.2)
+        pen := VigPen(G, VigARGB(a, dark), 11)
+        DllCall("gdiplus\GdipDrawEllipse", "Ptr", G, "Ptr", pen, "Float", cx - rx + k * 9, "Float", cy - ry + k * 9 * ry / rx, "Float", (rx - k * 9) * 2, "Float", (ry - k * 9 * ry / rx) * 2)
+        DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    }
+    pen := VigPen(G, VigARGB(210, VigColAt(0.2)), 3)
+    DllCall("gdiplus\GdipDrawEllipse", "Ptr", G, "Ptr", pen, "Float", cx - rx, "Float", cy - ry, "Float", rx * 2, "Float", ry * 2)
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+}
+
+; sparks drift up along the edges of the screen (the October look)
+VigFxEmbers(G, w, h, depth, T)
+{
+    static px := [], py := [], pv := [], ps := [], pk := [], pw := []
+    n := 80
+    if (px.Length != n) {
+        px := [], py := [], pv := [], ps := [], pk := [], pw := []
+        Loop n {
+            i := A_Index
+            if (i <= 44)
+                px.Push(Random(0, w))
+            else if (Mod(i, 2))
+                px.Push(Random(0, 160))
+            else
+                px.Push(w - Random(0, 160))
+            py.Push(Random(0, h))
+            pv.Push(Random(45, 170))
+            ps.Push(Random(3, 7))
+            pk.Push(Random(0, 1000) / 1000)
+            pw.Push(Random(8, 40))
+        }
+    }
+    VigEdges(G, depth * 0.7, 140)
+    Loop n {
+        i := A_Index
+        y := Mod(py[i] - pv[i] * T / 1000 + h * 4, h + 40) - 20
+        x := px[i] + pw[i] * Sin(T / 700 + pk[i] * 6.28)
+        fl := 0.65 + 0.35 * Sin(T / 90 + pk[i] * 20)
+        col := VigColAt(pk[i] * 0.6)
+        warm := [Min(255, col[1] + 90), Min(255, col[2] + 60), Min(255, col[3] + 30)]
+        sz := ps[i]
+        for lay in [[sz * 3.4, 38], [sz * 1.8, 110], [sz, 255]] {
+            brush := 0
+            DllCall("gdiplus\GdipCreateSolidFill", "UInt", VigARGB(Round(lay[2] * fl), warm), "Ptr*", &brush)
+            DllCall("gdiplus\GdipFillEllipse", "Ptr", G, "Ptr", brush, "Float", x - lay[1] / 2, "Float", y - lay[1] / 2, "Float", lay[1], "Float", lay[1])
+            DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+        }
+    }
+}
+
+; Critical keeps another timer from touching the shared drawing handle halfway through, but it must not
+; leak into the thread that called us (it would stop timers from running while that thread sleeps).
+VigRender()
+{
+    pc := A_IsCritical
+    Critical
+    try VigRenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+VigRenderInner()
+{
+    global VigG, VigGui, VigStyle, VigTint, VignetteThickness, VigSig, VigGrad, VigStops, VigAnim, VigAnimSpd, VigPhase, VignetteColor, VigDirty, VigState
+    G := VigG
+    T := IsObject(VigState) ? A_TickCount - VigState.t0 : 0
+    fdur := IsObject(VigState) ? VigState.dur : 0
+    w := A_ScreenWidth, h := A_ScreenHeight
+    VigPhase := A_TickCount / 1000 * VigAnimSpd * 0.06
+    if (VigGrad > 1) {
+        VigStops := SPLogoStops(VigGrad - 1)
+    } else if (VigAnim) {
+        ; a single colour "shimmers" between itself and a lighter shade
+        c := [Integer("0x" SubStr(VignetteColor, 1, 2)), Integer("0x" SubStr(VignetteColor, 3, 2)), Integer("0x" SubStr(VignetteColor, 5, 2))]
+        VigStops := [c, [Round(c[1] + (255 - c[1]) * 0.6), Round(c[2] + (255 - c[2]) * 0.6), Round(c[3] + (255 - c[3]) * 0.6)]]
+    } else {
+        VigStops := ""
+    }
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", G, "UInt", 0)
+    base := VigColAt(0.0)
+    if (VigTint > 0)
+        VigSolid(G, 0, 0, w, h, VigARGB(Round(VigTint * 2.2), base))
+    depth := Max(40, VignetteThickness * 9)
+    switch VigStyle {
+        case 6:                                         ; hard border
+            t := Max(2, VignetteThickness)
+            n := 28
+            Loop n {
+                i := A_Index
+                x0 := Floor((i - 1) * w / n), x1 := Floor(i * w / n)
+                ct := VigColAt((i - 0.5) / n * 0.25)
+                cb := VigColAt(0.75 - (i - 0.5) / n * 0.25)
+                VigSolid(G, x0, 0, x1 - x0 + 1, t, VigARGB(235, ct))
+                VigSolid(G, x0, h - t, x1 - x0 + 1, t, VigARGB(235, cb))
+                y0 := Floor((i - 1) * h / n), y1 := Floor(i * h / n)
+                cr := VigColAt(0.25 + (i - 0.5) / n * 0.25)
+                cl := VigColAt(1.0 - (i - 0.5) / n * 0.25)
+                VigSolid(G, 0, y0, t, y1 - y0 + 1, VigARGB(235, cl))
+                VigSolid(G, w - t, y0, t, y1 - y0 + 1, VigARGB(235, cr))
+            }
+        case 7: VigFxShockwave(G, w, h, depth, T)
+        case 8: VigFxChromatic(G, w, h, depth)
+        case 9: VigFxRadar(G, w, h, depth, T)
+        case 11: VigFxLightning(G, w, h, depth)
+        case 12: VigFxHourglass(G, w, h, depth, T, fdur)
+        case 13: VigFxClosing(G, w, h, depth, T)
+        case 14: VigFxEmbers(G, w, h, depth, T)
+        default:
+            VigEdges(G, depth, 235)
+    }
+    if (VigStyle = 3) {                                 ; scanlines
+        y := 0
+        while (y < h) {
+            VigSolid(G, 0, y, w, 1, VigARGB(26, base))
+            y += 4
+        }
+    } else if (VigStyle = 4) {                          ; glitch bars
+        Loop 7 {
+            bh := Random(3, 16)
+            by := Random(0, h - bh)
+            side := Random(0, 1)
+            bw := Random(Round(w * 0.04), Round(w * 0.22))
+            bx := side ? w - bw : 0
+            VigSolid(G, bx, by, bw, bh, VigARGB(Random(70, 150), Random(0, 1) ? [0, 255, 255] : [255, 0, 170]))
+        }
+    } else if (VigStyle = 5) {                          ; frost speckles
+        Loop 520 {
+            e := Random(0, 3)
+            d := Random(2, depth)
+            px := (e < 2) ? Random(0, w - 3) : ((e = 2) ? Random(0, d) : Random(w - d, w - 3))
+            py := (e = 0) ? Random(0, d) : ((e = 1) ? Random(h - d, h - 3) : Random(0, h - 3))
+            sz := Random(1, 3)
+            VigSolid(G, px, py, sz, sz, VigARGB(Random(80, 170), [235, 245, 255]))
+        }
+    }
+    VigSig := VigStyle "|" VigGrad "|" VignetteThickness "|" VigTint "|" A_ScreenWidth
+    VigDirty := true
+}
+
+; The full-screen picture is only handed to Windows when it has changed; fading it in and out afterwards just changes its opacity, which
+; costs next to nothing (before, every step of every fade pushed the whole screen again, tying the script up for milliseconds).
+VigSetAlpha(a)
+{
+    global VigGui, VigDC, VigDirty, VigLastA
+    a := Max(0, Min(255, Round(a)))
+    if (a = VigLastA && !VigDirty)
+        return
+    bf := Buffer(4, 0)
+    NumPut("UChar", a, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    if (VigDirty) {
+        sz := Buffer(8, 0)
+        NumPut("Int", A_ScreenWidth, sz, 0)
+        NumPut("Int", A_ScreenHeight, sz, 4)
+        src := Buffer(8, 0)
+        DllCall("UpdateLayeredWindow", "Ptr", VigGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", VigDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+        VigDirty := false
+    } else
+        DllCall("UpdateLayeredWindow", "Ptr", VigGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", 0, "Ptr", 0, "Ptr", 0, "UInt", 0, "Ptr", bf, "UInt", 2)
+    VigLastA := a
+}
+
+; Critical keeps another timer from touching the shared drawing handle halfway through, but it must not
+; leak into the thread that called us (it would stop timers from running while that thread sleeps).
+VigPillRender(T, dur, a, idle := false, ap := 1.0)
+{
+    pc := A_IsCritical
+    Critical
+    try VigPillRenderInner(T, dur, a, idle, ap)
+    finally Critical(pc ? "On" : "Off")
+}
+
+; idle = nothing is frozen: the card shows the full freeze time (and a full bar); while freezing it counts down to 0
+; ap = how far the appear / leave animation is (0 .. 1): the card fades and grows a little
+VigPillRenderInner(T, dur, a, idle := false, ap := 1.0)
+{
+    global VigPGui, VigPDC, VigPG, NLG, NLAlphaPage, NLFontB, NLFontSm, VignetteColor, VigLastText, PillStyle
+    if (!IsObject(VigPGui))
+        return
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := VigPG
+    NLAlphaPage := Max(0.0, Min(1.0, a * ap))
+    sc := PillStyle.scale / 100
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", VigPG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", VigPG, "UInt", 0)
+    k := 0.86 + 0.14 * ap
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", VigPG, "Float", 125 * sc, "Float", 32 * sc, "Int", 0)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", VigPG, "Float", sc * k, "Float", sc * k, "Int", 0)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", VigPG, "Float", -125, "Float", -32, "Int", 0)
+    col := VigColAt(0.5)
+    c := NLC(col[1], col[2], col[3])
+    if (PillStyle.bg) {
+        NLRR(3, 6, 244, 52, 18, NLC(0, 0, 0, 60))
+        NLRR(3, 3, 244, 52, 17, SPCol("Card"))
+    }
+    if (PillStyle.border) {
+        bs := PillBs()
+        gi := PillStyle.grad ? PillStyle.grad : 1
+        if (bs <= 2) {
+            NLRRLine(3, 3, 244, 52, 17, bs = 2 ? NLAccent(210) : SPCol("Border"))
+        } else {
+            if (PillStyle.bg)
+                NLRRLine(3, 3, 244, 52, 17, SPCol("Border", 120))
+            SPGradBorder(4, 4, 242, 50, 16, SPLogoStops(bs = 4 ? 6 : gi), A_TickCount / 1000 * 0.3, 2)
+        }
+    }
+    fst := PillStyle.fill ? SPLogoStops(PillStyle.fill) : 0
+    if (fst) {                                                ; the dot and the bar take the chosen gradient instead of the effect colour
+        col := SPStopsSample(fst, A_TickCount / 1000 * 0.12)
+        c := NLC(col[1], col[2], col[3])
+    }
+    pulse := idle ? 0.0 : 0.5 + 0.5 * Sin(T / 140)
+    NLDisc(26, 22, 7 + 2 * pulse, NLC(col[1], col[2], col[3], idle ? 40 : 70))
+    NLDisc(26, 22, 4.5, c)
+    pst := SPLogoStops(PillStyle.grad ? PillStyle.grad : 1)           ; the title and the number follow the pill's own gradient
+    ptc := SPStopsSample(pst, A_TickCount / 1000 * 0.12 + 0.1)
+    ptn := SPStopsSample(pst, A_TickCount / 1000 * 0.12 + 0.45)
+    NLText("FREEZE", 42, 10, NLC(ptc[1], ptc[2], ptc[3]), NLFontB, 100, 24, 0, 1)
+    if (dur > 0) {
+        ; a short freeze is far too quick to read, so its number runs down more slowly: from the freeze time to 0
+        span := VigSpan(dur)
+        frac := idle ? 1.0 : Max(0.0, Min(1.0, 1 - T / span))
+        rem := dur * frac
+        VigLastText := Round(rem) " ms"
+        NLText(Round(rem) " ms", 140, 10, NLC(ptn[1], ptn[2], ptn[3]), NLFontSm, 94, 24, 2, 1)
+    } else {
+        NLText(Round(T / 100) / 10 " s", 140, 10, NLC(ptn[1], ptn[2], ptn[3]), NLFontSm, 94, 24, 2, 1)
+        frac := 0.5 + 0.5 * Sin(T / 300)
+    }
+    NLRR(16, 40, 218, 6, 3, SPCol("Track"))
+    if (frac > 0.01) {
+        if (fst)
+            SPGradBarFill(16, 40, 218, 6, 3, Max(6, 218 * frac), PillStyle.fill)
+        else
+            NLRR(16, 40, Max(6, 218 * frac), 6, 3, c)
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", VigPG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    sz := Buffer(8, 0)
+    NumPut("Int", PillW(), sz, 0)
+    NumPut("Int", PillH(), sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", VigPGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", VigPDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; where the countdown card sits: top centre unless you dragged it somewhere
+VigPillPos()
+{
+    global VigPillCustom, VigPillX, VigPillY
+    if (VigPillCustom)
+        return {x: Max(0, Min(A_ScreenWidth - 60, VigPillX)), y: Max(0, Min(A_ScreenHeight - 40, VigPillY))}
+    return {x: (A_ScreenWidth - 250) // 2, y: 34}
+}
+
+; same colours as the freeze effect, worked out without drawing the whole screen
+VigUpdateStops()
+{
+    global VigStops, VigGrad, VigAnim, VignetteColor
+    if (VigGrad > 1) {
+        VigStops := SPLogoStops(VigGrad - 1)
+    } else if (VigAnim) {
+        c := [Integer("0x" SubStr(VignetteColor, 1, 2)), Integer("0x" SubStr(VignetteColor, 3, 2)), Integer("0x" SubStr(VignetteColor, 5, 2))]
+        VigStops := [c, [Round(c[1] + (255 - c[1]) * 0.6), Round(c[2] + (255 - c[2]) * 0.6), Round(c[3] + (255 - c[3]) * 0.6)]]
+    } else
+        VigStops := ""
+}
+
+; The card shows the full freeze time whenever nothing is frozen: while the menu is open (then it can be dragged anywhere), or all the
+; time when "Keep the card on screen" is on. A real freeze counts it down and it returns to the full time afterwards.
+VigPrewarm()
+{
+    global VigState, VigSig, VigStyle, VigGrad, VignetteThickness, VigTint, IsLagVignetteChecked
+    if (IsObject(VigState) || !IsLagVignetteChecked)
+        return
+    sig := VigStyle "|" VigGrad "|" VignetteThickness "|" VigTint "|" A_ScreenWidth
+    if (sig != VigSig) {
+        VigEnsure()
+        VigRender()
+    }
+}
+
+VigPillPreviewTick()
+{
+    global VigPillOn, PillAlways, VigPGui, VigState, isAppMinimized, VigPillDrag, VigPillPrev, VigPillThru, VigPillX, VigPillY, VigPillCustom, FreezeDuration, PillStyle, VigPillOff
+    static wasDown := false, n := 0, lastSig := "", menuSince := 0, menuPrev := false, bootTick := A_TickCount, appearAt := 0, leaveAt := 0, shownOnce := false
+    menu := !isAppMinimized
+    static lastPre := 0
+    if (!menu && A_TickCount - bootTick > 4000 && A_TickCount - lastPre > 1000) {
+        lastPre := A_TickCount
+        VigPrewarm()                                          ; (so that a freeze finds the effect already drawn)
+    }
+    if (menu && !menuPrev)
+        menuSince := A_TickCount
+    menuPrev := menu
+    ; nothing is built or drawn until a few seconds after the script has started and after the menu has appeared, so neither is slowed down
+    ; (only the very first time: after that the menu brings it back at once)
+    ready := (A_TickCount - bootTick > 3000) && (!menu || shownOnce || A_TickCount - menuSince > 3000)
+    want := VigPillOn && ready && (PillAlways || menu) && !IsObject(VigState) && !VigPillOff
+    if (!want) {
+        if (VigPillPrev) {
+            if (!IsObject(VigState) && IsObject(VigPGui)) {
+                if (!leaveAt)
+                    leaveAt := A_TickCount
+                t := (A_TickCount - leaveAt) / 220
+                if (t < 1) {                                  ; a short fade out
+                    VigUpdateStops()
+                    VigPillRender(0, FreezeDuration, 1.0, true, (1 - t) ** 2)
+                    return
+                }
+                try VigPGui.Hide()
+            }
+            VigPillPrev := false
+            VigPillDrag := 0
+        }
+        leaveAt := 0
+        return
+    }
+    leaveAt := 0
+    VigEnsure()
+    if (!VigPillPrev) {
+        VigPillPrev := true
+        shownOnce := true
+        appearAt := A_TickCount
+        lastSig := ""
+        VigUpdateStops()
+        VigPillRender(0, FreezeDuration, 1.0, true, 0.0)      ; (so the first thing you see is the start of the animation)
+        pp := VigPillPos()
+        VigPGui.Show("x" pp.x " y" pp.y " w" PillW() " h" PillH() " NA")
+    }
+    if (menu && VigPillThru) {                              ; clickable (draggable) only while the menu is open
+        VigPillThru := false
+        try WinSetExStyle("-0x20", "ahk_id " VigPGui.Hwnd)
+    } else if (!menu && !VigPillThru) {
+        VigPillThru := true
+        VigPillDrag := 0
+        try WinSetExStyle("+0x20", "ahk_id " VigPGui.Hwnd)
+    }
+    if (menu) {
+        pt := Buffer(8, 0)
+        DllCall("GetCursorPos", "Ptr", pt)
+        mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
+        down := (DllCall("GetAsyncKeyState", "Int", 0x01, "Short") & 0x8000) ? true : false
+        if (IsObject(VigPillDrag)) {
+            if (down) {
+                VigPGui.Move(Max(0, Min(A_ScreenWidth - 60, mx - VigPillDrag.ox)), Max(0, Min(A_ScreenHeight - 40, my - VigPillDrag.oy)))
+            } else {
+                VigPGui.GetPos(&gx, &gy)
+                VigPillX := gx, VigPillY := gy, VigPillCustom := true
+                VigPillDrag := 0
+                SPSavePrefs()
+            }
+        } else if (down && !wasDown) {
+            VigPGui.GetPos(&gx, &gy, &gw, &gh)
+            if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh)
+                VigPillDrag := {ox: mx - gx, oy: my - gy}
+        }
+        wasDown := down
+    } else
+        wasDown := false
+    n += 1
+    if (menu && Mod(n, 15) = 1)                              ; keep it above the menu
+        try WinSetAlwaysOnTop(1, "ahk_id " VigPGui.Hwnd)
+    VigUpdateStops()
+    animated := (PillStyle.border && PillBs() >= 3) || PillStyle.fill
+    sig := FreezeDuration "|" PillStyle.bg "|" PillStyle.border "|" PillStyle.scale "|" PillStyle.bstyle "|" PillStyle.grad "|" PillStyle.fill "|" A_ScreenWidth
+    ap := Min(1.0, (A_TickCount - appearAt) / 380)
+    ap := 1 - (1 - ap) ** 3                                   ; ease out
+    static period := 50
+    if (period != (menu ? 33 : 50)) {                         ; a little faster while the menu is open, so it keeps up with the menu's own drawing
+        period := menu ? 33 : 50
+        SetTimer(VigPillPreviewTick, period)
+    }
+    if (menu || animated || ap < 1 || sig != lastSig) {
+        lastSig := sig
+        VigPillRender(0, FreezeDuration, 1.0, true, ap)
+    }
+}
+SetTimer(VigPillPreviewTick, 50)
+
+; after a change of its look (size, border, gradient ...)
+VigPillApplyStyle()
+{
+    global VigPGui, VigPillPrev, PillStyle
+    if (VigPillPrev && IsObject(VigPGui)) {
+        VigPGui.GetPos(&gx, &gy)
+        VigPGui.Move(gx, gy, PillW(), PillH())
+    }
+}
+
+VigTogglePillAlways(*)
+{
+    global PillAlways
+    PillAlways := !PillAlways
+    SPSavePrefs()
+    NLRequest()
+}
+
+; how long the number takes to run down: real time for freezes of 0.5s or more, slowed down for very short ones
+VigSpan(dur) => (dur < 500) ? 1400 : dur
+
+VigTick()
+{
+    global VigState, VigStyle, VigIntensity, VigPillOn, VigGui, VigPGui, VigTimerOn, VigAnim, VigMinShow, VigDbg, PillAlways, FreezeDuration
+    if (!IsObject(VigState)) {
+        SetTimer(VigTick, 0)
+        VigTimerOn := false
+        return
+    }
+    now := A_TickCount
+    T := now - VigState.t0
+    dur := VigState.dur
+    fi := Min(1.0, T / ((dur > 0 && dur < 500) ? 35 : 130))   ; short freezes: appear almost at once
+    fi := 1 - (1 - fi) ** 3
+    fo := 1.0
+    if (VigState.hideAt && now >= VigState.hideAt)
+        fo := 1 - Min(1.0, (now - VigState.hideAt) / 220)
+    ; the countdown card stays until its number has reached 0 (it can outlast a short freeze)
+    po := fo
+    if (dur > 0) {
+        tp := now - (VigState.t0 + Max(VigSpan(dur) + ((dur < 500) ? 250 : 120), VigMinShow))
+        po := (tp <= 0) ? 1.0 : 1 - Min(1.0, tp / 220)
+        if (!VigState.hideAt)
+            po := Min(po, 1.0)
+    }
+    VigDbg := Round(fo, 2) "|" Round(po, 2) "|" T
+    if (VigState.hideAt && fo <= 0 && (!VigPillOn || po <= 0 || dur <= 0)) {
+        VigGui.Hide()
+        if (!PillAlways)
+            VigPGui.Hide()
+        VigState := 0
+        SetTimer(VigTick, 0)
+        VigTimerOn := false
+        return
+    }
+    if (fo <= 0 && VigGui.Hwnd)
+        try VigGui.Hide()
+    gap := VigRedrawGap(VigStyle)
+    if (VigStyle = 13 && T > 620)
+        gap := 0                                              ; (the tunnel has closed: nothing moves any more)
+    if (fo > 0 && ((VigStyle = 4 && now - VigState.lastGlitch > 110) || (VigAnim && now - VigState.lastGlitch > 70) || (gap && now - VigState.lastGlitch > gap))) {
+        VigState.lastGlitch := now
+        VigRender()
+    }
+    pulse := (VigStyle = 2) ? 0.62 + 0.38 * Sin(T / 170) : ((VigStyle = 10) ? VigBeat(T) : 1.0)
+    if (fo > 0)
+        VigSetAlpha(255 * fi * fo * VigIntensity / 100 * pulse)
+    if (VigPillOn && po > 0)
+        VigPillRender(T, dur, fi * po)
+    else if (VigPillOn && PillAlways)
+        VigPillRender(0, FreezeDuration, 1.0, true)          ; the countdown is over: back to the full time
+    else if (VigPillOn)
+        VigPGui.Hide()
+}
+
+; dur = how long the freeze lasts in ms (0 when it lasts as long as you hold the key)
+ShowFreezeVignette(dur := -1) {
+    global VigGui, VigPGui, VigState, VigTimerOn, VigSig, VigStyle, VigGrad, VigTint, VignetteThickness, VigPillOn, VigSound, VigAnim, VigPillThru, PillAlways
+    global FreezeDuration, IsLagHoldChecked, LagKey
+    VigEnsure()
+    if (dur < 0)
+        dur := (IsLagHoldChecked && LagKey != "") ? 0 : FreezeDuration
+    sig := VigStyle "|" VigGrad "|" VignetteThickness "|" VigTint "|" A_ScreenWidth
+    VigState := {t0: A_TickCount, dur: dur, hideAt: 0, lastGlitch: A_TickCount}
+    if (sig != VigSig || VigStyle = 4 || VigAnim || VigRedrawGap(VigStyle))
+        VigRender()
+    VigSetAlpha(0)
+    VigGui.Show("x0 y0 w" A_ScreenWidth " h" A_ScreenHeight " NA")
+    if (VigPillOn) {
+        pp := VigPillPos()
+        if (!VigPillThru) {                                    ; (it was a draggable preview a moment ago: clicks go through again)
+            try WinSetExStyle("+0x20", "ahk_id " VigPGui.Hwnd)
+            VigPillThru := true
+        }
+        VigPGui.Show("x" pp.x " y" pp.y " w" PillW() " h" PillH() " NA")
+        VigPillRender(0, dur, PillAlways ? 1.0 : 0)
+    }
+    if (VigSound)
+        VigSoundPlay(true)
+    if (!VigTimerOn) {
+        VigTimerOn := true
+        SetTimer(VigTick, 16, 1)   ; priority 1: keeps running while the freeze code is sleeping
+    }
+}
+
+HideFreezeVignette() {
+    global VigState, VigSound, VigMinShow
+    if (!IsObject(VigState) || VigState.hideAt)
+        return
+    ; keep it up for at least ~0.5s so even a 70 ms freeze can be read; the fade-out starts after that
+    VigState.hideAt := Max(A_TickCount, VigState.t0 + VigMinShow)
+    if (VigSound)
+        VigSoundPlay(false)
+}
+
+; ===== Performance HUD: a small separate card with the graphics card readouts (not part of the macro HUD) =====
+Global PHUDW := 134, PHUDH := 92
+Global PHStyle := {id: "perf", bg: true, border: true, scale: 100, bstyle: 0, grad: 0}
+PHW() => Round(PHUDW * PHStyle.scale / 100)
+PHH() => Round(PHUDH * PHStyle.scale / 100)
+PHBs() => PHStyle.bstyle ? PHStyle.bstyle : 3
+Global PHudOn := false, PHudPosIdx := 2, PHudCustom := false, PHudCX := 8, PHudCY := 400
+Global PHudGui := "", PHudDC := 0, PHudBmp := 0, PHudG := 0, PHudVisible := false, PHudMoving := false
+Global PHudClickThru := true, PHudDragOff := 0, PHudTimerOn := false
+
+class PHudPosSelC {
+    items := ["Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right"]
+    Value => PHudPosIdx
+    Text => this.items[PHudPosIdx]
+    Choose(i) {
+        global PHudPosIdx, PHudCustom
+        PHudPosIdx := i
+        PHudCustom := false
+        SPSavePrefs()
+        PHudApplyPos()
+    }
+}
+Global PHudPosSel := PHudPosSelC()
+
+PHudPos()
+{
+    global PHudPosIdx, PHudCustom, PHudCX, PHudCY
+    pw := PHW(), ph := PHH()
+    if (PHudCustom)
+        return {x: PHudCX, y: PHudCY}
+    switch PHudPosIdx {
+        case 1: return {x: 8, y: 80}
+        case 2: return {x: A_ScreenWidth - pw - 8, y: 80}
+        case 3: return {x: 8, y: A_ScreenHeight - ph - 8}
+        default: return {x: A_ScreenWidth - pw - 8, y: A_ScreenHeight - ph - 8}
+    }
+}
+
+; after a style change (size, border, gradient ...)
+PHudApplyStyle()
+{
+    global PHudGui, PHudVisible, PHudCustom
+    if (PHudVisible && IsObject(PHudGui)) {
+        PHudGui.GetPos(&gx, &gy)
+        pos := PHudCustom ? {x: Max(0, Min(gx, A_ScreenWidth - PHW())), y: Max(0, Min(gy, A_ScreenHeight - PHH()))} : PHudPos()
+        PHudGui.Move(pos.x, pos.y, PHW(), PHH())
+    }
+    PHudRequest()
+}
+
+PHudApplyPos()
+{
+    global PHudGui, PHudVisible
+    if (PHudVisible && IsObject(PHudGui)) {
+        pos := PHudPos()
+        PHudGui.Move(pos.x, pos.y)
+    }
+}
+
+PHudEnsure()
+{
+    global PHudGui, PHudDC, PHudBmp, PHudG, PHUDW, PHUDH
+    if (IsObject(PHudGui))
+        return
+    NLGdipInit()
+    PHudGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M perf hud")
+    VigMakeSurface(Ceil(PHUDW * 1.6), Ceil(PHUDH * 1.6), &PHudDC, &PHudBmp, &PHudG)
+}
+
+PHudShow()
+{
+    global PHudGui, PHudVisible, PHUDW, PHUDH
+    PHudEnsure()
+    pos := PHudPos()
+    PHudVisible := true
+    HAnimStart("perf")
+    PHudGui.Show("x" pos.x " y" pos.y " w" PHW() " h" PHH() " NA")
+    GpuPoll()
+    PHudRender()
+    SetTimer(PHudDragTick, 20)
+    PHudKick()
+}
+
+PHudHide()
+{
+    global PHudVisible, PHudGui
+    if (PHudVisible && IsObject(PHudGui))
+        HAnimLeave("perf", PHudHideNow)
+    else
+        PHudHideNow()
+}
+
+PHudHideNow()
+{
+    global PHudGui, PHudVisible, PHudTimerOn
+    PHudVisible := false
+    SetTimer(PHudDragTick, 0)
+    if (PHudTimerOn) {
+        SetTimer(PHudAnimTick, 0)
+        PHudTimerOn := false
+    }
+    if (IsObject(PHudGui))
+        PHudGui.Hide()
+}
+
+; the moving border needs frequent redraws; with a plain border the card only redraws when the numbers change
+PHudKick()
+{
+    global PHudVisible, PHudTimerOn, HudBorderIdx
+    anim := PHudVisible && PHStyle.border && PHBs() >= 3
+    if (anim && !PHudTimerOn) {
+        PHudTimerOn := true
+        SetTimer(PHudAnimTick, 40)
+    } else if (PHudTimerOn && !anim) {
+        SetTimer(PHudAnimTick, 0)
+        PHudTimerOn := false
+    }
+}
+
+PHudAnimTick()
+{
+    global PHudVisible, HudBorderIdx
+    if (!PHudVisible || !PHStyle.border || PHBs() < 3) {
+        PHudKick()
+        return
+    }
+    PHudRender()
+    static period := 40
+    want := isAppMinimized ? 40 : 66
+    if (want != period) {
+        period := want
+        SetTimer(PHudAnimTick, want)
+    }
+}
+
+PHudRequest()
+{
+    global PHudVisible
+    if (PHudVisible)
+        PHudRender()
+    PHudKick()
+}
+
+PHudToggle(*)
+{
+    global PHudOn
+    PHudOn := !PHudOn
+    if (PHudOn)
+        PHudShow()
+    else
+        PHudHide()
+    SPSavePrefs()
+}
+
+; Grab the card with the mouse while the menu is open; otherwise it stays click-through.
+PHudOnSetCursor(wParam, lParam, msg, hwnd)
+{
+    global PHudGui, PHudClickThru
+    if (!IsObject(PHudGui) || hwnd != PHudGui.Hwnd || PHudClickThru)
+        return
+    DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32646, "Ptr"))
+    return 1
+}
+OnMessage(0x0020, PHudOnSetCursor)
+
+PHudDragTick()
+{
+    global PHudGui, PHudVisible, PHudMoving, PHudClickThru, PHudDragOff, PHudCX, PHudCY, PHudCustom, PHUDW, PHUDH, isAppMinimized
+    static wasDown := false
+    if (!PHudVisible || !IsObject(PHudGui)) {
+        PHudMoving := false
+        return
+    }
+    menuOpen := !isAppMinimized
+    if (menuOpen = PHudClickThru) {
+        PHudClickThru := !menuOpen
+        try WinSetExStyle(menuOpen ? "-0x20" : "+0x20", "ahk_id " PHudGui.Hwnd)
+    }
+    if (!menuOpen) {
+        PHudMoving := false
+        wasDown := false
+        return
+    }
+    pt := Buffer(8, 0)
+    DllCall("GetCursorPos", "Ptr", pt)
+    mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
+    down := (DllCall("GetAsyncKeyState", "Int", 0x01, "Short") & 0x8000) ? true : false
+    if (PHudMoving) {
+        if (down) {
+            PHudGui.Move(Max(0, Min(A_ScreenWidth - PHW(), mx - PHudDragOff.x)), Max(0, Min(A_ScreenHeight - PHH(), my - PHudDragOff.y)))
+        } else {
+            PHudMoving := false
+            PHudGui.GetPos(&gx, &gy)
+            PHudCX := gx, PHudCY := gy, PHudCustom := true
+            SPSavePrefs()
+            PHudRequest()
+        }
+    } else if (down && !wasDown) {
+        PHudGui.GetPos(&gx, &gy, &gw, &gh)
+        if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh) {
+            PHudMoving := true
+            PHudDragOff := {x: mx - gx, y: my - gy}
+        }
+    }
+    wasDown := down
+}
+
+PHudRender()
+{
+    pc := A_IsCritical
+    Critical
+    try PHudRenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+PHudRenderInner()
+{
+    global PHudG, PHudDC, PHudGui, PHudVisible, PHudMoving, PHUDW, PHUDH, HudOpacity, HudBorderIdx, HudGradIdx
+    global GpuLoad, GpuTemp, GpuUsed, GpuTotal, NLG, NLAlphaPage, NLFontSm, NLFontUI
+    if (!PHudVisible || !IsObject(PHudGui))
+        return
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := PHudG
+    pap := HAnimAp("perf")
+    base := Max(0.2, HudOpacity / 255) * pap
+    NLAlphaPage := base
+    sc := PHStyle.scale / 100
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", PHudG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", PHudG, "UInt", 0)
+    if (pap < 1)
+        HAnimXf(PHudG, PHUDW / 2, PHUDH / 2, sc, pap)
+    else
+        DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", PHudG, "Float", sc, "Float", sc, "Int", 0)
+    if (PHStyle.bg) {
+        NLRR(1, 5, PHUDW - 2, PHUDH - 6, 16, NLC(0, 0, 0, 45))
+        NLRR(3, 3, PHUDW - 6, PHUDH - 8, 14, SPCol("Card"))
+    }
+    bs := PHudMoving ? 4 : PHBs()
+    gi := PHStyle.grad ? PHStyle.grad : 1
+    if (PHStyle.border || PHudMoving) {
+        if (bs <= 2) {
+            NLRRLine(3, 3, PHUDW - 6, PHUDH - 8, 14, bs = 2 ? NLAccent(210) : SPCol("Border"))
+        } else {
+            if (PHStyle.bg)
+                NLRRLine(3, 3, PHUDW - 6, PHUDH - 8, 14, SPCol("Border", 120))
+            stops := SPLogoStops(PHudMoving ? 6 : (bs = 4 ? 6 : gi))
+            SPGradBorder(4, 4, PHUDW - 8, PHUDH - 10, 13, stops, A_TickCount / 1000 * 0.3, 2)
+        }
+    }
+    ok := GpuInit()
+    tc := (GpuTemp >= 85) ? NLC(240, 96, 96) : 0
+    gu := ok ? GpuUsed : 0
+    rows := [["GPU", ok ? GpuLoad "%" : "n/a", ok ? GpuLoad / 100 : 0, 0]
+           , ["Temp", ok ? GpuTemp Chr(0xB0) "C" : "n/a", ok ? Min(1.0, GpuTemp / 90) : 0, tc]
+           , ["VRAM", ok ? Round(gu / 1024, 1) "/" Round(GpuTotal / 1024) "GB" : "n/a", gu / GpuTotal, 0]]
+    ry := 10
+    for r in rows {
+        NLText(r[1], 14, ry, SPCol("Muted"), NLFontSm, 46, 20, 0, 1)
+        NLText(r[2], 52, ry, SPCol("Text"), NLFontSm, PHUDW - 52 - 14, 20, 2, 1)
+        NLRR(14, ry + 20, PHUDW - 28, 3, 1.5, SPCol("Track"))
+        if (r[4])
+            NLRR(14, ry + 20, Max(3.0, (PHUDW - 28) * Max(0.0, Min(1.0, r[3]))), 3, 1.5, r[4])
+        else
+            SPGradBarFill(14, ry + 20, PHUDW - 28, 3, 1.5, Max(3.0, (PHUDW - 28) * Max(0.0, Min(1.0, r[3]))), gi)
+        ry += 26
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", PHudG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    sz := Buffer(8, 0)
+    NumPut("Int", PHW(), sz, 0)
+    NumPut("Int", PHH(), sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", PHudGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", PHudDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; keep it on top and refresh the numbers once per second
+PHudSecondTick()
+{
+    global PHudOn, PHudVisible, PHudGui
+    if (!PHudOn)
+        return
+    if (!PHudVisible) {
+        PHudShow()
+        return
+    }
+    GpuPoll()
+    PHudRequest()
+    try WinSetAlwaysOnTop(1, "ahk_id " PHudGui.Hwnd)
+}
+SetTimer(PHudSecondTick, 1000)
+DllCall("winmm\timeBeginPeriod", "UInt", 1)          ; timers tick every 1 ms instead of 15.6 ms: smooth widgets and companion
+
+; ===== Misc -> Input monitor: live keys, mouse speed graph and auto strafer activity =====
+Global LiveDt := 40, LiveWheelAt := -9999, LiveWheelDir := 0, LiveHist := [], LiveStrafe := [], LiveKeyDown := Map(), LiveMag := 0.0, LiveWanted := false, LiveTimerOn := false
+Global LiveKeys := [["W", 0x57], ["A", 0x41], ["S", 0x53], ["D", 0x44], ["Space", 0x20], ["Ctrl", 0x11], ["Shift", 0x10], ["C", 0x43], ["LMB", 0x01], ["RMB", 0x02], ["MMB", 0x04], ["X1", 0x05], ["X2", 0x06]]
+
+LiveVisible()
+{
+    global NLShown, NLStyle, CurrentTab, NLSubTab
+    return NLShown && NLStyle = "sp" && CurrentTab = 4 && NLSubTab = 4
+}
+
+; Called while the page is being drawn: starts the sampling (and the raw mouse input) only while the page is open.
+LiveEnsure()
+{
+    global LiveTimerOn
+    if (!LiveTimerOn) {
+        LiveTimerOn := true
+        SetTimer(LiveTick, LiveDt, 1)             ; a little above the menu's own timers, so the widgets keep their pace while the menu is being used
+    }
+}
+
+LiveStop()
+{
+    global LiveWanted, LiveTimerOn, isStrafeActive
+    SetTimer(LiveTick, 0)
+    LiveTimerOn := false
+    if (LiveWanted) {
+        LiveWanted := false
+        if (!isStrafeActive)
+            UnregisterRawMouseInput()
+    }
+}
+
+LiveTick()
+{
+    global LiveHist, LiveStrafe, LiveKeyDown, LiveMag, LiveKeys, isStrafeActive, StrafeCurrentDir, LiveWanted, WH
+    page := LiveVisible()
+    anyW := WHudAnyLiveOn()
+    if (!page && !anyW) {
+        LiveStop()
+        return
+    }
+    ; the mouse speed needs raw mouse input: only while the page or the mouse widget is showing
+    needRaw := page || WH["mouse"].on || WH["mbtn"].on
+    if (needRaw && !LiveWanted) {
+        LiveWanted := true
+        RegisterRawMouseInput()
+    } else if (!needRaw && LiveWanted) {
+        LiveWanted := false
+        if (!isStrafeActive)
+            UnregisterRawMouseInput()
+    }
+    mag := LiveMag
+    LiveMag := 0.0
+    LiveHist.Push(mag * (1000 / LiveDt))                       ; mouse counts per second
+    if (LiveHist.Length > 100)
+        LiveHist.RemoveAt(1)
+    code := !isStrafeActive ? 2 : (StrafeCurrentDir = "left" ? -1 : (StrafeCurrentDir = "right" ? 1 : 0))
+    LiveStrafe.Push(code)
+    if (LiveStrafe.Length > 100)
+        LiveStrafe.RemoveAt(1)
+    ; two ways of asking, because a button that one of the macros has bound is swallowed by AutoHotkey before
+    ; Windows records it: the "physical" state (hook) sees those, the plain state sees keys the macros press for you
+    static names := Map("W", "w", "A", "a", "S", "s", "D", "d", "Space", "Space", "Ctrl", "Ctrl", "Shift", "Shift", "C", "c"
+        , "LMB", "LButton", "RMB", "RButton", "MMB", "MButton", "X1", "XButton1", "X2", "XButton2")
+    sig := ""
+    for k in LiveKeys {
+        LiveKeyDown[k[1]] := ((DllCall("GetAsyncKeyState", "Int", k[2], "Short") & 0x8000) || GetKeyState(names[k[1]], "P")) ? 1 : 0
+        sig .= LiveKeyDown[k[1]]
+    }
+    static lastSig := "", quiet := 0, tickN := 0, fade := 0
+    tickN += 1
+    quiet := (mag > 0 || code != 2 && code != 0) ? 0 : quiet + 1
+    if (page)
+        NLRequest()
+    if (anyW) {
+        if (sig != lastSig)
+            fade := 10                                  ; keep redrawing for a moment so a released key fades out
+        else if (fade > 0)
+            fade -= 1
+        keysChanged := (fade > 0) || InStr(sig, "1") || (A_TickCount - LiveWheelAt < 700) || (IdleAnim && !MenuBusy())   ; held keys glow with a moving gradient
+        lastSig := sig
+        graphsDue := quiet < 104 || quiet = 104
+        for id, wd in WH {
+            if (!wd.on || id = "fps")
+                continue
+            if (id = "keys" || id = "mbtn") {
+                if (keysChanged)
+                    WHudRender(wd)
+            } else if (graphsDue)
+                WHudRender(wd)
+        }
+    }
+}
+
+; rounded rectangle with a separate radius for every corner
+NLPathC(x, y, w, h, tl, tr, br, bl)
+{
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    for c in [[tl, x, y, 180], [tr, x + w - 2 * tr, y, 270], [br, x + w - 2 * br, y + h - 2 * br, 0], [bl, x, y + h - 2 * bl, 90]] {
+        r := c[1]
+        if (r > 0)
+            DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", c[2], "Float", c[3], "Float", r * 2, "Float", r * 2, "Float", c[4], "Float", 90)
+        else {
+            px := (c[4] = 180 || c[4] = 90) ? x : x + w
+            py := (c[4] = 180 || c[4] = 270) ? y : y + h
+            DllCall("gdiplus\GdipAddPathLine", "Ptr", path, "Float", px, "Float", py, "Float", px, "Float", py)
+        }
+    }
+    DllCall("gdiplus\GdipClosePathFigure", "Ptr", path)
+    return path
+}
+
+NLRRCorners(x, y, w, h, tl, tr, br, bl, fill, line)
+{
+    global NLG
+    path := NLPathC(x, y, w, h, tl, tr, br, bl)
+    brush := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", fill, "Ptr*", &brush)
+    DllCall("gdiplus\GdipFillPath", "Ptr", NLG, "Ptr", brush, "Ptr", path)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen1", "UInt", line, "Float", 1, "Int", 2, "Ptr*", &pen)
+    DllCall("gdiplus\GdipDrawPath", "Ptr", NLG, "Ptr", pen, "Ptr", path)
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+SPKeyT(id)
+{
+    global LiveKeyDown
+    return NLLerp("kc" id, LiveKeyDown.Has(id) ? LiveKeyDown[id] : 0, 0.5)
+}
+
+; A small mouse: left / right / middle button, scroll arrows and the two side buttons (M4 back, M5 forward).
+; gradient fill / outline for the button shapes (a different radius for every corner), like the key caps have
+SPGradFillC(x, y, w, h, tl, tr, br, bl, stops, tt, alpha)
+{
+    global NLG
+    brush := SPGradBrush(x, y, w, h, stops, tt, alpha)
+    path := NLPathC(x, y, w, h, tl, tr, br, bl)
+    DllCall("gdiplus\GdipFillPath", "Ptr", NLG, "Ptr", brush, "Ptr", path)
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+SPGradStrokeC(x, y, w, h, tl, tr, br, bl, stops, tt, wd)
+{
+    global NLG
+    brush := SPGradBrush(x, y, w, h, stops, tt, 1.0)
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen2", "Ptr", brush, "Float", wd, "Int", 2, "Ptr*", &pen)
+    path := NLPathC(x, y, w, h, tl, tr, br, bl)
+    DllCall("gdiplus\GdipDrawPath", "Ptr", NLG, "Ptr", pen, "Ptr", path)
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+; a pressed button: moving gradient fill and outline (the same look as a pressed key)
+SPPressedShape(x, y, w, h, tl, tr, br, bl, t, st)
+{
+    global NLAlphaPage
+    if (t < 0.03)
+        return
+    tt := A_TickCount / 1000 * 0.4 - x / 140
+    SPGradFillC(x, y, w, h, tl, tr, br, bl, st, tt, 0.8 * t)
+    if (t > 0.3) {
+        keep := NLAlphaPage
+        NLAlphaPage := keep * Min(1.0, t)
+        SPGradStrokeC(x, y, w, h, tl, tr, br, bl, st, tt, 2)
+        NLAlphaPage := keep
+    }
+}
+
+SPMouseDraw(ox, oy)
+{
+    global LiveWheelAt, LiveWheelDir, NLFontSm, NLAnimating, SPKeyGradIdx, IdleAnim, NLAlphaPage
+    lt := SPKeyT("LMB"), rt := SPKeyT("RMB"), mt := SPKeyT("MMB"), x1 := SPKeyT("X1"), x2 := SPKeyT("X2")
+    gst := SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1)
+    NLRRCorners(ox, oy, 100, 162, 48, 48, 36, 36, SPCol("Card"), SPCol("Border"))
+    if (lt > 0.03) {
+        c := SPKeyGlowCol(0.0)
+        NLRRCorners(ox - 2, oy - 2, 54, 82, 47, 7, 7, 7, NLC(c[1], c[2], c[3], Round(60 * lt)), 0)
+    }
+    if (rt > 0.03) {
+        c := SPKeyGlowCol(0.5)
+        NLRRCorners(ox + 48, oy - 2, 54, 82, 7, 47, 7, 7, NLC(c[1], c[2], c[3], Round(60 * rt)), 0)
+    }
+    NLRRCorners(ox + 3, oy + 3, 46, 78, 45, 4, 4, 4, SPAccMix("Pill", 0), SPAccMix("Border", lt))
+    NLRRCorners(ox + 51, oy + 3, 46, 78, 4, 45, 4, 4, SPAccMix("Pill", 0), SPAccMix("Border", rt))
+    SPPressedShape(ox + 3, oy + 3, 46, 78, 45, 4, 4, 4, lt, gst)
+    SPPressedShape(ox + 51, oy + 3, 46, 78, 4, 45, 4, 4, rt, gst)
+    if (IdleAnim) {                                           ; soft moving outline on the buttons that are not pressed
+        keep := NLAlphaPage
+        NLAlphaPage := keep * 0.55
+        tt := A_TickCount / 1000 * 0.4
+        if (lt < 0.1)
+            SPGradStrokeC(ox + 3, oy + 3, 46, 78, 45, 4, 4, 4, gst, tt, 1.6)
+        if (rt < 0.1)
+            SPGradStrokeC(ox + 51, oy + 3, 46, 78, 4, 45, 4, 4, gst, tt - 0.3, 1.6)
+        if (mt < 0.1)
+            SPGradStrokeC(ox + 43, oy + 22, 14, 32, 7, 7, 7, 7, gst, tt - 0.15, 1.6)
+        SPGradStrokeC(ox, oy + 80, 100, 82, 0, 0, 36, 36, gst, tt - 0.45, 1.6)      ; the lower body of the mouse
+        if (x1 < 0.1)
+            SPGradStrokeC(ox - 8, oy + 92, 12, 22, 5, 2, 2, 5, gst, tt - 0.6, 1.6)
+        if (x2 < 0.1)
+            SPGradStrokeC(ox - 8, oy + 118, 12, 22, 5, 2, 2, 5, gst, tt - 0.75, 1.6)
+        NLAlphaPage := keep
+    }
+    ic := [SPCol("Muted"), SPCol("Muted"), SPCol("Muted"), SPCol("Muted")]
+    if (IdleAnim) {                                           ; the small labels follow the gradient as well
+        for k, v in [[x1, 0.7], [x2, 0.9], [lt, 0.1], [rt, 0.6]] {
+            if (v[1] < 0.1) {
+                gc := SPKeyGlowCol(v[2])
+                ic[k] := NLC(gc[1], gc[2], gc[3])
+            }
+        }
+    }
+    ; wheel
+    SPKeyHalo(ox + 43, oy + 22, 14, 32, 7, mt, 0.25)
+    NLRR(ox + 43, oy + 22, 14, 32, 7, SPAccMix("Pill", 0))
+    SPPressedShape(ox + 43, oy + 22, 14, 32, 7, 7, 7, 7, mt, gst)
+    if (mt <= 0.3)
+        NLRRLine(ox + 43, oy + 22, 14, 32, 7, SPAccMix("Border", mt))
+    age := A_TickCount - LiveWheelAt
+    wt := (age < 320) ? 1 - age / 320 : 0
+    if (wt > 0)
+        NLAnimating := true
+    up := (LiveWheelDir > 0) ? wt : 0, dn := (LiveWheelDir < 0) ? wt : 0
+    ccol := SPAccMix("Muted", up)
+    NLLineW(ox + 45, oy + 17, ox + 50, oy + 12, ccol, 2)
+    NLLineW(ox + 50, oy + 12, ox + 55, oy + 17, ccol, 2)
+    ccol2 := SPAccMix("Muted", dn)
+    NLLineW(ox + 45, oy + 59, ox + 50, oy + 64, ccol2, 2)
+    NLLineW(ox + 50, oy + 64, ox + 55, oy + 59, ccol2, 2)
+    ; side buttons
+    SPKeyHalo(ox - 8, oy + 92, 12, 22, 5, x1, 0.7)
+    SPKeyHalo(ox - 8, oy + 118, 12, 22, 5, x2, 0.9)
+    NLRRCorners(ox - 8, oy + 92, 12, 22, 5, 2, 2, 5, SPAccMix("Pill", 0), SPAccMix("Border", x1))
+    NLRRCorners(ox - 8, oy + 118, 12, 22, 5, 2, 2, 5, SPAccMix("Pill", 0), SPAccMix("Border", x2))
+    SPPressedShape(ox - 8, oy + 92, 12, 22, 5, 2, 2, 5, x1, gst)
+    SPPressedShape(ox - 8, oy + 118, 12, 22, 5, 2, 2, 5, x2, gst)
+    NLText("M4", ox - 36, oy + 92, (x1 < 0.1) ? ic[1] : SPMix("Muted", "Text", x1), NLFontSm, 26, 22, 2, 1)
+    NLText("M5", ox - 36, oy + 118, (x2 < 0.1) ? ic[2] : SPMix("Muted", "Text", x2), NLFontSm, 26, 22, 2, 1)
+    NLText("L", ox + 3, oy + 60, (lt < 0.1) ? ic[3] : SPMix("Muted", "Text", lt), NLFontSm, 46, 18, 1, 1)
+    NLText("R", ox + 51, oy + 60, (rt < 0.1) ? ic[4] : SPMix("Muted", "Text", rt), NLFontSm, 46, 18, 1, 1)
+}
+
+; Pressed keys and mouse buttons glow in the colours of the (moving) gradient. SPKeyGradIdx is set by the widget being drawn
+; (0 = the macro HUD's gradient).
+Global SPKeyGradIdx := 0
+; optional: keys and mouse buttons show a soft, moving gradient outline even when nothing is pressed
+Global IdleAnim := false
+
+ToggleIdleAnim(*)
+{
+    global IdleAnim, WH
+    IdleAnim := !IdleAnim
+    for id in ["keys", "mbtn"] {
+        if (WH[id].on)
+            WHudRender(WH[id])
+    }
+    NLRequest()
+}
+
+; the outline of an idle key or button: the widget's gradient at about half strength
+SPIdleKeyBorder(x, y, w, h, r, phase)
+{
+    global SPKeyGradIdx, NLAlphaPage
+    keep := NLAlphaPage
+    NLAlphaPage := keep * 0.55
+    SPGradBorder(x, y, w, h, r, SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1), A_TickCount / 1000 * 0.4 - phase, 1.6)
+    NLAlphaPage := keep
+}
+
+SPKeyGlowCol(phase := 0.0)
+{
+    global SPKeyGradIdx, HudGradIdx
+    stops := SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1)
+    return SPStopsSample(stops, Round((phase - A_TickCount / 1000 * 0.4) * 96) / 96)
+}
+
+; soft halo behind a pressed key (two translucent layers) in the gradient's current colour
+SPKeyHalo(x, y, w, h, r, t, phase := 0.0)
+{
+    if (t < 0.03)
+        return
+    c := SPKeyGlowCol(phase)
+    NLRR(x - 5, y - 5, w + 10, h + 10, r + 5, NLC(c[1], c[2], c[3], Round(36 * t)))
+    NLRR(x - 2.5, y - 2.5, w + 5, h + 5, r + 3, NLC(c[1], c[2], c[3], Round(72 * t)))
+}
+
+SPKeyCap(id, x, y, w, h, label)
+{
+    global LiveKeyDown, NLFontSm, IdleAnim
+    global NLAlphaPage, SPKeyGradIdx, HudGradIdx
+    t := NLLerp("kc" id, LiveKeyDown.Has(id) ? LiveKeyDown[id] : 0, 0.5)
+    yy := y + 3 - 2 * t
+    SPKeyHalo(x, yy, w, h, 10, t, x / 140)
+    NLRR(x, yy, w, h, 10, SPAccMix("Pill", 0))
+    if (t > 0.03)
+        SPGradFill(x, yy, w, h, 10, SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1), A_TickCount / 1000 * 0.4 - x / 140, 0.8 * t)
+    if (t > 0.3) {
+        keep := NLAlphaPage
+        NLAlphaPage := keep * Min(1.0, t)
+        SPGradBorder(x, yy, w, h, 10, SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1), A_TickCount / 1000 * 0.4 - x / 140, 2)
+        NLAlphaPage := keep
+    } else {
+        NLRRLine(x, yy, w, h, 10, SPAccMix("Border", t))
+        if (IdleAnim && t < 0.1)
+            SPIdleKeyBorder(x, yy, w, h, 10, x / 140)
+    }
+    lcol := SPMix("Text2", "Text", t)
+    if (IdleAnim && t < 0.1) {                                ; the letter takes the moving gradient colour too
+        gc := SPKeyGlowCol(x / 140)
+        lcol := NLC(gc[1], gc[2], gc[3])
+    }
+    NLText(label, x, yy, lcol, NLFontSm, w, h, 1, 1)
+}
+
+SPKeysCard()
+{
+    global SPX, SPY, SPW, NLFontB
+    SPCard("", 150, "live_keys")
+    NLText("Keys", SPX + 16, SPY + 8, SPCol("Text"), NLFontB, 200, 24, 0, 1)
+    cx := SPX + SPW / 2 - 170
+    sz := 40, gap := 6
+    SPKeyCap("W", cx + sz + gap, SPY + 40, sz, sz, "W")
+    SPKeyCap("A", cx, SPY + 40 + sz + gap, sz, sz, "A")
+    SPKeyCap("S", cx + sz + gap, SPY + 40 + sz + gap, sz, sz, "S")
+    SPKeyCap("D", cx + 2 * (sz + gap), SPY + 40 + sz + gap, sz, sz, "D")
+    rx := cx + 3 * (sz + gap) + 26
+    SPKeyCap("Space", rx, SPY + 40, 170, sz, "Space")
+    SPKeyCap("Ctrl", rx, SPY + 40 + sz + gap, 70, sz, "Ctrl")
+    SPKeyCap("Shift", rx + 76, SPY + 40 + sz + gap, 74, sz, "Shift")
+    SPKeyCap("C", rx + 156, SPY + 40 + sz + gap, sz, sz, "C")
+    SPY += 160
+}
+
+SPMouseCard()
+{
+    global SPX, SPY, SPW, NLFontB
+    SPCard("", 206, "live_mbtn")
+    NLText("Mouse buttons", SPX + 16, SPY + 8, SPCol("Text"), NLFontB, 200, 24, 0, 1)
+    SPMouseDraw(SPX + SPW / 2 - 50, SPY + 34)
+    SPY += 216
+}
+
+; points -> GDI+ POINTF array
+SPPointsBuf(pts)
+{
+    buf := Buffer(pts.Length * 8, 0)
+    for i, q in pts {
+        NumPut("Float", q[1], buf, (i - 1) * 8)
+        NumPut("Float", q[2], buf, (i - 1) * 8 + 4)
+    }
+    return buf
+}
+
+SPGraphCard(id, title, unit, hist)
+{
+    global SPX, SPY, SPW, NLG, NLFontB, NLFontSm
+    SPCard("", 176, id)
+    NLText(title, SPX + 16, SPY + 10, SPCol("Text"), NLFontB, 200, 24, 0, 1)
+    hi := 0.0, lo := 1e9
+    for v in hist {
+        hi := Max(hi, v)
+        lo := Min(lo, v)
+    }
+    if (hist.Length = 0)
+        lo := 0
+    cur := hist.Length ? hist[hist.Length] : 0
+    NLText("High", SPX + SPW - 190, SPY + 8, SPCol("Muted"), NLFontSm, 60, 18, 2, 1)
+    NLText(Round(hi) " " unit, SPX + SPW - 190, SPY + 24, SPAccMix("Text", 1), NLFontB, 60, 22, 2, 1)
+    NLText("Low", SPX + SPW - 110, SPY + 8, SPCol("Muted"), NLFontSm, 60, 18, 2, 1)
+    NLText(Round(lo) " " unit, SPX + SPW - 110, SPY + 24, SPCol("Text2"), NLFontB, 60, 22, 2, 1)
+    px := SPX + 22, py := SPY + 62, pw := SPW - 60, ph := 70
+    NLLine(px, py + ph, px + pw, py + ph, SPCol("Border"))
+    n := hist.Length
+    scale := Max(hi, 200.0)
+    pts := []
+    Loop n {
+        v := hist[A_Index]
+        if (A_Index > 1 && A_Index < n)
+            v := (hist[A_Index - 1] + v + hist[A_Index + 1]) / 3        ; light smoothing
+        x := px + pw * (100 - n + A_Index - 1) / 99
+        pts.Push([x, py + ph - ph * Min(1.0, v / scale)])
+    }
+    if (n >= 2) {
+        poly := pts.Clone()
+        poly.Push([pts[n][1], py + ph])
+        poly.Push([pts[1][1], py + ph])
+        brush := 0
+        DllCall("gdiplus\GdipCreateSolidFill", "UInt", NLAccent(46), "Ptr*", &brush)
+        buf := SPPointsBuf(poly)
+        DllCall("gdiplus\GdipFillPolygon", "Ptr", NLG, "Ptr", brush, "Ptr", buf, "Int", poly.Length, "Int", 0)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+        pen := 0
+        DllCall("gdiplus\GdipCreatePen1", "UInt", NLAccent(), "Float", 2.2, "Int", 2, "Ptr*", &pen)
+        DllCall("gdiplus\GdipSetPenLineJoin", "Ptr", pen, "Int", 2)
+        buf2 := SPPointsBuf(pts)
+        DllCall("gdiplus\GdipDrawLines", "Ptr", NLG, "Ptr", pen, "Ptr", buf2, "Int", n)
+        DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        NLDisc(pts[n][1], pts[n][2], 6, NLAccent(60))
+        NLDisc(pts[n][1], pts[n][2], 3.6, NLAccent())
+        NLText(Round(cur), pts[n][1] - 20, pts[n][2] - 26, SPCol("Text"), NLFontSm, 40, 18, 1, 1)
+    }
+    labels := ["-4s", "-3.2s", "-2.4s", "-1.6s", "-0.8s", "now"]
+    for i, lb in labels
+        NLText(lb, px + pw * (i - 1) / 5 - 20, py + ph + 6, SPCol("Muted"), NLFontSm, 40, 18, 1, 1)
+    SPY += 186
+}
+
+SPStraferCard()
+{
+    global SPX, SPY, SPW, NLFontB, NLFontSm, NLFontUI, LiveStrafe, isStrafeActive
+    SPCard("", 168, "live_strafe")
+    NLText("Auto strafer", SPX + 16, SPY + 10, SPCol("Text"), NLFontB, 200, 24, 0, 1)
+    on := isStrafeActive ? 1 : 0
+    t := NLLerp("liveon", on, 0.3)
+    NLRR(SPX + SPW - 96, SPY + 12, 80, 22, 11, SPAccMix("Pill", t * 0.6))
+    NLText(on ? "Active" : "Off", SPX + SPW - 96, SPY + 12, on ? SPAccMix("Text", 1) : SPCol("Muted"), NLFontSm, 80, 22, 1, 1)
+    ; 5 second timeline: left / right / idle
+    tx := SPX + 18, tw := SPW - 36, ty := SPY + 50, th := 24
+    NLRR(tx, ty, tw, th, 8, SPCol("Track"))
+    n := LiveStrafe.Length
+    l := 0, r := 0, idle := 0, sw := 0, lastDir := 0
+    Loop n {
+        v := LiveStrafe[A_Index]
+        if (v = 2)
+            continue
+        if (v = -1)
+            l++
+        else if (v = 1)
+            r++
+        else
+            idle++
+        if (v != 0) {
+            if (lastDir != 0 && v != lastDir)
+                sw++
+            lastDir := v
+        }
+    }
+    segW := tw / 100
+    Loop n {
+        v := LiveStrafe[A_Index]
+        if (v = 2 || v = 0)
+            continue
+        x := tx + (100 - n + A_Index - 1) * segW
+        NLRR(x, ty + 3, segW + 0.8, th - 6, 0, (v = -1) ? NLC(59, 130, 246) : NLC(168, 85, 247))
+    }
+    NLText("left", tx, ty + th + 4, NLC(59, 130, 246), NLFontSm, 60, 18, 0, 1)
+    NLText("right", tx + 44, ty + th + 4, NLC(168, 85, 247), NLFontSm, 60, 18, 0, 1)
+    NLText("-4s", tx + tw - 90, ty + th + 4, SPCol("Muted"), NLFontSm, 40, 18, 2, 1)
+    NLText("now", tx + tw - 40, ty + th + 4, SPCol("Muted"), NLFontSm, 40, 18, 2, 1)
+    act := l + r + idle
+    secs := Max(0.2, act * LiveDt / 1000)
+    cols := [["Switches / s", act ? Round(sw / secs, 1) : "-"]
+           , ["Left", act ? Round(100 * l / act) " %" : "-"]
+           , ["Right", act ? Round(100 * r / act) " %" : "-"]
+           , ["Idle", act ? Round(100 * idle / act) " %" : "-"]]
+    cw := tw / 4
+    for i, c in cols {
+        NLText(c[2], tx + (i - 1) * cw, SPY + 108, SPCol("Text"), NLFontUI, cw, 26, 0, 1)
+        NLText(c[1], tx + (i - 1) * cw, SPY + 132, SPCol("Muted"), NLFontSm, cw, 20, 0, 1)
+    }
+    SPY += 178
+}
+
+SPRowsOverlay()
+{
+    global HudPosDDL, HudOpacitySlider
+    SPToggleRow("t_hud", "Macro HUD", ShowSidebarIndicators, ToggleSidebarIndicators, true)
+    SPToggleRow("t_stat", "Status popups", ShowStatusNotifs, ToggleStatusNotifs, true)
+    SPDropRow("p_hudpos", "Macro HUD position", HudPosDDL, UpdateHudPosition)
+    SPDropRow("p_hudstyle", "Macro HUD style", HudStyleSel)
+    SPDropRow("p_hudborder", "HUD border", HudBorderSel)
+    SPDropRow("p_hudgrad", "HUD gradient", HudGradSel)
+    SPToggleRow("t_hudcompact", "Compact HUD (running macros only)", HudCompact, HudToggleCompact, true)
+    SPToggleRow("t_hudkeys", "Show keybinds on the HUD", HudShowKeys, HudToggleKeys, true)
+    SPSliderRow("s_op", "Opacity", 10, 100, HudOpacitySlider.Value, NLSetOpacity)
+}
+
+SPRowsWidgets()
+{
+    global WH
+    SPToggleRow("t_wkeys", "Keys widget", WH["keys"].on, WHudToggle.Bind("keys"), true)
+    SPToggleRow("t_wmbtn", "Mouse buttons widget", WH["mbtn"].on, WHudToggle.Bind("mbtn"), true)
+    SPToggleRow("t_wmouse", "Mouse speed widget", WH["mouse"].on, WHudToggle.Bind("mouse"), true)
+    SPToggleRow("t_wstrafer", "Auto strafer widget", WH["strafer"].on, WHudToggle.Bind("strafer"), true)
+    SPToggleRow("t_widle", "Animate keys and mouse when idle", IdleAnim, ToggleIdleAnim, true)
+    SPDropRow("p_wsel", "Settings for", WSel)
+    sel := WHudSel()
+    SPToggleRow("t_wbg", "Background", sel.bg, WHudToggleBg, true)
+    SPToggleRow("t_wborder", "Border", sel.border, WHudToggleBorder, true)
+    SPDropRow("p_wbstyle", "Border style", WBorderSel)
+    SPDropRow("p_wgrad", "Gradient", WGradSel)
+    if (sel.id = "pill")
+        SPDropRow("p_plfill", "Dot and bar colour", PillFillSel)
+    SPSliderRow("s_wscale", "Size (%)", 60, 160, sel.scale, WHudSetScale)
+}
+
+; The live preview is the widget itself, drawn inside a card: every setting (gradient, border, background, size) shows up at once.
+SPWidgetPreview(id)
+{
+    global SPX, SPY, SPW, NLG, WH
+    wd := WH[id]
+    sc := Min(1.0, (SPW - 24) / wd.w) * wd.scale / 100
+    ch := Round(wd.h * sc) + 24
+    SPCard("", ch, "live_" (id = "strafer" ? "strafe" : id))
+    ox := SPX + (SPW - wd.w * sc) / 2, oy := SPY + 12
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", NLG, "Float", ox, "Float", oy, "Int", 0)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", NLG, "Float", sc, "Float", sc, "Int", 0)
+    WHudDrawFrame(wd, true)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", NLG, "Float", 1 / sc, "Float", 1 / sc, "Int", 0)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", NLG, "Float", -ox, "Float", -oy, "Int", 0)
+    SPY += ch + 10
+}
+
+SPPageLive()
+{
+    global LiveHist, WH
+    LiveEnsure()
+    SPSection("On-screen widgets")
+    SPRowsWidgets()
+    SPParaCard("Each widget is a small separate card on your screen. Drag them anywhere with the mouse while this menu is open; they stay click-through while you play. They are saved with your configs.", 62)
+    SPSection("Live preview")
+    for id in ["keys", "mbtn", "mouse", "strafer"]
+        SPWidgetPreview(id)
+    SPParaCard("Everything here is read from your own keyboard and mouse input while this page is open; nothing is read from the game. The graph shows how fast you move the mouse (mouse counts per second), which is what drives the auto strafer.", 76)
+}
+
+; ===== On-screen widgets for the Input monitor: keys, mouse speed and auto strafer (separate small HUDs) =====
+Global WH := Map()
+WH["mbtn"] := {id: "mbtn", bg: false, border: false, scale: 100, bstyle: 0, grad: 0, w: 160, h: 196, on: false, custom: false, x: 304, y: A_ScreenHeight - 230, gui: "", dc: 0, bmp: 0, g: 0, thru: true}
+WH["keys"] := {id: "keys", bg: false, border: false, scale: 100, bstyle: 0, grad: 0, w: 270, h: 100, on: false, custom: false, x: 8, y: A_ScreenHeight - 200, gui: "", dc: 0, bmp: 0, g: 0, thru: true}
+WH["mouse"] := {id: "mouse", bg: true, border: true, scale: 100, bstyle: 0, grad: 0, w: 270, h: 132, on: false, custom: false, x: A_ScreenWidth - 278, y: A_ScreenHeight - 150, gui: "", dc: 0, bmp: 0, g: 0, thru: true}
+WH["strafer"] := {id: "strafer", bg: true, border: true, scale: 100, bstyle: 0, grad: 0, w: 270, h: 120, on: false, custom: false, x: A_ScreenWidth - 278, y: A_ScreenHeight - 290, gui: "", dc: 0, bmp: 0, g: 0, thru: true}
+WH["fps"] := {id: "fps", bg: true, border: true, scale: 100, bstyle: 0, grad: 0, w: 190, h: 92, on: false, custom: false, x: A_ScreenWidth // 2 - 95, y: 10, gui: "", dc: 0, bmp: 0, g: 0, thru: true}
+Global WHDrag := 0
+Global WIds := ["keys", "mbtn", "mouse", "strafer", "fps"], WSelIdx := 1
+
+; which widget the background / border / size settings on the page apply to
+class WSelC {
+    items := ["Keys", "Mouse buttons", "Mouse speed", "Auto strafer", "FPS HUD", "Performance HUD"]
+    Value => WSelIdx
+    Text => this.items[WSelIdx]
+    Choose(i) {
+        global WSelIdx
+        WSelIdx := i
+        NLRequest()
+    }
+}
+Global WSel := WSelC()
+
+WHudSel() => (WSelIdx = 6) ? PHStyle : WH[WIds[WSelIdx]]
+
+; border style and gradient of the selected widget; the first entry means "same as the macro HUD"
+class WBorderSelC {
+    items := ["Default", "Off", "Accent", "Animated gradient", "Rainbow"]
+    Value => WHudSel().bstyle + 1
+    Text => this.items[this.Value]
+    Choose(i) {
+        wd := WHudSel()
+        wd.bstyle := i - 1
+        SPSavePrefs()
+        WHudRedraw(wd)
+        NLRequest()
+    }
+}
+Global WBorderSel := WBorderSelC()
+
+; the same two selectors, bound to one HUD (the performance HUD or the FPS HUD)
+class HStyleBorderSelC {
+    items := ["Default", "Off", "Accent", "Animated gradient", "Rainbow"]
+    __New(obj) {
+        this.obj := obj
+    }
+    Value => this.obj.bstyle + 1
+    Text => this.items[this.Value]
+    Choose(i) {
+        this.obj.bstyle := i - 1
+        SPSavePrefs()
+        WHudRedraw(this.obj)
+        NLRequest()
+    }
+}
+
+class HStyleGradSelC {
+    items := ["Default", "Accent Flow", "Aurora", "Sunset", "Ocean", "Fire", "Rainbow", "Candy", "Mono", "Static"]
+    __New(obj) {
+        this.obj := obj
+    }
+    Value => this.obj.grad + 1
+    Text => this.items[this.Value]
+    Choose(i) {
+        this.obj.grad := i - 1
+        SPSavePrefs()
+        WHudRedraw(this.obj)
+        NLRequest()
+    }
+}
+
+HStyleToggle(obj, field, *)
+{
+    obj.%field% := !obj.%field%
+    SPSavePrefs()
+    WHudRedraw(obj)
+    NLRequest()
+}
+
+HStyleScale(obj, v)
+{
+    obj.scale := v
+    if (obj.id != "perf" && obj.id != "pill" && obj.id != "notif" && obj.on && IsObject(obj.gui)) {
+        ww := WHudScaled(obj, obj.w), hh := WHudScaled(obj, obj.h)
+        obj.gui.GetPos(&gx, &gy)
+        obj.gui.Move(Max(0, Min(gx, A_ScreenWidth - ww)), Max(0, Min(gy, A_ScreenHeight - hh)), ww, hh)
+    }
+    SPSavePrefs()
+    WHudRedraw(obj)
+}
+
+Global PHBorderSel := HStyleBorderSelC(PHStyle), PHGradSel := HStyleGradSelC(PHStyle)
+; colour of the dot and the bar of the countdown pill: "Default" keeps the freeze effect's colour
+class HStyleFillSelC {
+    items := ["Effect colour", "Accent Flow", "Aurora", "Sunset", "Ocean", "Fire", "Rainbow", "Candy", "Mono", "Static"]
+    __New(obj) {
+        this.obj := obj
+    }
+    Value => this.obj.fill + 1
+    Text => this.items[this.Value]
+    Choose(i) {
+        this.obj.fill := i - 1
+        SPSavePrefs()
+        WHudRedraw(this.obj)
+        NLRequest()
+    }
+}
+Global PillBorderSel := HStyleBorderSelC(PillStyle), PillGradSel := HStyleGradSelC(PillStyle), PillFillSel := HStyleFillSelC(PillStyle)
+Global NotifBorderSel := HStyleBorderSelC(NotifStyle), NotifGradSel := HStyleGradSelC(NotifStyle)
+Global FpsBorderSel := HStyleBorderSelC(WH["fps"]), FpsGradSel := HStyleGradSelC(WH["fps"])
+
+; Style rows of one HUD (Misc > Performance in the M0MENT4M / Halloween designs)
+SPRowsHudStyle(obj, bsel, gsel, prefix)
+{
+    SPToggleRow("t_" prefix "bg", "Background", obj.bg, HStyleToggle.Bind(obj, "bg"), true)
+    SPToggleRow("t_" prefix "border", "Border", obj.border, HStyleToggle.Bind(obj, "border"), true)
+    SPDropRow("p_" prefix "bstyle", "Border style", bsel)
+    SPDropRow("p_" prefix "grad", "Gradient", gsel)
+    if (obj.id = "pill")
+        SPDropRow("p_plfill", "Dot and bar colour", PillFillSel)
+    SPSliderRow("s_" prefix "scale", "Size (%)", 60, 160, obj.scale, HStyleScale.Bind(obj))
+}
+
+NLRowsHudStyle(obj, bsel, gsel, prefix)
+{
+    NLToggleRow("t_" prefix "bg", "Background", obj.bg, HStyleToggle.Bind(obj, "bg"))
+    NLToggleRow("t_" prefix "border", "Border", obj.border, HStyleToggle.Bind(obj, "border"))
+    NLSelRowS("p_" prefix "bstyle", "Border style", bsel)
+    NLSelRowS("p_" prefix "grad", "Gradient", gsel)
+    if (obj.id = "pill")
+        NLSelRowS("p_plfill", "Dot and bar", PillFillSel)
+    NLSliderRow("s_" prefix "scale", "Size (%)", 60, 160, obj.scale, HStyleScale.Bind(obj))
+}
+
+class WGradSelC {
+    items := ["Default", "Accent Flow", "Aurora", "Sunset", "Ocean", "Fire", "Rainbow", "Candy", "Mono", "Static"]
+    Value => WHudSel().grad + 1
+    Text => this.items[this.Value]
+    Choose(i) {
+        wd := WHudSel()
+        wd.grad := i - 1
+        SPSavePrefs()
+        WHudRedraw(wd)
+        NLRequest()
+    }
+}
+Global WGradSel := WGradSelC()
+WHudScaled(wd, v) => Round(v * wd.scale / 100)
+
+WHudRedraw(wd)
+{
+    if (wd.id = "notif") {                                    ; show a card so the change can be seen
+        SPToast("Notification style", 7700, "info", "This is how the cards look")
+        return
+    }
+    if (wd.id = "pill") {
+        VigPillApplyStyle()
+        return
+    }
+    if (wd.id = "perf") {
+        PHudApplyStyle()
+        return
+    }
+    if (wd.on && IsObject(wd.gui))
+        WHudRender(wd)
+}
+
+WHudToggleBg(*)
+{
+    wd := WHudSel()
+    wd.bg := !wd.bg
+    SPSavePrefs()
+    WHudRedraw(wd)
+}
+
+WHudToggleBorder(*)
+{
+    wd := WHudSel()
+    wd.border := !wd.border
+    SPSavePrefs()
+    WHudRedraw(wd)
+}
+
+WHudSetScale(v)
+{
+    wd := WHudSel()
+    wd.scale := v
+    if (wd.id = "perf" || wd.id = "pill") {
+        SPSavePrefs()
+        WHudRedraw(wd)
+        return
+    }
+    if (wd.on && IsObject(wd.gui)) {
+        ; a bigger widget must not hang off the edge of the screen
+        ww := WHudScaled(wd, wd.w), hh := WHudScaled(wd, wd.h)
+        wd.gui.GetPos(&gx, &gy)
+        wd.gui.Move(Max(0, Min(gx, A_ScreenWidth - ww)), Max(0, Min(gy, A_ScreenHeight - hh)), ww, hh)
+    }
+    SPSavePrefs()
+    WHudRedraw(wd)
+}
+
+WHudPrefsText()
+{
+    global WH
+    out := ""
+    return out                       ; (the look of the widgets is saved in the configs now, only their places stay here)
+}
+
+; widget looks: defaults, applying, and the config (save / load / reset)
+WHudDefaultStyle(wd)
+{
+    wd.bg := (wd.id = "mouse" || wd.id = "strafer" || wd.id = "fps" || wd.id = "perf" || wd.id = "pill" || wd.id = "notif")
+    wd.border := wd.bg
+    wd.scale := 100
+    wd.bstyle := 0
+    wd.grad := 0
+    if (wd.id = "pill")
+        wd.fill := 1
+}
+
+WHudApplyStyle(wd)
+{
+    if (wd.id = "perf") {
+        PHudApplyStyle()
+        return
+    }
+    if (wd.on && IsObject(wd.gui)) {
+        wd.gui.Move(, , WHudScaled(wd, wd.w), WHudScaled(wd, wd.h))
+        WHudRender(wd)
+    }
+}
+
+WHudResetStyles()
+{
+    global WH
+    for id, wd in WH {
+        WHudDefaultStyle(wd)
+        WHudApplyStyle(wd)
+    }
+    WHudDefaultStyle(PHStyle)
+    PHudApplyStyle()
+    WHudDefaultStyle(PillStyle)
+    VigPillApplyStyle()
+    WHudDefaultStyle(NotifStyle)
+    global IdleAnim
+    IdleAnim := false
+}
+
+; Puts only the colour choices of the HUD, widgets, pill and notifications back to "follow the accent" (sizes and on/off stay).
+WHudResetColors()
+{
+    global WH, PHStyle, PillStyle, NotifStyle, HudBorderIdx, HudGradIdx, SPLogoIdx, VigGrad, VigTint
+    for id, wd in WH {
+        wd.bstyle := 0, wd.grad := 0
+        WHudApplyStyle(wd)
+    }
+    PHStyle.bstyle := 0, PHStyle.grad := 0
+    PHudApplyStyle()
+    PillStyle.bstyle := 0, PillStyle.grad := 0, PillStyle.fill := 1
+    VigPillApplyStyle()
+    NotifStyle.bstyle := 0, NotifStyle.grad := 0
+    HudBorderIdx := 3, HudGradIdx := 1, VigGrad := 1, VigTint := 0
+    SPLogoIdx := 1
+    try HudRequest()
+    try NLRequest()
+}
+
+WHudStyleObj()
+{
+    global WH
+    o := {}
+    for id, wd in WH
+        o.%id% := {bg: wd.bg ? 1 : 0, border: wd.border ? 1 : 0, scale: wd.scale, bstyle: wd.bstyle, grad: wd.grad}
+    o.perf := {bg: PHStyle.bg ? 1 : 0, border: PHStyle.border ? 1 : 0, scale: PHStyle.scale, bstyle: PHStyle.bstyle, grad: PHStyle.grad}
+    o.pill := {bg: PillStyle.bg ? 1 : 0, border: PillStyle.border ? 1 : 0, scale: PillStyle.scale, bstyle: PillStyle.bstyle, grad: PillStyle.grad, fill: PillStyle.fill}
+    o.idle_anim := IdleAnim ? 1 : 0
+    o.notif := {bg: NotifStyle.bg ? 1 : 0, border: NotifStyle.border ? 1 : 0, scale: NotifStyle.scale, bstyle: NotifStyle.bstyle, grad: NotifStyle.grad}
+    return o
+}
+
+WHudLoadStyles(config)
+{
+    global WH
+    if (!config.HasOwnProp("widgets")) {
+        WHudResetStyles()
+        return
+    }
+    for id, wd in WH {
+        WHudDefaultStyle(wd)
+        if (config.widgets.HasOwnProp(id)) {
+            w := config.widgets.%id%
+            wd.bg := w.HasOwnProp("bg") ? (w.bg ? true : false) : wd.bg
+            wd.border := w.HasOwnProp("border") ? (w.border ? true : false) : wd.border
+            wd.scale := w.HasOwnProp("scale") ? Max(60, Min(160, Integer(w.scale))) : 100
+            wd.bstyle := w.HasOwnProp("bstyle") ? Max(0, Min(4, Integer(w.bstyle))) : 0
+            wd.grad := w.HasOwnProp("grad") ? Max(0, Min(9, Integer(w.grad))) : 0
+        }
+        WHudApplyStyle(wd)
+    }
+    WHudDefaultStyle(PHStyle)
+    if (config.widgets.HasOwnProp("perf")) {
+        w := config.widgets.perf
+        PHStyle.bg := w.HasOwnProp("bg") ? (w.bg ? true : false) : true
+        PHStyle.border := w.HasOwnProp("border") ? (w.border ? true : false) : true
+        PHStyle.scale := w.HasOwnProp("scale") ? Max(60, Min(160, Integer(w.scale))) : 100
+        PHStyle.bstyle := w.HasOwnProp("bstyle") ? Max(0, Min(4, Integer(w.bstyle))) : 0
+        PHStyle.grad := w.HasOwnProp("grad") ? Max(0, Min(9, Integer(w.grad))) : 0
+    }
+    PHudApplyStyle()
+    WHudDefaultStyle(PillStyle)
+    if (config.widgets.HasOwnProp("pill")) {
+        w := config.widgets.pill
+        PillStyle.bg := w.HasOwnProp("bg") ? (w.bg ? true : false) : true
+        PillStyle.border := w.HasOwnProp("border") ? (w.border ? true : false) : true
+        PillStyle.scale := w.HasOwnProp("scale") ? Max(60, Min(160, Integer(w.scale))) : 100
+        PillStyle.bstyle := w.HasOwnProp("bstyle") ? Max(0, Min(4, Integer(w.bstyle))) : 0
+        PillStyle.grad := w.HasOwnProp("grad") ? Max(0, Min(9, Integer(w.grad))) : 0
+        PillStyle.fill := w.HasOwnProp("fill") ? Max(0, Min(9, Integer(w.fill))) : 1
+    }
+    VigPillApplyStyle()
+    global IdleAnim
+    IdleAnim := config.widgets.HasOwnProp("idle_anim") && config.widgets.idle_anim ? true : false
+    WHudDefaultStyle(NotifStyle)
+    if (config.widgets.HasOwnProp("notif")) {
+        w := config.widgets.notif
+        NotifStyle.bg := w.HasOwnProp("bg") ? (w.bg ? true : false) : true
+        NotifStyle.border := w.HasOwnProp("border") ? (w.border ? true : false) : true
+        NotifStyle.scale := w.HasOwnProp("scale") ? Max(60, Min(160, Integer(w.scale))) : 100
+        NotifStyle.bstyle := w.HasOwnProp("bstyle") ? Max(0, Min(4, Integer(w.bstyle))) : 0
+        NotifStyle.grad := w.HasOwnProp("grad") ? Max(0, Min(9, Integer(w.grad))) : 0
+    }
+}
+
+WHudAnyLiveOn()
+{
+    global WH
+    for id, wd in WH {
+        if (wd.on && id != "fps")
+            return true
+    }
+    return false
+}
+
+WHudAnyOn()
+{
+    global WH
+    for id, wd in WH {
+        if (wd.on)
+            return true
+    }
+    return false
+}
+
+WHudEnsure(wd)
+{
+    if (IsObject(wd.gui))
+        return
+    NLGdipInit()
+    wd.gui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M widget " wd.id)
+    dc := 0, bmp := 0, g := 0
+    VigMakeSurface(Ceil(wd.w * 1.6), Ceil(wd.h * 1.6), &dc, &bmp, &g)
+    wd.dc := dc, wd.bmp := bmp, wd.g := g
+    wd.thru := true
+}
+
+WHudShowOne(wd)
+{
+    WHudEnsure(wd)
+    HAnimStart(wd.id)
+    wd.gui.Show("x" wd.x " y" wd.y " w" WHudScaled(wd, wd.w) " h" WHudScaled(wd, wd.h) " NA")
+    wd.thru := true
+    if (wd.id != "fps")
+        LiveEnsure()
+    SetTimer(WHudDragTick, 20)
+    SetTimer(WHudSecond, 1000)
+    WHudRender(wd)
+    if (wd.id = "fps" && !FpsBegin()) {
+        wd.on := false
+        WHudHideOne(wd)
+    }
+}
+
+WHudHideOne(wd)
+{
+    if (wd.id = "fps")
+        FpsEnd()
+    if (IsObject(wd.gui) && DllCall("IsWindowVisible", "Ptr", wd.gui.Hwnd))
+        HAnimLeave(wd.id, WHudHideNow.Bind(wd))
+    else
+        WHudHideNow(wd)
+}
+
+WHudHideNow(wd)
+{
+    if (wd.on)                                 ; (switched on again in the meantime)
+        return
+    if (IsObject(wd.gui))
+        wd.gui.Hide()
+}
+
+WHudToggle(id, *)
+{
+    global WH
+    wd := WH[id]
+    wd.on := !wd.on
+    if (wd.on)
+        WHudShowOne(wd)
+    else
+        WHudHideOne(wd)
+    SPSavePrefs()
+}
+
+; used when a config is loaded or reset
+WHudSet(id, on)
+{
+    global WH
+    wd := WH[id]
+    if (wd.on = on)
+        return
+    if (on && id = "fps" && !FpsInstalled()) {
+        SPToast("FPS HUD needs the FPS counter", 7316, "off", "Install it first in Misc > Performance")
+        return
+    }
+    wd.on := on
+    if (on)
+        WHudShowOne(wd)
+    else
+        WHudHideOne(wd)
+}
+
+WHudRenderAll()
+{
+    global WH
+    for id, wd in WH {
+        if (wd.on && IsObject(wd.gui))
+            WHudRender(wd)
+    }
+}
+
+WHudSecond()
+{
+    global WH
+    if (!WHudAnyOn()) {
+        SetTimer(WHudSecond, 0)
+        return
+    }
+    for id, wd in WH {
+        if (wd.on && IsObject(wd.gui))
+            try WinSetAlwaysOnTop(1, "ahk_id " wd.gui.Hwnd)
+    }
+}
+
+WHudOnSetCursor(wParam, lParam, msg, hwnd)
+{
+    global WH
+    for id, wd in WH {
+        if (IsObject(wd.gui) && hwnd = wd.gui.Hwnd && !wd.thru) {
+            DllCall("SetCursor", "Ptr", DllCall("LoadCursor", "Ptr", 0, "Ptr", 32646, "Ptr"))
+            return 1
+        }
+    }
+}
+OnMessage(0x0020, WHudOnSetCursor)
+
+; While the menu is open the widgets can be dragged with the mouse; otherwise they stay click-through.
+WHudDragTick()
+{
+    global WH, WHDrag, isAppMinimized
+    static wasDown := false
+    if (!WHudAnyOn()) {
+        SetTimer(WHudDragTick, 0)
+        return
+    }
+    menuOpen := !isAppMinimized
+    for id, wd in WH {
+        if (wd.on && IsObject(wd.gui) && wd.thru = menuOpen) {
+            wd.thru := !menuOpen
+            try WinSetExStyle(menuOpen ? "-0x20" : "+0x20", "ahk_id " wd.gui.Hwnd)
+        }
+    }
+    if (!menuOpen) {
+        WHDrag := 0
+        wasDown := false
+        return
+    }
+    pt := Buffer(8, 0)
+    DllCall("GetCursorPos", "Ptr", pt)
+    mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
+    down := (DllCall("GetAsyncKeyState", "Int", 0x01, "Short") & 0x8000) ? true : false
+    if (IsObject(WHDrag)) {
+        wd := WHDrag.wd
+        if (down) {
+            wd.gui.Move(Max(0, Min(A_ScreenWidth - WHudScaled(wd, wd.w), mx - WHDrag.ox)), Max(0, Min(A_ScreenHeight - WHudScaled(wd, wd.h), my - WHDrag.oy)))
+        } else {
+            wd.gui.GetPos(&gx, &gy)
+            wd.x := gx, wd.y := gy, wd.custom := true
+            WHDrag := 0
+            SPSavePrefs()
+        }
+    } else if (down && !wasDown) {
+        for id, wd in WH {
+            if (!wd.on || !IsObject(wd.gui))
+                continue
+            wd.gui.GetPos(&gx, &gy, &gw, &gh)
+            if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh) {
+                WHDrag := {wd: wd, ox: mx - gx, oy: my - gy}
+                break
+            }
+        }
+    }
+    wasDown := down
+}
+
+WHudRender(wd)
+{
+    pc := A_IsCritical
+    Critical
+    try WHudRenderInner(wd)
+    finally Critical(pc ? "On" : "Off")
+}
+
+; The widget card (background, border, content) drawn at the origin of the current surface. The real widget calls it on its own
+; surface; the live preview on the settings page calls it with a translated origin, so both look exactly the same.
+WHudDrawFrame(wd, preview)
+{
+    global HudBorderIdx, HudGradIdx, WHDrag, SPKeyGradIdx
+    W := wd.w, H := wd.h
+    if (wd.bg) {
+        NLRR(1, 5, W - 2, H - 6, 16, NLC(0, 0, 0, 45))
+        NLRR(3, 3, W - 6, H - 8, 14, SPCol("Card"))
+    }
+    moving := !preview && IsObject(WHDrag) && WHDrag.wd.id = wd.id
+    bs := moving ? 4 : (wd.bstyle ? wd.bstyle : 3)
+    gi := wd.grad ? wd.grad : 1
+    if (wd.border || moving) {
+        if (bs <= 2) {
+            NLRRLine(3, 3, W - 6, H - 8, 14, bs = 2 ? NLAccent(210) : SPCol("Border"))
+        } else {
+            if (wd.bg)
+                NLRRLine(3, 3, W - 6, H - 8, 14, SPCol("Border", 120))
+            stops := SPLogoStops(moving ? 6 : (bs = 4 ? 6 : gi))
+            SPGradBorder(4, 4, W - 8, H - 10, 13, stops, A_TickCount / 1000 * 0.3, 2)
+        }
+    }
+    SPKeyGradIdx := gi
+    switch wd.id {
+        case "keys": WHudDrawKeys(W, H)
+        case "mouse": WHudDrawMouse(W, H)
+        case "mbtn": WHudDrawMouseBtns(W, H)
+        case "strafer": WHudDrawStrafer(W, H)
+        case "fps": WHudDrawFps(W, H)
+    }
+    SPKeyGradIdx := 0
+}
+
+WHudRenderInner(wd)
+{
+    global NLG, NLAlphaPage, HudOpacity, HudBorderIdx, HudGradIdx, WHDrag
+    if (!IsObject(wd.gui))
+        return
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := wd.g
+    wap := HAnimAp(wd.id)
+    NLAlphaPage := Max(0.2, HudOpacity / 255) * wap
+    sc := wd.scale / 100
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", wd.g)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", wd.g, "UInt", 0)
+    W := wd.w, H := wd.h
+    if (wap < 1)
+        HAnimXf(wd.g, W / 2, H / 2, sc, wap)
+    else
+        DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", wd.g, "Float", sc, "Float", sc, "Int", 0)
+    WHudDrawFrame(wd, false)
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", wd.g)
+    NLG := prevG
+    NLAlphaPage := prevA
+    sz := Buffer(8, 0)
+    NumPut("Int", WHudScaled(wd, W), sz, 0)
+    NumPut("Int", WHudScaled(wd, H), sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", wd.gui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", wd.dc, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+WHudDrawKeys(W, H)
+{
+    sz := 30, gap := 5
+    x0 := 14, y0 := 12
+    SPKeyCap("W", x0 + sz + gap, y0, sz, sz, "W")
+    SPKeyCap("A", x0, y0 + sz + gap, sz, sz, "A")
+    SPKeyCap("S", x0 + sz + gap, y0 + sz + gap, sz, sz, "S")
+    SPKeyCap("D", x0 + 2 * (sz + gap), y0 + sz + gap, sz, sz, "D")
+    rx := x0 + 3 * (sz + gap) + 12
+    SPKeyCap("Space", rx, y0, 136, sz, "Space")
+    SPKeyCap("Ctrl", rx, y0 + sz + gap, 46, sz, "Ctrl")
+    SPKeyCap("Shift", rx + 51, y0 + sz + gap, 50, sz, "Shift")
+    SPKeyCap("C", rx + 106, y0 + sz + gap, sz, sz, "C")
+}
+
+WHudDrawMouseBtns(W, H)
+{
+    SPMouseDraw(48, 16)
+}
+
+; text in the colour of the widget's gradient (it moves along with it)
+WTxtCol(phase)
+{
+    c := SPKeyGlowCol(phase)
+    return NLC(c[1], c[2], c[3])
+}
+
+WHudDrawMouse(W, H)
+{
+    global LiveHist, NLG, NLFontB, NLFontSm
+    hist := LiveHist
+    NLText("Mouse speed", 16, 8, WTxtCol(0.0), NLFontB, 130, 22, 0, 1)
+    hi := 0.0, lo := 1e9
+    for v in hist {
+        hi := Max(hi, v)
+        if (v >= 1)
+            lo := Min(lo, v)                 ; (the slowest you moved, not the idle moments in between)
+    }
+    if (lo = 1e9)
+        lo := 0
+    NLText("High", W - 138, 6, SPCol("Muted"), NLFontSm, 56, 16, 2, 1)
+    NLText(Round(hi) " c/s", W - 138, 20, WTxtCol(0.2), NLFontSm, 56, 16, 2, 1)
+    NLText("Low", W - 76, 6, SPCol("Muted"), NLFontSm, 56, 16, 2, 1)
+    NLText(Round(lo) " c/s", W - 76, 20, WTxtCol(0.45), NLFontSm, 56, 16, 2, 1)
+    px := 16, py := 46, pw := W - 40, ph := 52
+    NLLine(px, py + ph, px + pw, py + ph, SPCol("Border"))
+    n := hist.Length
+    scale := Max(hi, 200.0)
+    pts := []
+    Loop n {
+        v := hist[A_Index]
+        if (A_Index > 1 && A_Index < n)
+            v := (hist[A_Index - 1] + v + hist[A_Index + 1]) / 3
+        pts.Push([px + pw * (100 - n + A_Index - 1) / 99, py + ph - ph * Min(1.0, v / scale)])
+    }
+    if (n >= 2) {
+        global SPKeyGradIdx, HudGradIdx
+        stops := SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1)
+        tt := A_TickCount / 1000 * 0.3
+        poly := pts.Clone()
+        poly.Push([pts[n][1], py + ph])
+        poly.Push([pts[1][1], py + ph])
+        brush := SPGradBrush(px, py, pw, 0, stops, tt, 0.22)
+        buf := SPPointsBuf(poly)
+        DllCall("gdiplus\GdipFillPolygon", "Ptr", NLG, "Ptr", brush, "Ptr", buf, "Int", poly.Length, "Int", 0)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+        lbrush := SPGradBrush(px, py, pw, 0, stops, tt, 1.0)
+        pen := 0
+        DllCall("gdiplus\GdipCreatePen2", "Ptr", lbrush, "Float", 2, "Int", 2, "Ptr*", &pen)
+        DllCall("gdiplus\GdipSetPenLineJoin", "Ptr", pen, "Int", 2)
+        buf2 := SPPointsBuf(pts)
+        DllCall("gdiplus\GdipDrawLines", "Ptr", NLG, "Ptr", pen, "Ptr", buf2, "Int", n)
+        DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", lbrush)
+        ec := SPStopsSample(stops, Round(((pts[n][1] - px) / pw - tt) * 96) / 96)
+        NLDisc(pts[n][1], pts[n][2], 5, NLC(ec[1], ec[2], ec[3], 60))
+        NLDisc(pts[n][1], pts[n][2], 3, NLC(ec[1], ec[2], ec[3]))
+        NLText(Round(hist[n]), pts[n][1] - 20, pts[n][2] - 22, WTxtCol(0.7), NLFontSm, 40, 16, 1, 1)
+    }
+    labels := ["-4s", "-3.2s", "-2.4s", "-1.6s", "-0.8s", "now"]
+    for i, lb in labels
+        NLText(lb, px + pw * (i - 1) / 5 - 18, py + ph + 3, WTxtCol(i * 0.14), NLFontSm, 36, 16, 1, 1)
+}
+
+; strafer figures from the last 5 seconds of samples
+LiveStraferStats()
+{
+    global LiveStrafe
+    l := 0, r := 0, idle := 0, sw := 0, lastDir := 0
+    for v in LiveStrafe {
+        if (v = 2)
+            continue
+        if (v = -1)
+            l++
+        else if (v = 1)
+            r++
+        else
+            idle++
+        if (v != 0) {
+            if (lastDir != 0 && v != lastDir)
+                sw++
+            lastDir := v
+        }
+    }
+    return {l: l, r: r, idle: idle, sw: sw, act: l + r + idle}
+}
+
+WHudDrawStrafer(W, H)
+{
+    global LiveStrafe, isStrafeActive, NLFontB, NLFontSm
+    NLText("Auto strafer", 16, 8, WTxtCol(0.0), NLFontB, 130, 22, 0, 1)
+    on := isStrafeActive ? 1 : 0
+    global SPKeyGradIdx, HudGradIdx
+    gst := SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1)
+    NLRR(W - 82, 10, 64, 20, 10, SPAccMix("Pill", 0))
+    sc := SPKeyGlowCol(0.4)
+    NLText(on ? "Active" : "Off", W - 82, 10, on ? NLC(sc[1], sc[2], sc[3]) : NLC(sc[1], sc[2], sc[3], 150), NLFontSm, 64, 20, 1, 1)
+    tx := 16, tw := W - 32, ty := 40, th := 20
+    NLRR(tx, ty, tw, th, 7, SPCol("Track"))
+    n := LiveStrafe.Length
+    segW := tw / 100
+    lc := SPKeyGlowCol(0.12), rc := SPKeyGlowCol(0.62)
+    i := 1
+    while (i <= n) {
+        v := LiveStrafe[i]
+        j := i
+        while (j < n && LiveStrafe[j + 1] = v)
+            j += 1
+        if (v != 2 && v != 0)
+            NLRR(tx + (100 - n + i - 1) * segW, ty + 3, (j - i + 1) * segW + 0.8, th - 6, 0, (v = -1) ? NLC(lc[1], lc[2], lc[3]) : NLC(rc[1], rc[2], rc[3]))
+        i := j + 1
+    }
+    st := LiveStraferStats()
+    secs := Max(0.2, st.act * LiveDt / 1000)
+    cols := [["Sw/s", st.act ? Round(st.sw / secs, 1) : "-"]
+           , ["Left", st.act ? Round(100 * st.l / st.act) "%" : "-"]
+           , ["Right", st.act ? Round(100 * st.r / st.act) "%" : "-"]
+           , ["Idle", st.act ? Round(100 * st.idle / st.act) "%" : "-"]]
+    cw := tw / 4
+    for i, c in cols {
+        NLText(c[2], tx + (i - 1) * cw, 68, SPCol("Text"), NLFontB, cw, 22, 0, 1)
+        NLText(c[1], tx + (i - 1) * cw, 90, SPCol("Muted"), NLFontSm, cw, 18, 0, 1)
+    }
+}
+
+; === EMERGENCY EXIT / RELOAD ===
+ReloadAction(*)
+{
+    global isAppMinimized, WH, ExitAnimBusy, ExitCardText
+    if (ExitAnimBusy)
+        return
+    ExitAnimBusy := true
+    EnvSet("M0M_NOINTRO", "1")
+    EnvSet("M0M_RELOADED", "1")
+    ; everything fades out first (the menu, the HUDs), the new start fades the menu back in
+    if (!isAppMinimized)
+        FadeWindow(false)
+    FadeAwayAll()
+    try CompHide()
+    ; a card in the middle of the screen says what is happening, then the script restarts
+    ExitCardText := "Reloading M0MENT4M"
+    SetTimer(Reload, -2200)                           ; (safety)
+    try ExitCardShow()
+    SetTimer(ReloadAnimTick, 15)
+    ReloadAnimTick(true)
+}
+
+ReloadAnimTick(first := false)
+{
+    static t0 := 0
+    if (first = true)
+        t0 := A_TickCount
+    tc := Min(1.0, (A_TickCount - t0) / 850)
+    try ExitCardRender(tc)
+    if (tc >= 1) {
+        SetTimer(ReloadAnimTick, 0)
+        Reload()
+    }
+}
+
+ExitAction(*)
+{
+    global isMacroRunning, isBhopRunning, isStrafeActive, isComboRunning, isCSpamRunning, isClickRunning, isSpinbotRunning
+    ; everything stops first (hotkeys off, macros off, keys released), then the closing animation plays
+    Suspend(true)
+    isMacroRunning := false, isBhopRunning := false, isStrafeActive := false, isComboRunning := false
+    isCSpamRunning := false, isClickRunning := false, isSpinbotRunning := false
+    Send("{Space up}{c up}{s up}{w up}{a up}{d up}")
+    SetTimer(ExitApp, -2200)                          ; (safety: it quits even if the animation cannot run)
+    ExitWithAnimation()
+}
+
+RegisterSystemHotkeys()
+{
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    if (ReloadKey != "")
+        try Hotkey(ReloadKey, ReloadAction, "On")
+    if (MinimizeKey != "")
+        try Hotkey(MinimizeKey, ToggleMainGui, "On")
+    if (MacroLockKey != "")
+        try Hotkey(MacroLockKey, MacroLockToggle, "On")
+    if (ExitKey != "")
+        try Hotkey(ExitKey, ExitAction, "On")
+}
+
+UnregisterReloadKey(key)
+{
+    if (key == "")
+        return
+    try Hotkey(key, "Off")
+}
+
+UnregisterMinimizeKey(key)
+{
+    if (key == "")
+        return
+    try Hotkey(key, "Off")
+}
+
+UnregisterMacroLockKey(key)
+{
+    if (key == "")
+        return
+    try Hotkey(key, "Off")
+}
+
+UnregisterExitKey(key)
+{
+    if (key == "")
+        return
+    try Hotkey(key, "Off")
+}
+
+StartBindReload(*)
+{
+    global ReloadKey, currentReloadKey
+    BindKey(&ReloadKey, &currentReloadKey, BtnReloadKey, UnregisterReloadKey, RegisterSystemHotkeys)
+}
+
+StartBindMinimize(*)
+{
+    global MinimizeKey, currentMinimizeKey
+    BindKey(&MinimizeKey, &currentMinimizeKey, BtnMinimizeKey, UnregisterMinimizeKey, RegisterSystemHotkeys)
+}
+
+StartBindMacroLock(*)
+{
+    global MacroLockKey, currentMacroLockKey
+    BindKey(&MacroLockKey, &currentMacroLockKey, BtnMacroLockKey, UnregisterMacroLockKey, RegisterSystemHotkeys)
+}
+
+StartBindExit(*)
+{
+    global ExitKey, currentExitKey
+    BindKey(&ExitKey, &currentExitKey, BtnExitKey, UnregisterExitKey, RegisterSystemHotkeys)
+}
+
+RegisterSystemHotkeys()
+
+; ===== Classic / Skeet: the newer features, built from native controls =====
+; Each row is an object {page, kind, id, cy (classic y), col + y (skeet)}. AdvBuild creates them, AdvRefresh syncs them
+; with the settings, AdvLayoutSkeet places them in the Skeet boxes.
+AdvReg(r, ctrls, texts, bgs)
+{
+    global AdvRows, PageControls, SkeetPages, AllTextControls, AllBgControls
+    r.ctrls := ctrls
+    for c in ctrls {
+        c.Visible := false
+        PageControls[r.page].Push(c)
+        if (r.sk)
+            SkeetPages[r.page].Push(c)
+    }
+    for c in texts
+        AllTextControls.Push(c)
+    for c in bgs
+        AllBgControls.Push(c)
+    AdvRows.Push(r)
+}
+
+AdvTip(id, ctrls*)
+{
+    global SPTips
+    if (SPTips.Has(id)) {
+        for c in ctrls
+            AddTip(c, SPTips[id])
+    }
+}
+
+AdvToggle(page, id, label, getter, fn, cy, col, y)
+{
+    global MainGui, BgColor, AccentColor
+    r := {page: page, kind: "tog", id: id, cy: cy, col: col, y: y, sk: true, getter: getter, fn: fn, label: label}
+    r.chk := MainGui.Add("Text", "x104 y" cy " w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
+    r.chk.SetFont("s10 Bold")
+    r.lbl := MainGui.Add("Text", "x128 y" (cy + 2) " w" (id = "t_vsound" ? 100 : 276) " c0xD98484 BackgroundTrans", label)
+    h := AdvToggleClick.Bind(r)
+    r.chk.OnEvent("Click", h)
+    r.lbl.OnEvent("Click", h)
+    AdvTip(id, r.chk, r.lbl)
+    AdvReg(r, [r.chk, r.lbl], [r.chk, r.lbl], [r.chk])
+}
+
+AdvToggleClick(r, *)
+{
+    fn := r.fn
+    fn()
+    AdvRefresh()
+    g := r.getter
+    SPToast(r.label ": " (g() ? "ON" : "OFF"), 3000 + StrLen(r.label))
+}
+
+AdvSlider(page, id, label, mn, mx, getter, setter, cy, col, y)
+{
+    global MainGui
+    r := {page: page, kind: "sld", id: id, cy: cy, col: col, y: y, sk: true, getter: getter, setter: setter, label: label}
+    r.lbl := MainGui.Add("Text", "x104 y" (cy + 2) " w130 c0xD98484 BackgroundTrans", label)
+    r.sl := MainGui.Add("Slider", "x236 y" cy " w170 h20 Range" mn "-" mx " NoTicks", getter())
+    r.sl.OnEvent("Change", AdvSliderChange.Bind(r))
+    AdvTip(id, r.sl, r.lbl)
+    AdvReg(r, [r.lbl, r.sl], [r.lbl], [])
+}
+
+AdvSliderChange(r, ctl, *)
+{
+    v := ctl.Value
+    setter := r.setter
+    setter(v)
+    LblSet(r.lbl, r.label ": " v)
+}
+
+AdvDDL(page, id, label, sel, cy, col, y)
+{
+    global MainGui
+    r := {page: page, kind: "ddl", id: id, cy: cy, col: col, y: y, sk: true, sel: sel}
+    r.lbl := MainGui.Add("Text", "x104 y" (cy + 3) " w100 c0xD98484 BackgroundTrans", label)
+    r.ddl := MainGui.Add("DropDownList", "x206 y" cy " w190", sel.items)
+    r.ddl.Opt("Background000000")
+    r.ddl.Value := sel.Value
+    r.ddl.OnEvent("Change", AdvDDLChange.Bind(r))
+    AdvTip(id, r.ddl, r.lbl)
+    AdvReg(r, [r.lbl, r.ddl], [r.lbl, r.ddl], [r.ddl])
+}
+
+; a selector that sits to the right of the toggle above it (same row)
+AdvDDLNext(page, id, sel, cy, col, y)
+{
+    global MainGui
+    r := {page: page, kind: "ddlx", id: id, cy: cy, col: col, y: y, sk: true, sel: sel}
+    r.ddl := MainGui.Add("DropDownList", "x250 y" cy " w150", sel.items)
+    r.ddl.Opt("Background000000")
+    r.ddl.Value := sel.Value
+    r.ddl.OnEvent("Change", AdvDDLChange.Bind(r))
+    AdvTip(id, r.ddl)
+    AdvReg(r, [r.ddl], [r.ddl], [r.ddl])
+}
+
+AdvDDLChange(r, ctl, *)
+{
+    r.sel.Choose(ctl.Value)
+    AdvRefresh()
+}
+
+AdvButton(page, id, text, fn, cy, col, y)
+{
+    global MainGui, BgColor
+    r := {page: page, kind: "btn", id: id, cy: cy, col: col, y: y, sk: true}
+    r.btn := MainGui.Add("Text", "x104 y" cy " w250 h23 Center +0x200", text)
+    r.btn.Opt("Background" BgColor " c0xD98484")
+    r.btn.OnEvent("Click", (*) => fn())
+    RegisterHover([r.btn], () => BgColor)
+    AdvTip(id, r.btn)
+    AdvReg(r, [r.btn], [r.btn], [r.btn])
+}
+
+AdvHeader(page, text, cy)
+{
+    global MainGui
+    r := {page: page, kind: "hdr", cy: cy, sk: false}
+    r.lbl := MainGui.Add("Text", "x104 y" cy " w320 c0xD98484 BackgroundTrans", text)
+    r.lbl.SetFont("s9 Bold")
+    AdvReg(r, [r.lbl], [], [])
+}
+
+AdvGpuLine(which, cy, col, y)
+{
+    global MainGui
+    r := {page: 7, kind: "gpu", which: which, cy: cy, col: col, y: y, sk: true}
+    r.lbl := MainGui.Add("Text", "x104 y" cy " w330 c0xD98484 BackgroundTrans", " ")
+    AdvReg(r, [r.lbl], [r.lbl], [])
+}
+
+AdvFpsNote(page, cy, h, col, y)
+{
+    global MainGui
+    r := {page: page, kind: "fpsnote", cy: cy, h: h, col: col, y: y, sk: true}
+    r.lbl := MainGui.Add("Text", "x104 y" cy " w340 h" h " c0xD98484 BackgroundTrans", FpsStatusText())
+    AdvReg(r, [r.lbl], [r.lbl], [])
+}
+
+AdvNote(page, text, cy, h, col, y)
+{
+    global MainGui
+    r := {page: page, kind: "note", cy: cy, h: h, col: col, y: y, sk: true}
+    r.lbl := MainGui.Add("Text", "x104 y" cy " w340 h" h " c0xD98484 BackgroundTrans", text)
+    AdvReg(r, [r.lbl], [r.lbl], [])
+}
+
+AdvWidgetToggle(id, *)
+{
+    LiveEnsure()
+    WHudToggle(id)
+}
+
+AdvGpuText(r)
+{
+    global GpuLoad, GpuTemp, GpuUsed, GpuTotal
+    if (!GpuInit()) {
+        LblSet(r.lbl, (r.which = 1) ? "No NVIDIA graphics card found." : "")
+        return
+    }
+    switch r.which {
+        case 1: LblSet(r.lbl, "GPU load: " GpuLoad " %")
+        case 2: LblSet(r.lbl, "Temperature: " GpuTemp " " Chr(0xB0) "C")
+        case 3: LblSet(r.lbl, "Video memory: " Round(GpuUsed / 1024, 1) " / " Round(GpuTotal / 1024, 1) " GB")
+    }
+}
+
+AdvRefresh(*)
+{
+    global AdvRows
+    for r in AdvRows {
+        switch r.kind {
+            case "tog":
+                g := r.getter
+                SetChk(r.chk, g() ? 1 : 0)
+            case "sld":
+                g := r.getter
+                v := g()
+                r.sl.Value := v
+                LblSet(r.lbl, r.label ": " v)
+            case "ddl", "ddlx":
+                try r.ddl.Value := r.sel.Value
+            case "gpu":
+                AdvGpuText(r)
+            case "fpsnote":
+                LblSet(r.lbl, FpsStatusText())
+        }
+    }
+}
+
+AdvLayoutSkeet(i)
+{
+    global AdvRows, SkM
+    for r in AdvRows {
+        if (r.page != i || !r.sk)
+            continue
+        cx := (r.col = 1) ? SkM.colX1 : SkM.colX2
+        cw := (r.col = 1) ? SkM.colW1 : SkM.colW2
+        y := r.y
+        switch r.kind {
+            case "tog":
+                Mv(r.chk, cx + 14, y, 14, 14), Mv(r.lbl, cx + 36, y - 1, r.id = "t_vsound" ? 90 : cw - 50, 16)
+            case "sld":
+                Mv(r.lbl, cx + 14, y + 2, 112, 14), Mv(r.sl, cx + 124, y - 2, cw - 138, 20)
+            case "ddl":
+                Mv(r.lbl, cx + 14, y + 3, 100, 14), Mv(r.ddl, cx + 114, y, cw - 128)
+            case "ddlx":
+                Mv(r.ddl, cx + 130, y, cw - 144)
+            case "btn":
+                Mv(r.btn, cx + 14, y, cw - 28, 24)
+            case "gpu":
+                Mv(r.lbl, cx + 14, y, cw - 28, 16)
+            case "note", "fpsnote":
+                Mv(r.lbl, cx + 14, y, cw - 28, r.h)
+        }
+    }
+}
+
+; the macro checkboxes of the Classic / Skeet pages say what they did, like the other designs
+AdvMacroToast(label, key, getter, *)
+{
+    SPToast(label ": " (getter() ? "ON" : "OFF"), key)
+}
+
+AdvBuild()
+{
+    n := 0
+    for def in [[ChkSlide, LblSlide, "INF SLIDE", () => IsSlideChecked], [ChkSlideBehind, LblSlideBehind, "SLIDE TURN CAMERA", () => IsSlideBehindChecked]
+              , [ChkBhop, LblBhop, "AUTO BHOP", () => IsBhopChecked], [ChkBhopHold, LblBhopHold, "BHOP HOLD", () => IsBhopHoldChecked]
+              , [ChkStrafe, LblStrafe, "AUTO STRAFER", () => IsStrafeChecked], [ChkCombo, LblCombo, "EDASH", () => IsComboChecked]
+              , [ChkCSpam, LblCSpam, "CROUCH SPAM", () => IsCSpamChecked], [ChkClick, LblClick, "AUTO CLICKER", () => IsClickChecked]
+              , [ChkSpinbot, LblSpinbot, "SPINBOT", () => IsSpinbotChecked]
+              , [ChkLagPrecision, LblLagPrecision, "HIGH PRECISION", () => IsLagPrecisionChecked], [ChkLagBurst, LblLagBurst, "TICK MODE", () => IsLagBurstChecked]
+              , [ChkLagHold, LblLagHold, "HOLD TO FREEZE", () => IsLagHoldChecked], [ChkLagVignette, LblLagVignette, "SCREEN EFFECT", () => IsLagVignetteChecked]] {
+        n += 1
+        h := AdvMacroToast.Bind(def[3], 1000 + n, def[4])
+        def[1].OnEvent("Click", h)
+        def[2].OnEvent("Click", h)
+    }
+    global VigStyleSel, VigGradSel, HudBorderSel, HudGradSel, PHudPosSel, WSel, WH, LayoutMode
+    ; macros page
+    AdvToggle(1, "t_edstrafe", "E-Dash autostrafer", () => IsEDashStrafe, ToggleEDashStrafe, 548, 2, 222)
+    ; lagswitch page: freeze effect
+    AdvHeader(3, "── FREEZE EFFECT ──", 568)
+    AdvDDL(3, "p_vstyle", "Style:", VigStyleSel, 590, 2, 258)
+    AdvDDL(3, "p_vgrad", "Colour:", VigGradSel, 616, 2, 284)
+    AdvToggle(3, "t_vanim", "Animate the colours", () => VigAnim, VigToggleAnim, 646, 2, 312)
+    AdvSlider(3, "s_vspd", "Anim speed", 1, 10, () => VigAnimSpd, VigSetSpd, 670, 2, 336)
+    AdvSlider(3, "s_vstay", "Stays (ms)", 200, 5000, () => VigMinShow, VigSetStay, 694, 2, 360)
+    AdvSlider(3, "s_vint", "Intensity", 10, 100, () => VigIntensity, VigSetInt, 718, 2, 384)
+    AdvSlider(3, "s_vtint", "Screen tint", 0, 40, () => VigTint, VigSetTint, 742, 2, 408)
+    AdvToggle(3, "t_vpill", "Countdown pill", () => VigPillOn, VigTogglePill, 770, 2, 436)
+    AdvToggle(3, "t_vpillalways", "Keep the pill on screen", () => PillAlways, VigTogglePillAlways, 794, 2, 460)
+    AdvToggle(3, "t_vsound", "Sound cue", () => VigSound, VigToggleSound, 820, 2, 486)
+    AdvDDLNext(3, "p_vsoundsel", VigSoundSel, 816, 2, 482)
+    AdvSlider(3, "s_vvol", "Volume", 0, 100, () => VigVol, VigSetVol, 846, 2, 512)
+    AdvButton(3, "b_vprev", "PREVIEW EFFECT", VigPreview, 874, 2, 540)
+    ; misc page: macro HUD style
+    AdvHeader(4, "── MACRO HUD STYLE ──", 650)
+    AdvDDL(4, "p_hudborder", "Border:", HudBorderSel, 674, 1, 332)
+    AdvDDL(4, "p_hudgrad", "Gradient:", HudGradSel, 700, 1, 360)
+    AdvToggle(4, "t_hudcompact", "Compact (running only)", () => HudCompact, HudToggleCompact, 732, 1, 392)
+    AdvToggle(4, "t_hudkeys", "Show keybinds", () => HudShowKeys, HudToggleKeys, 758, 1, 418)
+    AdvButton(4, "b_resetcol", "RESET COLORS", ResetDesignColors, 792, 1, 268)
+    ; performance page
+    AdvHeader(7, "── PERFORMANCE HUD ──", 95)
+    AdvToggle(7, "t_phud", "Show performance HUD", () => PHudOn, PHudToggle, 122, 1, 58)
+    AdvDDL(7, "p_phudpos", "Position:", PHudPosSel, 150, 1, 86)
+    AdvHeader(7, "── FPS COUNTER ──", 192)
+    AdvButton(7, "b_fpsinst", "INSTALL / REINSTALL FPS COUNTER", FpsInstallBtn, 216, 1, 128)
+    AdvToggle(7, "t_wfps", "Show the FPS HUD", () => WH["fps"].on, FpsToggle, 248, 1, 160)
+    AdvToggle(7, "t_fpsstats", "1% low and frame time", () => FpsShowStats, FpsToggleStats, 274, 1, 188)
+    AdvFpsNote(7, 300, 30, 1, 216)
+    AdvHeader(7, "── NVIDIA GRAPHICS CARD ──", 344)
+    AdvGpuLine(1, 370, 1, 252)
+    AdvGpuLine(2, 392, 1, 274)
+    AdvGpuLine(3, 414, 1, 296)
+    AdvNote(7, "Read from the NVIDIA driver once per second.", 440, 30, 1, 326)
+    AdvHeader(7, "── ON-SCREEN WIDGETS ──", 478)
+    AdvToggle(7, "t_wkeys", "Keys", () => WH["keys"].on, AdvWidgetToggle.Bind("keys"), 506, 2, 58)
+    AdvToggle(7, "t_wmbtn", "Mouse buttons", () => WH["mbtn"].on, AdvWidgetToggle.Bind("mbtn"), 532, 2, 84)
+    AdvToggle(7, "t_wmouse", "Mouse speed", () => WH["mouse"].on, AdvWidgetToggle.Bind("mouse"), 558, 2, 110)
+    AdvToggle(7, "t_wstrafer", "Auto strafer", () => WH["strafer"].on, AdvWidgetToggle.Bind("strafer"), 584, 2, 136)
+    AdvDDL(7, "p_wsel", "Settings for:", WSel, 614, 2, 168)
+    AdvToggle(7, "t_wbg", "Background", () => WHudSel().bg, WHudToggleBg, 646, 2, 200)
+    AdvToggle(7, "t_wborder", "Border", () => WHudSel().border, WHudToggleBorder, 672, 2, 226)
+    AdvDDL(7, "p_wbstyle", "Border style:", WBorderSel, 698, 2, 252)
+    AdvDDL(7, "p_wgrad", "Gradient:", WGradSel, 726, 2, 280)
+    AdvSlider(7, "s_wscale", "Size %", 60, 160, () => WHudSel().scale, WHudSetScale, 756, 2, 310)
+    AdvNote(7, "Drag a widget with the mouse while this menu is open. They stay click-through while you play.", 796, 50, 2, 344)
+    AdvRefresh()
+    SwitchTab(CurrentTab)
+}
+
+; ===== FPS counter: PresentMon (Intel, open source) reads Roblox's frame times through Windows; the HUD shows them =====
+; PresentMon needs administrator rights to listen to Windows' graphics events, so a small helper script is started
+; elevated (one Windows prompt per session). The helper runs PresentMon, turns its output into one tiny text file
+; (fps.txt) and stops by itself when the macro closes. Nothing is injected into Roblox.
+Global FpsVer := "2.6.0"
+Global FpsURL := "https://github.com/GameTechDev/PresentMon/releases/download/v2.6.0/PresentMon-2.6.0-x64.exe"
+Global FpsSha := "b2a706bc6ad475749e3b7e3409263aa1e6906d45bdcf993f6dbc0f660188f1af"
+Global FpsShowStats := true, FpsNow := 0.0, FpsLow := 0.0, FpsMs := 0.0, FpsHist := [], FpsStatus := "", FpsTimerOn := false, FpsT0 := 0
+
+FpsDir() => AppDir "\tools"
+FpsInstalled() => FileExist(AppDir "\tools\PresentMon.exe") ? true : false
+
+FpsStatusText()
+{
+    global WH, FpsStatus
+    if (!FpsInstalled())
+        return "Not installed yet"
+    if (!WH["fps"].on)
+        return "Installed - the FPS HUD is off"
+    return FpsStatus != "" ? FpsStatus : "Starting..."
+}
+
+; SHA-256 of a file (Windows' own certutil)
+FpsHash(file)
+{
+    out := A_Temp "\m0m_hash.txt"
+    try FileDelete(out)
+    try RunWait(A_ComSpec ' /c certutil -hashfile "' file '" SHA256 > "' out '"', , "Hide")
+    try txt := FileRead(out)
+    catch
+        return ""
+    try FileDelete(out)
+    h := ""
+    Loop Parse, txt, "`n", "`r" {
+        t := StrReplace(Trim(A_LoopField), " ")
+        if (RegExMatch(t, "^[0-9a-fA-F]{64}$"))
+            h := StrLower(t)
+    }
+    return h
+}
+
+; true when the file carries a valid Intel signature
+FpsSigned(file)
+{
+    out := A_Temp "\m0m_sig.txt"
+    try FileDelete(out)
+    ps := "$s = Get-AuthenticodeSignature -LiteralPath '" file "'; Write-Output ($s.Status.ToString() + '|' + $s.SignerCertificate.Subject)"
+    try RunWait(A_ComSpec ' /c powershell -NoProfile -Command "' ps '" > "' out '"', , "Hide")
+    try txt := FileRead(out)
+    catch
+        return false
+    try FileDelete(out)
+    return InStr(txt, "Valid|") = 1 && InStr(txt, "O=Intel Corporation")
+}
+
+FpsInstallBtn(*)
+{
+    FpsInstall()
+    try NLRequest()
+}
+
+FpsInstall()
+{
+    global FpsVer, FpsURL, FpsSha
+    ans := MsgBox("Install the FPS counter?`n`nThis downloads PresentMon " FpsVer " (Intel's open-source frame-time tool, about 1 MB) from`ngithub.com/GameTechDev/PresentMon into the 'tools' folder next to the script and checks its checksum and Intel signature.`n`nIt reads frame times through Windows (nothing is injected into Roblox) and needs administrator permission once per session.", "M0MENT4M - FPS counter", "YesNo Iconi 262144")
+    if (ans != "Yes")
+        return false
+    DirCreate(FpsDir())
+    tmp := FpsDir() "\PresentMon.download"
+    try {
+        Download(FpsURL, tmp)
+    } catch {
+        try FileDelete(tmp)
+        SPToast("Download failed", 7311, "off", "Check your internet connection and try again")
+        return false
+    }
+    if (FpsHash(tmp) != FpsSha) {
+        try FileDelete(tmp)
+        SPToast("Download rejected", 7312, "off", "The checksum did not match the official file")
+        return false
+    }
+    if (!FpsSigned(tmp)) {
+        try FileDelete(tmp)
+        SPToast("Download rejected", 7313, "off", "The file is not signed by Intel")
+        return false
+    }
+    FileMove(tmp, FpsDir() "\PresentMon.exe", true)
+    FpsWriteHelper()
+    SPToast("FPS counter installed", 7314, "on", "Turn on the FPS HUD to start it")
+    return true
+}
+
+FpsHelperAlive()
+{
+    static okAt := 0
+    f := FpsDir() "\fps.txt"
+    try {
+        if (DateDiff(A_Now, FileGetTime(f, "M"), "Seconds") < 5)
+            okAt := A_TickCount
+    }
+    ; the helper replaces fps.txt several times a second, so it can be missing for an instant: allow a short gap
+    return A_TickCount - okAt < 4000
+}
+
+; starts (or resumes) the counter; returns false when it cannot run
+FpsBegin()
+{
+    global FpsStatus, FpsTimerOn, FpsT0
+    FpsT0 := A_TickCount
+    if (!FpsInstalled()) {
+        FpsStatus := "Not installed yet"
+        return false
+    }
+    FpsWriteHelper()
+    try FileOpen(FpsDir() "\fps.run", "w").Close()
+    if (!FpsHelperAlive()) {
+        cmd := '"' A_AhkPath '" "' FpsDir() '\fpshelper.ahk" ' DllCall("GetCurrentProcessId")
+        try {
+            if (A_IsAdmin)
+                Run(cmd, FpsDir(), "Hide")
+            else
+                Run("*RunAs " cmd, FpsDir(), "Hide")
+        } catch {
+            try FileDelete(FpsDir() "\fps.run")
+            FpsStatus := "Administrator permission was not given"
+            SPToast("FPS counter needs permission", 7315, "off", "Windows asked for administrator rights and it was declined")
+            return false
+        }
+    }
+    FpsStatus := "Starting..."
+    if (!FpsTimerOn) {
+        FpsTimerOn := true
+        SetTimer(FpsPoll, 100)
+    }
+    return true
+}
+
+FpsEnd()
+{
+    global FpsTimerOn, FpsNow, FpsStatus
+    try FileDelete(FpsDir() "\fps.run")      ; the helper stops PresentMon (and keeps running, so turning it on again needs no new prompt)
+    SetTimer(FpsPoll, 0)
+    FpsTimerOn := false
+    FpsNow := 0.0
+    FpsStatus := ""
+}
+
+FpsToggleStats(*)
+{
+    global FpsShowStats
+    FpsShowStats := !FpsShowStats
+    SPSavePrefs()
+    try WHudRender(WH["fps"])
+    try NLRequest()
+}
+
+FpsToggle(*)
+{
+    global WH
+    if (!WH["fps"].on && !FpsInstalled()) {
+        if (!FpsInstall())
+            return
+    }
+    WHudSet("fps", !WH["fps"].on)
+    SPSavePrefs()
+    try NLRequest()
+}
+
+FpsPoll()
+{
+    global WH, FpsNow, FpsLow, FpsMs, FpsHist, FpsStatus, FpsTimerOn, FpsT0
+    wd := WH["fps"]
+    if (!wd.on) {
+        SetTimer(FpsPoll, 0)
+        FpsTimerOn := false
+        return
+    }
+    f := FpsDir() "\fps.txt"
+    txt := ""
+    try txt := FileRead(f)
+    if (txt != "") {
+        p := StrSplit(Trim(txt, "`r`n"), "|")
+        if (p.Length >= 4) {
+            FpsStatus := p[1]
+            FpsNow := p[2] + 0.0, FpsLow := p[3] + 0.0, FpsMs := p[4] + 0.0
+        }
+        if (!FpsHelperAlive())
+            FpsStatus := "The FPS helper stopped", FpsNow := 0.0
+    } else if (A_TickCount - FpsT0 > 20000)
+        FpsStatus := "Waiting for the administrator prompt"
+    FpsHist.Push(FpsNow)
+    if (FpsHist.Length > 60)
+        FpsHist.RemoveAt(1)
+    WHudRender(wd)
+}
+
+; the HUD itself: a big gradient number, a small history line and the 1 % low
+WHudDrawFps(W, H)
+{
+    global NLG, FpsShowStats, FpsNow, FpsLow, FpsMs, FpsHist, FpsStatus, NLFontSm, NLFontLogo, SPKeyGradIdx, HudGradIdx
+    NLText("FPS", 16, 8, WTxtCol(0.0), NLFontSm, 60, 18, 0, 1)
+    txt := FpsNow > 0 ? String(Round(FpsNow)) : "--"
+    x := 14
+    Loop Parse, txt {
+        c := SPKeyGlowCol(A_Index * 0.12)
+        NLText(A_LoopField, x, 22, NLC(c[1], c[2], c[3]), NLFontLogo, 44, 46, 0, 1)
+        x += NLTextW(A_LoopField, NLFontLogo) * 0.68 + 1.0
+    }
+    ; history line
+    gx := 96, gy := 18, gw := W - 112, gh := 36
+    n := FpsHist.Length
+    if (n >= 2) {
+        hi := 1.0
+        for v in FpsHist
+            hi := Max(hi, v)
+        hi := Max(hi * 1.15, 30.0)
+        pts := []
+        for i, v in FpsHist
+            pts.Push([gx + gw * (60 - n + i - 1) / 59, gy + gh - gh * Min(1.0, v / hi)])
+        stops := SPLogoStops(SPKeyGradIdx ? SPKeyGradIdx : 1)
+        tt := A_TickCount / 1000 * 0.3
+        lbrush := SPGradBrush(gx, gy, gw, 0, stops, tt, 1.0)
+        pen := 0
+        DllCall("gdiplus\GdipCreatePen2", "Ptr", lbrush, "Float", 1.8, "Int", 2, "Ptr*", &pen)
+        buf := SPPointsBuf(pts)
+        DllCall("gdiplus\GdipDrawLines", "Ptr", NLG, "Ptr", pen, "Ptr", buf, "Int", n)
+        DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", lbrush)
+    }
+    if (FpsNow > 0) {
+        if (FpsShowStats)
+            NLText("1% low " Round(FpsLow) "   " Round(FpsMs, 1) " ms", 16, H - 26, WTxtCol(0.5), NLFontSm, W - 32, 18, 0, 1)
+    } else
+        NLText(FpsStatus != "" ? FpsStatus : "waiting for Roblox", 14, H - 38, SPCol("Muted"), NLFontSm, W - 28, 34, 0, 1, true)
+}
+
+; The helper that runs elevated. It is rewritten from here every time before it starts.
+FpsHelperSrc()
+{
+    return "
+    (
+#Requires AutoHotkey v2.0
+#SingleInstance Force
+Persistent
+parent := A_Args.Length >= 1 ? Integer(A_Args[1]) : 0
+pmCmd := '"' A_ScriptDir '\PresentMon.exe"'
+if (A_Args.Length >= 2)
+    pmCmd := A_Args[2]
+runf := A_ScriptDir '\fps.run'
+outf := A_ScriptDir '\fps.txt'
+csv := A_ScriptDir '\fps_0.csv'
+pmlog := A_ScriptDir '\pm.log'
+pmImage := (A_Args.Length >= 2) ? '' : 'PresentMon.exe'
+hdr := '', startedAt := 0, openErr := '', nread := 0, nrows := 0, nlines := 0
+pmPid := 0, fh := 0, rest := '', col := 0, q := [], total := 0.0, lastFrame := 0, restartAt := 0, status := 'Waiting for Roblox', lastWrite := 0
+SetTimer(Tick, 100)
+Tick() {
+    global
+    if (parent && !ProcessExist(parent))
+        Quit()
+    want := FileExist(runf) ? true : false
+    if (want && !pmPid)
+        StartPM()
+    else if (!want && pmPid)
+        StopPM()
+    if (pmPid) {
+        if (!ProcessExist(pmPid)) {
+            msg := ''
+            try msg := Trim(FileRead(pmlog))
+            status := 'PresentMon stopped' . (msg != '' ? ': ' . SubStr(StrReplace(msg, Chr(10), ' '), 1, 160) : '')
+            pmPid := 0
+        } else if (A_TickCount > restartAt) {
+            StopPM()
+            StartPM()
+        } else
+            ReadNew()
+    }
+    if (A_TickCount - lastWrite >= 250)
+        WriteOut()
+}
+KillOldPM() {
+    global
+    if (pmImage != '')
+        try RunWait(A_ComSpec ' /c taskkill /F /T /FI "IMAGENAME eq ' pmImage '"', A_ScriptDir, 'Hide')
+    Sleep 300
+    Loop Files A_ScriptDir '\fps*.csv'
+        try FileDelete(A_LoopFilePath)
+}
+StartPM() {
+    global
+    KillOldPM()
+    csv := A_ScriptDir '\fps_' A_TickCount '.csv'
+    try FileDelete(pmlog)
+    cmd := A_ComSpec ' /c "' pmCmd ' --process_name RobloxPlayerBeta.exe --process_name Windows10Universal.exe --output_stdout --no_console_stats --v1_metrics --session_name M0MENT4M --stop_existing_session > "' csv '" 2> "' pmlog '""'
+    pid := 0
+    try {
+        Run(cmd, A_ScriptDir, 'Hide', &pid)
+    } catch as e {
+        status := 'Could not start PresentMon: ' e.Message
+        return
+    }
+    pmPid := pid
+    fh := 0, rest := '', col := 0, q := [], total := 0.0, hdr := '', nlines := 0
+    startedAt := A_TickCount
+    restartAt := A_TickCount + 600000
+    status := 'Waiting for Roblox'
+}
+StopPM() {
+    global
+    try RunWait(pmCmd ' --session_name M0MENT4M --terminate_existing_session', A_ScriptDir, 'Hide')
+    if (pmPid) {
+        try ProcessClose(pmPid)
+    }
+    pmPid := 0
+    if (fh) {
+        fh.Close()
+        fh := 0
+    }
+    if (pmImage != '')
+        try RunWait(A_ComSpec ' /c taskkill /F /T /FI "IMAGENAME eq ' pmImage '"', A_ScriptDir, 'Hide')
+    status := 'Paused'
+}
+ReadNew() {
+    global
+    if (!fh) {
+        if (!FileExist(csv))
+            return
+        try {
+            fh := FileOpen(csv, 'r')
+            b := Buffer(4, 255)
+            got := fh.RawRead(b, 4)
+            if (got < 4) {
+                fh.Close()
+                fh := 0
+                return                              ; not enough written yet
+            }
+            fh.Close()
+            ; PresentMon's text can be UTF-16 (every second byte empty), with or without a byte-order mark
+            utf16 := (NumGet(b, 0, 'UChar') = 255 && NumGet(b, 1, 'UChar') = 254) || (NumGet(b, 1, 'UChar') = 0 && NumGet(b, 3, 'UChar') = 0)
+            fh := FileOpen(csv, 'r', utf16 ? 'UTF-16' : 'UTF-8')
+        } catch as e {
+            openErr := e.Message . ' ' . e.Extra
+            fh := 0
+            return
+        }
+        if (!fh)
+            return
+    }
+    txt := StrReplace(fh.Read(), Chr(0))
+    if (txt = '')
+        return
+    nread += StrLen(txt)
+    lines := StrSplit(rest . txt, Chr(10))
+    rest := lines.Pop()
+    for line in lines {
+        line := Trim(line, Chr(13))
+        if (line = '')
+            continue
+        nlines += 1
+        if (!col && !hdr && nlines >= 4 && InStr(line, 'RobloxPlayerBeta')) {
+            col := 10                         ; no header line seen: use the layout of PresentMon's v1 format (msBetweenPresents = column 10)
+        }
+        if (!col) {
+            if (InStr(line, 'Application')) {
+                hdr := SubStr(line, 1, 150)
+                Loop Parse, line, ',' {
+                    nm := StrLower(Trim(A_LoopField))
+                    if (nm = 'msbetweenpresents' || (nm = 'frametime' && !col))
+                        col := A_Index
+                }
+            }
+            continue
+        }
+        f := StrSplit(line, ',')
+        nrows += 1
+        if (f.Length < col)
+            continue
+        ms := f[col] + 0
+        if (ms <= 0 || ms > 5000)
+            continue
+        q.Push(ms)
+        total += ms
+        lastFrame := A_TickCount
+        while (total > 1000 && q.Length > 1)
+            total -= q.RemoveAt(1)
+        status := 'Running'
+    }
+}
+WriteOut() {
+    global
+    lastWrite := A_TickCount
+    fps := 0.0, low := 0.0, avg := 0.0
+    if (q.Length && A_TickCount - lastFrame < 1500) {
+        fps := q.Length * 1000 / total
+        worst := 0.0
+        for v in q
+            worst := Max(worst, v)
+        low := worst ? 1000 / worst : 0
+        avg := total / q.Length
+    } else if (pmPid && !q.Length && A_TickCount - startedAt > 8000) {
+        sz := FileExist(csv) ? FileGetSize(csv) : -1
+        if (sz < 0)
+            status := 'Waiting for Roblox (PresentMon has not written any data yet)'
+        else if (openErr != '' && !fh)
+            status := 'Cannot read the PresentMon file: ' . openErr
+        else if (!col && hdr != '')
+            status := 'Waiting - unknown CSV columns: ' . hdr
+        else if (!hdr)
+            status := 'Read ' . nread . ' of ' . sz . ' bytes but found no header line'
+        else
+            status := 'Columns ok (col ' . col . '), ' . nrows . ' rows read, none usable'
+    } else if (pmPid && status = 'Running')
+        status := 'Waiting for Roblox'
+    tmp := outf '.tmp'
+    try {
+        try FileDelete(tmp)
+        FileAppend(status '|' Round(fps, 1) '|' Round(low, 1) '|' Round(avg, 2) '|' A_TickCount, tmp)
+        FileMove(tmp, outf, true)
+    }
+}
+Quit() {
+    StopPM()
+    try FileDelete(outf)
+    ExitApp
+}
+    )"
+}
+
+FpsWriteHelper()
+{
+    DirCreate(FpsDir())
+    f := FileOpen(FpsDir() "\fpshelper.ahk", "w", "UTF-8")
+    f.Write(FpsHelperSrc())
+    f.Close()
+}
+
+AdvBuild()
+
+; ===== Halloween design: top tab bar, glowing pumpkin, bats, a spider and cobwebs. Same pages as M0MENT4M. =====
+Global HWTop := 154, HWBot := 568, HWView := 400
+
+HWPoly(pts, argb)
+{
+    global NLG
+    n := pts.Length // 2
+    buf := Buffer(n * 8)
+    for i, v in pts
+        NumPut("Float", v, buf, (i - 1) * 4)
+    DllCall("gdiplus\GdipFillPolygon2", "Ptr", NLG, "Ptr", NLBrush(argb), "Ptr", buf, "Int", n)
+}
+
+HWOval(cx, cy, rx, ry, argb)
+{
+    global NLG
+    DllCall("gdiplus\GdipFillEllipse", "Ptr", NLG, "Ptr", NLBrush(argb), "Float", cx - rx, "Float", cy - ry, "Float", rx * 2, "Float", ry * 2)
+}
+
+; a spider web in one corner; (dx, dy) = +1/-1 says which way it opens
+HWWeb(x, y, dx, dy, r)
+{
+    col := NLC(205, 190, 230, 48)
+    Loop 6 {
+        a := (A_Index - 1) * 0.314159
+        NLLine(x, y, x + dx * Cos(a) * r, y + dy * Sin(a) * r, col)
+    }
+    for k in [0.3, 0.55, 0.8] {
+        Loop 5 {
+            a1 := (A_Index - 1) * 0.314159, a2 := A_Index * 0.314159
+            x1 := x + dx * Cos(a1) * r * k, y1 := y + dy * Sin(a1) * r * k
+            x2 := x + dx * Cos(a2) * r * k, y2 := y + dy * Sin(a2) * r * k
+            mx := (x1 + x2) / 2, my := (y1 + y2) / 2
+            mx += (x - mx) * 0.14, my += (y - my) * 0.14
+            NLLine(x1, y1, mx, my, col)
+            NLLine(mx, my, x2, y2, col)
+        }
+    }
+}
+
+; jack-o'-lantern with a flickering glow (fl = -1..1)
+HWPumpkin(cx, cy, r, fl)
+{
+    NLDisc(cx, cy, r * 1.9, NLC(255, 110, 20, Round(14 + 8 * fl)))
+    NLDisc(cx, cy, r * 1.35, NLC(255, 120, 20, Round(24 + 10 * fl)))
+    HWOval(cx - r * 0.52, cy, r * 0.62, r * 0.86, NLC(206, 78, 10))
+    HWOval(cx + r * 0.52, cy, r * 0.62, r * 0.86, NLC(206, 78, 10))
+    HWOval(cx, cy, r * 0.62, r * 0.92, NLC(255, 124, 24))
+    NLRR(cx - 3, cy - r * 1.14, 7, r * 0.36, 2, NLC(96, 130, 44))
+    g := NLC(255, 226, 120, Round(220 + 30 * fl))
+    HWPoly([cx - r * 0.52, cy - r * 0.05, cx - r * 0.16, cy - r * 0.05, cx - r * 0.34, cy - r * 0.42], g)
+    HWPoly([cx + r * 0.16, cy - r * 0.05, cx + r * 0.52, cy - r * 0.05, cx + r * 0.34, cy - r * 0.42], g)
+    HWPoly([cx - r * 0.07, cy + r * 0.1, cx + r * 0.07, cy + r * 0.1, cx, cy - r * 0.05], g)
+    HWPoly([cx - r * 0.58, cy + r * 0.24, cx - r * 0.3, cy + r * 0.34, cx, cy + r * 0.28, cx + r * 0.3, cy + r * 0.34, cx + r * 0.58, cy + r * 0.24
+        , cx + r * 0.4, cy + r * 0.52, cx + r * 0.2, cy + r * 0.4, cx, cy + r * 0.62, cx - r * 0.2, cy + r * 0.4, cx - r * 0.4, cy + r * 0.52], g)
+}
+
+HWBat(x, y, s, ph)
+{
+    fl := Sin(ph) * 0.55
+    c := NLC(150, 105, 190, 185)
+    HWOval(x, y, s * 0.22, s * 0.34, c)
+    NLDisc(x - s * 0.1, y - s * 0.36, s * 0.1, c)
+    NLDisc(x + s * 0.1, y - s * 0.36, s * 0.1, c)
+    HWPoly([x - s * 0.15, y - s * 0.05, x - s * 0.9, y - s * (0.55 + fl), x - s * 1.5, y - s * (0.1 + fl * 0.6)
+        , x - s * 1.25, y + s * 0.3, x - s * 0.9, y + s * 0.08, x - s * 0.55, y + s * 0.36, x - s * 0.3, y + s * 0.12], c)
+    HWPoly([x + s * 0.15, y - s * 0.05, x + s * 0.9, y - s * (0.55 + fl), x + s * 1.5, y - s * (0.1 + fl * 0.6)
+        , x + s * 1.25, y + s * 0.3, x + s * 0.9, y + s * 0.08, x + s * 0.55, y + s * 0.36, x + s * 0.3, y + s * 0.12], c)
+}
+
+HWSpider(x, len)
+{
+    NLLine(x, 0, x, len, NLC(210, 200, 230, 80))
+    c := NLC(176, 150, 206)
+    by := len + 8
+    Loop 4 {
+        k := A_Index
+        NLLine(x, by, x - 8 - k * 3, by - 7 + k * 4, c)
+        NLLine(x, by, x + 8 + k * 3, by - 7 + k * 4, c)
+    }
+    NLDisc(x, by, 6, c)
+    NLDisc(x, by - 7, 3.6, c)
+    NLDisc(x - 1.6, by - 8, 1.1, NLC(255, 60, 60))
+    NLDisc(x + 1.6, by - 8, 1.1, NLC(255, 60, 60))
+}
+
+HWGhost(x, y)
+{
+    c := NLC(240, 232, 255, 215)
+    NLRR(x, y, 28, 30, 13, c)
+    Loop 3
+        NLDisc(x + 4.7 + (A_Index - 1) * 9.3, y + 30, 4.7, c)
+    d := NLC(30, 16, 40)
+    NLDisc(x + 9, y + 13, 2.6, d)
+    NLDisc(x + 19, y + 13, 2.6, d)
+    NLDisc(x + 14, y + 21, 2.2, d)
+}
+
+HWTab(n, glyph, label, x, y, w, h)
+{
+    global CurrentTab, NLHoverId, NLFontSm, NLFontIcon
+    id := "tab" n
+    t := NLLerp(id, (CurrentTab = n) ? 1 : 0, 0.15)
+    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.2)
+    if (t > 0.01) {
+        NLRR(x + 8, y + h - 16, w - 16, 14, 0, NLAccent(Round(30 * t)))
+        NLRR(x + 2, y + h - 2, w - 4, 2, 1, NLAccent(Round(255 * t)))
+    }
+    lw := NLTextW(label, NLFontSm)
+    sx := x + (w - (24 + lw)) / 2
+    NLText(glyph, sx, y, SPMix("Muted", "Text", hv, Round(255 * (1 - t))), NLFontIcon, 20, h - 2, 1, 1)
+    NLText(glyph, sx, y, NLAccent(Round(255 * t)), NLFontIcon, 20, h - 2, 1, 1)
+    NLText(label, sx + 24, y, SPMix("Text2", "Text", hv, Round(255 * (1 - t))), NLFontSm, lw + 10, h - 2, 0, 1)
+    NLText(label, sx + 24, y, NLAccent(Round(255 * t)), NLFontSm, lw + 10, h - 2, 0, 1)
+    NLAddHit(id, x, y, w, h, NLGoTab.Bind(n))
+}
+
+HWTick()
+{
+    global NLShown, NLStyle, SPSkin
+    if (NLShown && NLStyle = "sp" && SPSkin = "hw")
+        NLRequest()
+}
+SetTimer(HWTick, 66)
+
+HWRender()
+{
+    global NLG, NLW, NLH, NLAnimating, NLHits, NLHitsB, NLPageAnim, NLAlphaPage, CurrentTab, NLSubTab, NLHoverId
+    global NLFontUI, NLFontSm, NLFontH, NLFontLogo, SPX, SPY, SPW, SPVT, SPVB, SPScroll, SPScrollT, SPContentH, SPTipRect, NLDragVert, SPDD
+    global HWTop, HWBot, HWView, SPLogoSel
+    NLAnimating := false
+    NLHitsB := []
+    NLAlphaPage := 1.0
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", NLG, "UInt", 0)
+    NLWinXf()
+    t := A_TickCount / 1000
+    fl := (Sin(t * 7) + Sin(t * 13.3)) / 2
+
+    NLPageAnim += (1.0 - NLPageAnim) * 0.06
+    if (NLPageAnim > 0.995)
+        NLPageAnim := 1.0
+    else
+        NLAnimating := true
+    SPScroll += (SPScrollT - SPScroll) * 0.25
+    if (Abs(SPScrollT - SPScroll) < 0.5)
+        SPScroll := SPScrollT
+    else
+        NLAnimating := true
+
+    ; window
+    NLRR(0, 0, NLW, NLH, 22, SPCol("Win"))
+    NLRR(0, 0, NLW, 92, 22, SPCol("Side"))
+    NLRR(0, 50, NLW, 42, 0, SPCol("Side"))
+    NLLine(0, 92, NLW, 92, SPCol("Border"))
+    HWWeb(1, 1, 1, 1, 92)
+    HWWeb(NLW - 1, NLH - 1, -1, -1, 110)
+    NLRRLine(0, 0, NLW, NLH, 22, NLAccent(130))
+    NLRRLine(3, 3, NLW - 6, NLH - 6, 20, NLAccent(34))
+
+    ; title bar: pumpkin and name in the middle, window buttons on the right
+    lw := 0
+    Loop Parse, "M0MENT4M"
+        lw += NLTextW(A_LoopField, NLFontLogo) * 0.68 + 1.0
+    lx := NLW / 2 - lw / 2 + 14
+    HWPumpkin(lx - 22, 23, 11, fl)
+    SPDrawLogo(lx, 4)
+    NLAddHit("logo", lx - 4, 3, lw + 8, 36, SPOpenDD.Bind("logo", SPLogoSel, 0))
+    mh := NLLerp("min", (NLHoverId = "min") ? 1 : 0, 0.2)
+    ch := NLLerp("close", (NLHoverId = "close") ? 1 : 0, 0.2)
+    NLText(Chr(0x2013), NLW - 76, 10, SPMix("Text2", "Text", mh), NLFontUI, 24, 24, 1, 1)
+    NLText(Chr(0x2715), NLW - 46, 10, SPMix("Text2", "Text", ch), NLFontSm, 24, 24, 1, 1)
+    NLAddHit("min", NLW - 76, 10, 24, 24, MinimizeApp)
+    NLAddHit("close", NLW - 46, 10, 24, 24, NLQuit)
+
+    ; tab bar
+    tabs := [[1, Chr(0x26A1), "Macros"], [2, Chr(0x2328), "Keybinds"], [3, Chr(0x231B), "Lagswitch"], [4, Chr(0x2699), "Misc"]
+           , [7, Chr(0x1F511), "Hotkeys"], [5, Chr(0x2139), "Info"], [6, Chr(0x1F4BE), "Config"]]
+    tw := (NLW - 48) / 7
+    for i, tb in tabs
+        HWTab(tb[1], tb[2], tb[3], 24 + (i - 1) * tw, 44, tw, 48)
+    top := 106
+    if (CurrentTab = 4) {
+        names := ["Appearance", "Overlay", "Performance", "Input monitor", "Waifus"]
+        sx := 28
+        for i, nm in names {
+            st := NLLerp("sub" i, (NLSubTab = i) ? 1 : 0, 0.15)
+            hv := NLLerp("subh" i, (NLHoverId = "sub" i) ? 1 : 0, 0.2)
+            sw := NLTextW(nm, NLFontSm) + 24
+            NLText(nm, sx, 100, SPMix("Text2", "Text", hv, Round(255 * (1 - st))), NLFontSm, sw, 28, 1, 1)
+            NLText(nm, sx, 100, NLAccent(Round(255 * st)), NLFontSm, sw, 28, 1, 1)
+            NLRR(sx + 6, 126, sw - 12, 2, 1, NLAccent(Round(255 * st)))
+            NLAddHit("sub" i, sx, 100, sw, 30, NLSetSub.Bind(i))
+            sx += sw + 6
+        }
+        NLLine(24, 129, NLW - 24, 129, SPCol("Border", 120))
+        top := 142
+    }
+
+    ; footer: quick save and user name
+    HWBot := NLH - 64
+    SPDrawSaveButton(NLW)
+    uw := NLTextW(A_UserName, NLFontSm)
+    NLText(A_UserName, NLW - 230, NLH - 56, SPCol("Muted"), NLFontSm, 206, 40, 2, 1)
+    NLDisc(NLW - 16, NLH - 36, 3.4, NLAccent())
+    ; the little halloween scene next to the user name
+    ux := NLW - 34 - uw
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 232, "Int", HWBot, "Int", NLW - 232 - 8, "Int", NLH - HWBot - 6, "Int", 0)
+    HWSpider(NLW / 2 + 40, HWBot + 4 + 6 * Sin(t * 1.3))
+    Loop 3 {
+        k := A_Index
+        bx := 232 + Mod(t * (30 + k * 8) + k * 150, ux - 232 - 60) + 10
+        HWBat(bx, HWBot + 16 + k * 8 + 6 * Sin(t * 1.6 + k * 2), 6 + k * 0.6, t * 13 + k * 2)
+    }
+    NLDisc(ux - 150, NLH - 36, 15, NLC(255, 226, 150, 18))
+    NLDisc(ux - 150, NLH - 36, 10, NLC(250, 224, 160, 235))
+    NLDisc(ux - 153, NLH - 39, 2.4, NLC(226, 196, 130, 150))
+    HWGhost(ux - 112, NLH - 52 + 3 * Sin(t * 2))
+    HWPumpkin(ux - 40, NLH - 34, 14, fl)
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+
+    ; left panel with the scrolling page, right panel with the preview
+    lpw := NLW - 48
+    ph := HWBot - top
+    names7 := Map(1, "MACROS", 2, "KEYBINDS", 3, "LAGSWITCH", 4, "MISC", 5, "INFO", 6, "CONFIG", 7, "HOTKEYS")
+    NLRR(24, top, lpw, ph, 12, SPCol("Side", 210))
+    NLRRLine(24, top, lpw, ph, 12, SPCol("Border"))
+    NLText(names7[CurrentTab], 40, top + 6, SPCol("Muted"), NLFontSm, 300, 22, 0, 1)
+
+    ; scrolling page content
+    HWTop := top + 30
+    SPVT := HWTop, SPVB := HWBot - 4
+    HWView := SPVB - SPVT - 8
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 25, "Int", SPVT, "Int", lpw - 2, "Int", SPVB - SPVT, "Int", 0)
+    NLAlphaPage := NLPageAnim
+    SPX := 40, SPW := lpw - 48
+    SPY := SPVT + 4 - SPScroll + 8 * (1 - NLPageAnim)
+    first := SPY
+    SPTipRect := Map()
+    switch CurrentTab {
+        case 1: SPPageMacro()
+        case 2: SPPageBinds()
+        case 3: SPPageLag()
+        case 4: SPPageMisc()
+        case 5: SPPageInfo()
+        case 6: SPPageConfig()
+        case 7: SPPageSysKeys()
+    }
+    NLAlphaPage := 1.0
+    SPContentH := SPY - first + SPScroll
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", NLG, "Int", 0, "Int", 0, "Int", NLW, "Int", NLH, "Int", 0)
+    if (SPContentH > HWView) {
+        maxS := SPContentH - HWView
+        thh := Max(30, HWView * HWView / SPContentH)
+        ty := SPVT + 4 + (HWView - thh) * (SPScroll / maxS)
+        hot := (NLHoverId = "vs_page" || (IsObject(NLDragVert) && NLDragVert.kind = "page"))
+        NLRR(24 + lpw - 12 - (hot ? 1 : 0), ty, hot ? 6 : 4, thh, 3, NLAccent(hot ? 230 : 150))
+        NLAddHit("vs_page", 24 + lpw - 22, SPVT + 4, 18, HWView, "vscroll", {kind: "page", top: SPVT + 4, trackH: HWView, thumbH: thh, max: maxS})
+    }
+    SPDrawDD()
+    SPDrawTip()
+    if (IsObject(SPDD))
+        NLAnimating := true
+    NLHits := NLHitsB
+    NLPresent()
+}
+
+; ===== Companion: a little anime girl that lives on your screen (drawn in code, animated, reacts to your macros) =====
+class CompHairSelC {
+    items := ["Silver", "Pink", "Sky blue", "Midnight", "Blonde", "Violet"]
+    Value => CompHair
+    Text => this.items[CompHair]
+    Choose(i) {
+        global CompHair
+        CompHair := i
+        SPSavePrefs()
+        NLRequest()
+    }
+}
+
+CompPrefsText()
+{
+    global CompOn, CompScale, CompX, CompY, CompCustom, CompHair, CompHat, CompFollow, CompBubbleOn, CompReactOn, CompChar, CompStyle
+    return "[companion]`n" . "on=" (CompOn ? 1 : 0) "`n" . "hair=" CompHair "`n" . "hat=" (CompHat ? 1 : 0) "`n"
+                . "`n"
+}
+
+CompLoadPrefs()
+{
+    global CompOn, CompScale, CompX, CompY, CompCustom, CompHair, CompHat, CompFollow, CompBubbleOn, CompReactOn, CompChar, CompStyle
+    f := SPPrefsFile()
+    CompHair := Max(1, Min(6, Integer(IniRead(f, "companion", "hair", "1"))))
+    CompHat := IniRead(f, "companion", "hat", "1") = "1"
+    CompCustom := false                     ; she always starts in the top right corner
+    ; she always starts switched off; turn her on in Misc > Companion
+}
+
+CompDefaultPos()
+{
+    global CompX, CompY, CompScale, CompW, CompH
+    CompX := A_ScreenWidth - Round(CompW * CompScale / 100) - 24
+    CompY := 24
+}
+
+; Blair can be drawn from a picture: put a transparent PNG at companion\blair.png next to the script.
+; Without it the drawn version is used (and nothing copyrighted needs to ship with the script).
+; which character is shown: the one picked on the Companion page, or (automatic) the one that goes with the design
+CompWho()
+{
+    global CompChar, SPSkin
+    if (CompChar = 2)
+        return "elfaria"
+    if (CompChar = 3)
+        return "blair"
+    return (SPSkin = "hw") ? "blair" : "elfaria"
+}
+
+; the artwork for one character (cached); 0 when companion\<name>.png is missing
+CompLoadImg(who)
+{
+    global CompImgs
+    if (CompImgs.Has(who))
+        return CompImgs[who]
+    f := AppDir "\companion\" who ".png"
+    img := 0
+    res := 0
+    if (FileExist(f) && DllCall("gdiplus\GdipCreateBitmapFromFile", "WStr", f, "Ptr*", &img) = 0 && img) {
+        w := 0, h := 0
+        DllCall("gdiplus\GdipGetImageWidth", "Ptr", img, "UInt*", &w)
+        DllCall("gdiplus\GdipGetImageHeight", "Ptr", img, "UInt*", &h)
+        res := [img, w, h]
+    }
+    CompImgs[who] := res
+    return res
+}
+
+; Optional 2D artwork lives in the "companion" folder next to the script. It is downloaded from the project's
+; GitHub page only when you ask for it (Misc > Companion > Get the 2D artwork).
+Global CompArtBase := "https://raw.githubusercontent.com/eintoaster/m0ment4m-companion/main/companion-art-repo/companion/"
+
+CompHaveArt()
+{
+    return FileExist(AppDir "\companion\elfaria.png") && FileExist(AppDir "\companion\blair.png")
+}
+
+CompOpenFolder(*)
+{
+    DirCreate(AppDir "\companion")
+    Run('explorer.exe "' AppDir '\companion"')
+}
+
+CompGetArt(*)
+{
+    global CompArtBase, CompImgs, CompStyle
+    ans := MsgBox("Download the 2D artwork (2 pictures, about 0.5 MB) from`ngithub.com/eintoaster/m0ment4m-companion`ninto the 'companion' folder next to the script?", "M0MENT4M - companion artwork", "YesNo Iconi 262144")
+    if (ans != "Yes")
+        return
+    DirCreate(AppDir "\companion")
+    ok := 0
+    for name in ["elfaria", "blair"] {
+        tmp := AppDir "\companion\" name ".tmp"
+        try {
+            Download(CompArtBase name ".png", tmp)
+            f := FileOpen(tmp, "r")
+            head := f.ReadUInt()
+            size := f.Length
+            f.Close()
+            if (head = 0x474E5089 && size > 5000) {          ; a real PNG, not an error page
+                FileMove(tmp, AppDir "\companion\" name ".png", true)
+                ok += 1
+            } else
+                try FileDelete(tmp)
+        } catch {
+            try FileDelete(tmp)
+        }
+    }
+    CompImgs.Clear()
+    if (ok = 2) {
+        CompStyle := 1
+        SPSavePrefs()
+        CompSkinChanged()
+        SPToast("2D artwork downloaded", 7301, "on", "Style switched to 2D artwork")
+    } else
+        SPToast("Download failed", 7302, "off", "Check your internet connection and try again")
+    try NLRequest()
+}
+
+; Scales the artwork to the size it is shown at, once, so drawing a frame is a plain 1:1 copy.
+CompBuildCache()
+{
+    global CompCache, CompCacheKey, CompImg, CompImgW, CompImgH, CompScale, CompUseImg
+    if (!CompUseImg)
+        return
+    key := CompImg "|" CompScale
+    if (CompCache && CompCacheKey = key)
+        return
+    if (CompCache)
+        DllCall("gdiplus\GdipDisposeImage", "Ptr", CompCache)
+    CompCache := 0
+    sc := CompScale / 100
+    w := Max(8, Round(300 * sc)), h := Max(8, Round(300 * sc * CompImgH / CompImgW))
+    bmp := 0
+    DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", w, "Int", h, "Int", 0, "Int", 0x26200A, "Ptr", 0, "Ptr*", &bmp)
+    g := 0
+    DllCall("gdiplus\GdipGetImageGraphicsContext", "Ptr", bmp, "Ptr*", &g)
+    DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", g, "Int", 7)
+    DllCall("gdiplus\GdipDrawImageRectI", "Ptr", g, "Ptr", CompImg, "Int", 0, "Int", 0, "Int", w, "Int", h)
+    DllCall("gdiplus\GdipDeleteGraphics", "Ptr", g)
+    CompCache := bmp, CompCacheKey := key
+}
+
+CompPrepare()
+{
+    global CompImg, CompImgW, CompImgH, CompUseImg, CompW, CompH, CompGui, CompStyle, CompSurfW, CompSurfH
+    NLGdipInit()
+    CompUseImg := false
+    if (CompStyle = 1) {
+        r := CompLoadImg(CompWho())
+        if (IsObject(r)) {
+            CompImg := r[1], CompImgW := r[2], CompImgH := r[3]
+            CompUseImg := true
+        }
+    }
+    if (CompUseImg) {
+        CompW := 300
+        CompH := 80 + Round(300 * CompImgH / CompImgW) + 22
+        CompBuildCache()
+    } else
+        CompW := 240, CompH := 392
+    if (IsObject(CompGui) && (CompSurfW != CompW * 2 || CompSurfH != CompH * 2))
+        CompFree()
+}
+
+CompFree()
+{
+    global CompGui, CompDC, CompBmp, CompG
+    SetTimer(CompTick, 0)
+    if (IsObject(CompGui))
+        CompGui.Destroy()
+    CompGui := ""
+    if (CompG)
+        DllCall("gdiplus\GdipDeleteGraphics", "Ptr", CompG)
+    if (CompBmp)
+        DllCall("DeleteObject", "Ptr", CompBmp)
+    if (CompDC)
+        DllCall("DeleteDC", "Ptr", CompDC)
+    CompG := 0, CompBmp := 0, CompDC := 0
+}
+
+; called when the design (and with it the companion's look) changes
+CompSkinChanged()
+{
+    global CompOn, CompLastWho
+    if (!CompOn)
+        return
+    old := CompLastWho
+    CompFree()
+    CompShow(true)
+    if (CompWho() != old)                 ; a different girl: she introduces herself
+        CompGreet()
+}
+
+CompGreet()
+{
+    CompSay(CompWho() = "blair" ? "Nya~ I'm Blair! Let's have fun!" : "Hello. I am Elfaria. I'll keep you company.", 3200)
+}
+
+CompShow(quiet := false)
+{
+    HAnimStart("comp")
+    global CompGui, CompDC, CompBmp, CompG, CompThru, CompX, CompY, CompScale, CompW, CompH, CompCustom, CompNextChat, SPSkin, CompSurfW, CompSurfH, CompLastWho
+    CompPrepare()
+    if (!IsObject(CompGui)) {
+        CompGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "M0MENT4M companion")
+        dc := 0, bmp := 0, g := 0
+        VigMakeSurface(CompW * 2, CompH * 2, &dc, &bmp, &g)
+        CompDC := dc, CompBmp := bmp, CompG := g
+        CompSurfW := CompW * 2, CompSurfH := CompH * 2
+        CompThru := true
+    }
+    if (!CompCustom)
+        CompDefaultPos()
+    CompX := Max(0, Min(A_ScreenWidth - 60, CompX)), CompY := Max(0, Min(A_ScreenHeight - 60, CompY))
+    CompGui.Show("x" CompX " y" CompY " w" Round(CompW * CompScale / 100) " h" Round(CompH * CompScale / 100) " NA")
+    CompNextChat := A_TickCount + 6000
+    static fine := false
+    if (!fine) {                                   ; timers otherwise tick in 15.6 ms steps (a 33 ms timer would run at 21 fps)
+        fine := true
+        DllCall("winmm\timeBeginPeriod", "UInt", 1)
+    }
+    SetTimer(CompTick, 33)
+    CompLastWho := CompWho()
+    if (!quiet)
+        CompGreet()
+    CompRender()
+}
+
+CompHide()
+{
+    global CompGui
+    SetTimer(CompTick, 0)
+    if (IsObject(CompGui) && DllCall("IsWindowVisible", "Ptr", CompGui.Hwnd))
+        HAnimLeave("comp", CompHideNow)             ; she fades out before she goes
+    else
+        CompHideNow()
+}
+
+CompHideNow()
+{
+    global CompGui, CompOn
+    if (CompOn)                                      ; (switched on again in the meantime)
+        return
+    if (IsObject(CompGui))
+        CompGui.Hide()
+}
+
+CompToggle(*)
+{
+    global CompOn
+    CompOn := !CompOn
+    if (CompOn)
+        CompShow()
+    else
+        CompHide()
+    SPSavePrefs()
+}
+
+CompSetScale(v)
+{
+    global CompScale, CompGui, CompOn, CompCustom, CompX, CompY, CompW, CompH
+    CompScale := v
+    if (CompOn && IsObject(CompGui)) {
+        CompBuildCache()
+        if (!CompCustom)
+            CompDefaultPos()
+        CompGui.Move(CompX, CompY, Round(CompW * v / 100), Round(CompH * v / 100))
+    }
+    SPSavePrefs()
+}
+
+CompToggleHat(*)
+{
+    global CompHat
+    CompHat := !CompHat
+    SPSavePrefs()
+}
+
+CompToggleFollow(*)
+{
+    global CompFollow
+    CompFollow := !CompFollow
+    SPSavePrefs()
+}
+
+CompToggleBubble(*)
+{
+    global CompBubbleOn
+    CompBubbleOn := !CompBubbleOn
+    SPSavePrefs()
+}
+
+CompToggleReact(*)
+{
+    global CompReactOn
+    CompReactOn := !CompReactOn
+    SPSavePrefs()
+}
+
+CompResetPos(*)
+{
+    global CompCustom, CompGui, CompOn, CompX, CompY
+    CompCustom := false
+    CompDefaultPos()
+    if (CompOn && IsObject(CompGui))
+        CompGui.Move(CompX, CompY)
+    SPSavePrefs()
+}
+
+CompSay(text, ms := 3500)
+{
+    global CompBubbleText, CompBubbleStart, CompBubbleUntil, CompOn
+    if (!CompOn)
+        return
+    CompBubbleText := text
+    CompBubbleStart := A_TickCount
+    CompBubbleUntil := A_TickCount + ms
+}
+
+CompSayRandom(*)
+{
+    global CompLines, CompLinesElf, CompOn, CompBubbleOn
+    if (!CompOn)
+        return
+    pool := (CompWho() = "blair") ? CompLines : CompLinesElf
+    CompSay(pool[Random(1, pool.Length)], 4200)
+}
+
+; called from ShowStatus: she comments on what your macros do (also while you play, where the popups stay hidden)
+CompReact(text)
+{
+    global CompOn, CompReactOn, CompBubbleOn
+    if (!CompOn || !CompReactOn || !CompBubbleOn || InStr(text, "UPDATED"))
+        return
+    t := Trim(StrReplace(StrReplace(text, "`r"), "`n", " "))
+    if (RegExMatch(t, "^(.*?):\s*(ON|OFF)$", &m))
+        msg := StrTitle(m[1]) (m[2] = "ON" ? " is on!" : " is off.")
+    else
+        msg := StrTitle(t)
+    CompSay(msg, 2600)
+}
+
+
+; what she says while a macro is running: [Elfaria's lines, Hazel's lines]
+Global CompMacroLines := Map(
+    "slide", [
+        ["Such graceful sliding... you really are crazy good.", "That slide is so smooth, it's almost like flying.", "Hey, crazy sliding! Keep it going.", "Not even the floor can stop you.", "You glide across the ground like water.", "What a magnificent slide!", "So fluid... I could watch this all day.", "The ground simply yields to you.", "Such control while sliding. Truly remarkable.", "That slide was breathtaking.", "You make it look so effortless.", "Sliding like a gentle breeze... lovely.", "A slide worthy of a champion.", "Please don't stop, it's wonderful to watch.", "Even the wind can't keep up with you."]
+        , ["Whee! Crazy sliding, I love it!", "You slide like a witch on a broomstick!", "Smooth! Even my cauldron would be jealous.", "Wow, you glide like a ghost!", "Slip, slide, spooky ride!", "Nobody slides like you, not even my cat!", "That slide is pure magic!", "Whoa, did you just slide through a haunted hallway?", "So slippery! Hehe, like a ghost on ice!", "Keep sliding, I'm getting dizzy in a good way!", "Boo-tiful sliding!", "You're sliding faster than my broom!", "Slide, slide, slide! I'm cheering for you!", "My spellbook says: this slide is legendary.", "Wooosh! Like a bat in the night!"]],
+    "bhop", [
+        ["Wow, your bhop skills are amazing.", "Such rhythm in every jump... impressive.", "You hop like the wind itself.", "That timing is perfect. Keep it up.", "Every jump lands exactly on time. Wonderful.", "Your bunnyhop is flawless.", "So light on your feet.", "Bhopping like that takes real skill.", "You almost never touch the ground.", "What superb momentum!", "I'm in awe of your rhythm.", "Such graceful hops, one after another.", "You make it look like a dance.", "That speed... truly something special.", "Hop after hop, never missing a beat."]
+        , ["Wow, your bhop is spooky good!", "Boing boing boing! You never miss a jump.", "Hop hop hop! You're faster than a bat!", "That bhop timing is magic, I swear.", "You bounce like a happy pumpkin!", "Whoa, you're hopping like a frog in my potion!", "Hop, hop, hooray!", "Bhop master of the night!", "Your jumps are so bouncy, I love it!", "Faster than a witch's broom, wow!", "Boing! Boing! My heart's bouncing too!", "Not even gravity can catch you!", "That's some wicked momentum!", "Hopping like a rabbit with a jetpack!", "Ooh, perfect jumps again, you're on fire!"]],
+    "strafe", [
+        ["Your strafing is so precise.", "Left, right, left... a beautiful dance of movement.", "Nobody can catch you with that strafing.", "Every turn is perfectly measured.", "Such fine control of your direction.", "You weave through the air like a ribbon.", "That is some elegant footwork.", "So smooth... so accurate.", "Not a single wasted movement.", "It's like watching a calm river bend.", "You turn so smoothly, it's mesmerising.", "What clever movement!", "Left and right, as if it were nothing.", "Your sense of angles is admirable.", "Truly, a master of strafing."]
+        , ["Strafing like a pro! Ooh, so fast!", "Left, right, left, right... you're making me dizzy!", "You zig-zag better than my pet bats!", "Nobody can aim at you like that!", "Wiggle, wiggle, whoosh!", "You dodge like a ghost through a wall!", "Zig-zag, zig-zag, I'm cheering!", "That's some slippery footwork!", "Even my spiders couldn't weave like that!", "Hehe, try to catch you? Impossible!", "So wiggly! So fast!", "Left! Right! Left! You're hypnotizing me!", "Careful, you'll tie yourself in knots!", "Strafing with style, ooh la la!", "You dance sideways like a crab on a broom!"]],
+    "edash", [
+        ["Emote dashing is so cool... dancing and bhopping, wow.", "You dance while you run? How wonderful.", "E-Dash... such style, such elegance.", "Dancing and dashing at once. I'm impressed.", "Emotes and speed together... what a unique style.", "You turn a dash into a performance.", "I'm rather fond of this dancing.", "A graceful dance at full speed.", "Such a lively way to move.", "That emote looks lovely while dashing.", "Dashing and dancing... may I join you?", "You move like you're at a ball.", "What a charming trick.", "Dancing through the air, how delightful.", "You make dancing look like a combat art."]
+        , ["Emote dashing is so cool! Dancing and bhopping, wow!", "A dance party at full speed, I love it!", "E-Dash! You move like a dancing skeleton!", "Dance, dance, dash! Hehe!", "Dancing while zooming? You're a party witch!", "Shake it, shake it, dash it!", "That emote is so cute while dashing!", "Moonlight disco, and you're the star!", "You dance like a ghost at a ball!", "Boogie bunny hop, yes!", "A spooky dance party on the run!", "Wow, you can dance and run? Teach me!", "Spin, shake, dash! Hee hee!", "I wanna dance too! Wait for me!", "What a groovy dash, I'm clapping!"]],
+    "cspam", [
+        ["You crouch so quickly... how adorable.", "Such rapid movement. Your fingers must be tired.", "That crouch rhythm is lovely.", "So many crouches... you must be in high spirits.", "A very quick bow, again and again.", "You're polite, in your own way.", "Quite a speedy little bow.", "Please don't tire your fingers too much.", "That is a very energetic crouch.", "Up and down like a tiny wave.", "You crouch with such enthusiasm.", "I can hardly follow that speed.", "What a spirited rhythm.", "So lively, and so quick.", "Crouch after crouch, never skipping a beat."]
+        , ["Crouch crouch crouch! You're so quick!", "Ooh, you're wiggling like a happy ghost!", "Tap tap tap, so fast!", "Squat squat squat, you're a hopping goblin!", "You crouch faster than a scared cat!", "Up, down, up, down, hehe!", "Are you trying to dig a hole? So fast!", "Crouching like a sneaky spider!", "My legs hurt just watching, hehe!", "Wiggly wiggly crouch!", "You're bouncing like a jelly pumpkin!", "Squish, squish, squish!", "Ooh, super crouch speed!", "Do you need a break? That's a lot of crouching!", "So energetic, like a hyper bat!"]],
+    "click", [
+        ["Your clicking is remarkably fast.", "Such steady clicks. I admire your focus.", "Tireless as ever, aren't you?", "So many clicks... your finger must be very strong.", "Clicking with such determination.", "Not a single click out of rhythm.", "Your dedication is inspiring.", "Please rest your hand once in a while.", "What a diligent little clicker.", "You're clicking faster than I can count.", "So precise and so fast.", "It's like gentle rain on a window.", "Such patience in every click.", "I admire how steady your hand is.", "Faster and faster... you never slow down."]
+        , ["Click click click! Fast like a spider!", "My goodness, those clicks are speedy!", "Click-clack! Even my wand can't keep up.", "Your finger is faster than lightning!", "Click, click, boom! Hehe!", "You tap like a woodpecker!", "Are you summoning something with all those clicks?", "Clickety-clack, spooky attack!", "So many clicks, the mouse must be scared!", "Ooh, a click storm!", "Your finger must be made of magic!", "Click! Click! Clap! Clap!", "Rat-a-tat-tat! Like a skeleton drumming!", "So fast! Even my cat is dizzy!", "Is your finger on a broomstick, too?"]],
+    "spin", [
+        ["Spinning around... are you not dizzy?", "What a lovely twirl.", "Round and round... it's rather beautiful.", "You spin like a leaf in the wind.", "Such a graceful rotation.", "I might get dizzy just watching.", "A dance of your own, it seems.", "Turning and turning... how mesmerising.", "It's like a gentle whirlpool.", "So many turns, and still elegant.", "You make spinning look like art.", "Do be careful not to get dizzy.", "Round we go, round we go.", "What a whirlwind you are.", "Where does your gaze land after all that?"]
+        , ["Wheee! Spin, spin, spin!", "You're twirling like a leaf in the autumn wind!", "Round and round we go!", "You spin faster than a witch's tornado!", "Ooh, you're a human spinning top!", "Dizzy, dizzy, dizzy! Hehe!", "Spinning like a ghost in a haunted house!", "Spin me too! Spin me too!", "Look at you go, like a merry-go-round!", "Whirl, twirl, swirl!", "You'll make a hole in the floor at this rate!", "Do the spooky spin! Yay!", "I'm getting dizzy just watching!", "Your camera is doing the cha-cha!", "Spin, spin, the world goes around!"]]
+)
+Global CompNextMacro := 0
+
+CompName() => (CompWho() = "blair") ? "Blair" : "Elfaria"
+
+CompRunningMacros()
+{
+    out := []
+    if (isMacroRunning)
+        out.Push("slide")
+    if (isBhopRunning)
+        out.Push("bhop")
+    if (isStrafeActive)
+        out.Push(IsEDashStrafe ? "edash" : "strafe")   ; the E-Dash autostrafer gets the emote dashing lines
+    if (isComboRunning && !(isStrafeActive && IsEDashStrafe))
+        out.Push("edash")
+    if (isCSpamRunning)
+        out.Push("cspam")
+    if (isClickRunning)
+        out.Push("click")
+    if (isSpinbotRunning)
+        out.Push("spin")
+    return out
+}
+
+; every so often she comments on a macro that is running right now
+CompMacroChat()
+{
+    global CompMacroLines, CompNextMacro, CompBubbleUntil, SPSkin
+    if (A_TickCount < CompNextMacro)
+        return
+    run := CompRunningMacros()
+    if (run.Length = 0) {
+        CompNextMacro := A_TickCount + 4000
+        return
+    }
+    if (A_TickCount < CompBubbleUntil + 800)
+        return
+    kind := run[Random(1, run.Length)]
+    pool := CompMacroLines[kind][(CompWho() = "blair") ? 2 : 1]
+    CompSay(pool[Random(1, pool.Length)], 4600)
+    CompNextMacro := A_TickCount + Random(16000, 32000)
+}
+
+CompTick()
+{
+    global CompOn, CompGui, CompThru, CompDrag, CompX, CompY, CompCustom, isAppMinimized, CompScale, CompW, CompH
+    global CompBubbleOn, CompNextChat, CompBubbleUntil, CompReactOn
+    static wasDown := false
+    if (!CompOn || !IsObject(CompGui)) {
+        SetTimer(CompTick, 0)
+        return
+    }
+    menuOpen := !isAppMinimized
+    if (CompThru = menuOpen) {                     ; clicks go through while you play, she can be dragged while the menu is open
+        CompThru := !menuOpen
+        try WinSetExStyle(menuOpen ? "-0x20" : "+0x20", "ahk_id " CompGui.Hwnd)
+    }
+    if (menuOpen) {
+        pt := Buffer(8, 0)
+        DllCall("GetCursorPos", "Ptr", pt)
+        mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
+        down := (DllCall("GetAsyncKeyState", "Int", 0x01, "Short") & 0x8000) ? true : false
+        if (IsObject(CompDrag)) {
+            if (down) {
+                CompGui.Move(Max(0, Min(A_ScreenWidth - 60, mx - CompDrag.ox)), Max(0, Min(A_ScreenHeight - 60, my - CompDrag.oy)))
+            } else {
+                CompGui.GetPos(&gx, &gy)
+                if (A_TickCount - CompDrag.t0 < 260 && Abs(mx - CompDrag.mx0) < 5 && Abs(my - CompDrag.my0) < 5) {
+                    CompGui.Move(CompDrag.gx0, CompDrag.gy0)       ; a short click, not a drag: she says something
+                    CompDrag := 0
+                    CompSayRandom()
+                } else {
+                    CompX := gx, CompY := gy, CompCustom := true
+                    CompDrag := 0
+                }
+            }
+        } else if (down && !wasDown) {
+            CompGui.GetPos(&gx, &gy, &gw, &gh)
+            if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh)
+                CompDrag := {ox: mx - gx, oy: my - gy, t0: A_TickCount, mx0: mx, my0: my, gx0: gx, gy0: gy}
+        }
+        wasDown := down
+    } else {
+        CompDrag := 0
+        wasDown := false
+    }
+    static period := 0
+    want := MenuBusy() ? 40 : 33          ; about 30 per second in the game; with the menu open the menu itself needs the time
+    if (want != period) {
+        period := want
+        SetTimer(CompTick, want)
+    }
+    if (CompBubbleOn && CompReactOn)
+        CompMacroChat()
+    if (CompBubbleOn && A_TickCount > CompNextChat) {
+        if (A_TickCount > CompBubbleUntil + 500)
+            CompSayRandom()
+        CompNextChat := A_TickCount + Random(22000, 38000)
+    }
+    CompRender()
+}
+
+CompRender()
+{
+    pc := A_IsCritical
+    Critical
+    try CompRenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+CompRenderInner()
+{
+    global NLG, NLAlphaPage, CompG, CompGui, CompDC, CompScale, CompW, CompH
+    if (!IsObject(CompGui))
+        return
+    prevG := NLG, prevA := NLAlphaPage
+    NLG := CompG
+    NLAlphaPage := HAnimAp("comp")
+    sc := CompScale / 100
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", CompG)
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", CompG, "Int", 0, "Int", 0, "Int", Round(CompW * sc), "Int", Round(CompH * sc), "Int", 0)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", CompG, "UInt", 0)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", CompG, "Float", sc, "Float", sc, "Int", 0)
+    CompDraw(A_TickCount / 1000)
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", CompG)
+    NLG := prevG
+    NLAlphaPage := prevA
+    sz := Buffer(8, 0)
+    NumPut("Int", Round(CompW * sc), sz, 0)
+    NumPut("Int", Round(CompH * sc), sz, 4)
+    src := Buffer(8, 0)
+    bf := Buffer(4, 0)
+    NumPut("UChar", 255, bf, 2)
+    NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", CompGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", CompDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; Blair (Soul Eater): purple hair with two spiral curls, amber eyes, a huge witch hat, a navy dress with silver tabs, floating on a pumpkin.
+CompSpiral(cx, cy, dir, t)
+{
+    pc := NLC(122, 74, 158)
+    px := cx, py := cy
+    Loop 34 {
+        a := (A_Index * 0.5 + t * 0.6) * dir
+        r := 2 + A_Index * 0.42
+        nx := cx + Cos(a) * r, ny := cy + Sin(a) * r * 0.95
+        if (A_Index > 1)
+            NLLineW(px, py, nx, ny, pc, 3.2)
+        px := nx, py := ny
+    }
+}
+
+CompDrawBlair(t)
+{
+    global CompBubbleUntil, NLG
+    skin := NLC(255, 228, 204)
+    navy := NLC(34, 38, 78)
+    navyL := NLC(60, 66, 128)
+    silver := NLC(196, 196, 204)
+    silverD := NLC(150, 150, 160)
+    hair := NLC(124, 76, 160)
+    hairD := NLC(92, 54, 124)
+    ink := NLC(50, 30, 60)
+    oy := 76
+    bob := 4 * Sin(t * 1.6)
+    y0 := oy + bob
+    sway := Sin(t * 1.4)
+    talking := (A_TickCount < CompBubbleUntil)
+    fl := (Sin(t * 7) + Sin(t * 13.3)) / 2
+
+    ; one pumpkin floating at her side
+    HWPumpkin(34, y0 + 224 + 8 * Sin(t * 1.9 + 1), 24, fl)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", NLG, "Float", 22, "Float", 0, "Int", 0)   ; shift her right to make room
+
+    HWOval(120, oy + 300, 50 - bob, 7, NLC(0, 0, 0, 50))
+
+    ; standing: dark stockings with a silver trim, small shoes
+    for lx in [108, 132] {
+        NLLineW(lx, y0 + 256, lx, y0 + 292 - bob, NLC(26, 30, 62), 12)
+        NLRR(lx - 6, y0 + 262, 12, 3, 1, silverD)
+        HWOval(lx, oy + 296, 11, 6, NLC(48, 48, 96))
+    }
+
+    ; skirt with silver tabs on the hem
+    HWPoly([94, y0 + 214, 146, y0 + 214, 174, y0 + 264, 66, y0 + 264], navy)
+    HWPoly([106, y0 + 220, 134, y0 + 220, 148, y0 + 264, 92, y0 + 264], navyL)
+    Loop 8
+        NLRR(62 + (A_Index - 1) * 15.6, y0 + 257, 9, 9, 2, silver)
+
+    ; bodice, bare shoulders, high collar with the round silver brooch
+    HWOval(88, y0 + 160, 11, 9, skin)
+    HWOval(152, y0 + 160, 11, 9, skin)
+    HWPoly([98, y0 + 154, 142, y0 + 154, 146, y0 + 222, 94, y0 + 222], navy)
+    HWPoly([106, y0 + 160, 134, y0 + 160, 130, y0 + 214, 110, y0 + 214], navyL)
+    NLRR(106, y0 + 146, 28, 16, 5, navy)
+    NLDisc(120, y0 + 168, 8.5, silverD)
+    NLDisc(120, y0 + 167, 7.5, silver)
+    HWPoly([116, y0 + 165, 124, y0 + 165, 120, y0 + 171], NLC(90, 90, 110))
+
+    ; both arms hang down in long detached bell sleeves with spiky cuffs (no hands)
+    HWPoly([92, y0 + 166, 104, y0 + 172, 86, y0 + 238, 56, y0 + 232, 66, y0 + 208], navy)
+    HWPoly([66, y0 + 208, 86, y0 + 238, 56, y0 + 232], navyL)
+    HWPoly([84, y0 + 170, 92, y0 + 158, 96, y0 + 172, 104, y0 + 164, 106, y0 + 178, 88, y0 + 182], navy)
+    HWPoly([148, y0 + 166, 136, y0 + 172, 154, y0 + 238, 184, y0 + 232, 174, y0 + 208], navy)
+    HWPoly([174, y0 + 208, 154, y0 + 238, 184, y0 + 232], navyL)
+    HWPoly([156, y0 + 170, 148, y0 + 158, 144, y0 + 172, 136, y0 + 164, 134, y0 + 178, 152, y0 + 182], navy)
+    NLRR(112, y0 + 142, 16, 10, 4, skin)
+
+    ; hair behind and the two spiral curls
+    HWOval(120, y0 + 108, 56, 52, hairD)
+    HWOval(76, y0 + 142, 13, 30, hair)
+    HWOval(164, y0 + 142, 13, 30, hair)
+    CompSpiral(46, y0 + 116, 1, t)
+    CompSpiral(194, y0 + 112, -1, t)
+
+    ; face
+    HWOval(120, y0 + 116, 46, 42, skin)
+    HWOval(86, y0 + 136, 7, 3.8, NLC(255, 150, 160, 80))
+    HWOval(154, y0 + 136, 7, 3.8, NLC(255, 150, 160, 80))
+    CompEyeOff(y0, &ox, &oyy)
+    blink := (Mod(t, 4.2) > 4.04)
+    for e in [[101, 1], [139, -1]] {
+        ex := e[1]
+        if (blink) {
+            HWOval(ex, y0 + 121, 12, 14, skin)
+            NLLineW(ex - 10, y0 + 123, ex, y0 + 126, ink, 2.4)
+            NLLineW(ex, y0 + 126, ex + 10, y0 + 123, ink, 2.4)
+            continue
+        }
+        HWOval(ex, y0 + 122, 11.6, 13.4, NLC(255, 255, 255))
+        HWOval(ex + ox, y0 + 123 + oyy, 8.8, 11, NLC(238, 178, 52))
+        HWOval(ex + ox, y0 + 124 + oyy, 4.4, 7.4, NLC(70, 36, 24))
+        NLDisc(ex + ox + 3, y0 + 118 + oyy, 3.2, NLC(255, 255, 255))
+        NLDisc(ex + ox - 3, y0 + 128 + oyy, 1.6, NLC(255, 255, 255, 210))
+        NLLineW(ex - 12 * e[2], y0 + 111, ex + 11 * e[2], y0 + 108, ink, 3)
+    }
+    if (talking) {
+        HWOval(120, y0 + 141, 4, 2.4 + 2.2 * Abs(Sin(t * 12)), NLC(176, 60, 90))
+    } else {
+        NLLineW(112, y0 + 140, 116, y0 + 143, NLC(190, 90, 110), 1.6)
+        NLLineW(116, y0 + 143, 120, y0 + 140.5, NLC(190, 90, 110), 1.6)
+        NLLineW(120, y0 + 140.5, 124, y0 + 143, NLC(190, 90, 110), 1.6)
+        NLLineW(124, y0 + 143, 128, y0 + 140, NLC(190, 90, 110), 1.6)
+    }
+
+    ; bangs, with the single long strand between her eyes
+    HWPoly([76, y0 + 116, 78, y0 + 82, 100, y0 + 66, 120, y0 + 64, 140, y0 + 66, 162, y0 + 82, 164, y0 + 116, 152, y0 + 96, 144, y0 + 118, 134, y0 + 94
+        , 126, y0 + 96, 122, y0 + 126, 118, y0 + 126, 114, y0 + 96, 106, y0 + 94, 96, y0 + 118, 88, y0 + 96], hair)
+
+    ; the huge witch hat: wide brim, folded silver band with rivets, a bent tip
+    tipx := 134 + sway * 12
+    HWOval(120, y0 + 70, 86, 13, NLC(40, 44, 92))
+    HWOval(120, y0 + 66, 82, 11, navy)
+    HWPoly([88, y0 + 66, 152, y0 + 66, 146, y0 + 22, tipx, y0 - 16, 108, y0 + 26], navy)
+    HWPoly([88, y0 + 66, 152, y0 + 66, 148, y0 + 52, 92, y0 + 52], silver)
+    HWPoly([92, y0 + 52, 148, y0 + 52, 150, y0 + 40, 90, y0 + 40], NLC(214, 214, 222))
+    NLDisc(104, y0 + 58, 2.2, silverD)
+    NLDisc(104, y0 + 47, 2.2, silverD)
+    NLLineW(88, y0 + 66, 90, y0 + 40, NLC(120, 120, 134), 1.4)
+
+    ; floating sparkles
+    Loop 4 {
+        k := A_Index
+        sx := 120 + 98 * Cos(t * 0.7 + k * 1.6), sy := y0 + 150 + 80 * Sin(t * 0.7 + k * 1.6)
+        s := 3.2 + 2.2 * Sin(t * 4.6 + k)
+        NLLineW(sx - s, sy, sx + s, sy, NLC(255, 190, 90, 210), 1.5)
+        NLLineW(sx, sy - s, sx, sy + s, NLC(255, 190, 90, 210), 1.5)
+    }
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", NLG, "Float", -22, "Float", 0, "Int", 0)
+}
+
+; Elfaria (the default companion): long pale-to-blue hair, a white dress with gold trim, a blue gem and a brown sash.
+CompElfHair(f, shade := 1.0)
+{
+    f := Max(0.0, Min(1.0, f))
+    r := 232 + (46 - 232) * f, g := 246 + (108 - 246) * f, b := 254 + (226 - 254) * f
+    return NLC(Round(r * shade), Round(g * shade), Round(b * (shade * 0.5 + 0.5)))
+}
+
+CompEyeOff(y0, &ox, &oy)
+{
+    global CompFollow, CompGui, CompScale
+    ox := 0, oy := 0
+    if (!CompFollow || !IsObject(CompGui))
+        return
+    pt := Buffer(8, 0)
+    DllCall("GetCursorPos", "Ptr", pt)
+    CompGui.GetPos(&gx, &gy)
+    sc := CompScale / 100
+    ox := Max(-1.0, Min(1.0, (NumGet(pt, 0, "Int") - (gx + 120 * sc)) / 260)) * 3.6
+    oy := Max(-1.0, Min(1.0, (NumGet(pt, 4, "Int") - (gy + (y0 + 120) * sc)) / 260)) * 3.0
+}
+
+CompDrawElf(t)
+{
+    global CompBubbleUntil
+    skin := NLC(255, 238, 232)
+    ink := NLC(58, 80, 150)
+    gold := NLC(230, 184, 78)
+    goldD := NLC(190, 140, 50)
+    brown := NLC(168, 84, 40)
+    white := NLC(248, 248, 255)
+    oy := 76
+    bob := 3 * Sin(t * 2.0)
+    y0 := oy + bob
+    sway := Sin(t * 1.3)
+    talking := (A_TickCount < CompBubbleUntil)
+
+    HWOval(120, oy + 300, 50 - bob, 7, NLC(0, 0, 0, 50))
+
+    ; very long, wavy hair behind (pale on top, deep blue at the ends), with a few loose locks
+    HWOval(120, y0 + 104, 66, 66, CompElfHair(0.1, 0.84))
+    for side in [-1, 1] {
+        for s in [3, 1, 0] {
+            topx := 120 + side * (40 + s * 9), topy := y0 + 90
+            tipx := 120 + side * (58 + s * 17) + sway * (9 + s * 5) * side, tipy := y0 + 214 + s * 13
+            Loop 24 {
+                f := (A_Index - 1) / 23
+                wave := 5 * Sin(f * 8 + t * 1.2 + s * 1.3 + (side > 0 ? 0 : 2)) * f
+                px := topx + (tipx - topx) * f + sway * 7 * f * f + wave
+                py := topy + (tipy - topy) * f
+                rr := (14 - 8 * f) * (1 - s * 0.08)
+                HWOval(px, py, rr * 0.88, rr * 1.4, CompElfHair(0.1 + f * 0.95 - s * 0.04, 0.92))
+            }
+        }
+    }
+
+    ; legs: white boots with gold and brown trim, blue sandals
+    for lx in [108, 132] {
+        NLLineW(lx, y0 + 248, lx, y0 + 292 - bob, white, 11)
+        NLRR(lx - 6, y0 + 252, 12, 4, 1, gold)
+        NLRR(lx - 6, y0 + 270, 12, 3, 1, brown)
+        HWOval(lx, oy + 296, 11, 6, NLC(112, 132, 234))
+    }
+    ; skirt: white with a long hem of brown and gold, a centre panel and a brown side sash
+    HWPoly([96, y0 + 172, 144, y0 + 172, 170, y0 + 266, 70, y0 + 266], NLC(238, 240, 253))
+    HWPoly([110, y0 + 176, 130, y0 + 176, 138, y0 + 266, 102, y0 + 266], NLC(214, 218, 244))
+    NLRR(70, y0 + 258, 100, 8, 3, brown)
+    NLRR(70, y0 + 253, 100, 2.5, 1, gold)
+    HWPoly([146, y0 + 168, 160, y0 + 172, 176, y0 + 268, 158, y0 + 268], brown)
+    NLLineW(151, y0 + 172, 166, y0 + 266, gold, 1.6)
+    Loop 4
+        NLDisc(160 + A_Index * 3.4, y0 + 200 + A_Index * 17, 2.1, NLC(255, 246, 220))
+    ; strapless bodice, shoulders bare, big gold collar and gem
+    NLRR(86, y0 + 150, 20, 14, 7, skin)
+    NLRR(134, y0 + 150, 20, 14, 7, skin)
+    HWPoly([98, y0 + 160, 142, y0 + 160, 140, y0 + 186, 100, y0 + 186], white)
+    HWPoly([94, y0 + 154, 146, y0 + 154, 138, y0 + 164, 102, y0 + 164], gold)
+    NLRR(100, y0 + 184, 40, 8, 3, brown)
+    ; diagonal brown strap with a white diamond pattern
+    NLLineW(100, y0 + 160, 140, y0 + 186, brown, 6)
+    Loop 4
+        NLDisc(104 + A_Index * 8.5, y0 + 163 + A_Index * 5.2, 1.6, NLC(255, 246, 220))
+    HWPoly([120, y0 + 156, 131, y0 + 170, 120, y0 + 186, 109, y0 + 170], goldD)
+    HWPoly([120, y0 + 158, 129, y0 + 170, 120, y0 + 184, 111, y0 + 170], gold)
+    HWPoly([120, y0 + 161, 126, y0 + 170, 120, y0 + 180, 114, y0 + 170], NLC(48, 138, 242))
+    HWPoly([120, y0 + 164, 123.5, y0 + 170, 120, y0 + 175, 116.5, y0 + 170], NLC(170, 220, 255))
+    ; arms with gold bands
+    NLLineW(94, y0 + 162, 82, y0 + 214 + 3 * Sin(t * 2.0 + 1), skin, 9)
+    NLRR(86, y0 + 172, 9, 5, 2, gold)
+    NLDisc(82, y0 + 218 + 3 * Sin(t * 2.0 + 1), 5.5, skin)
+    wv := Sin(t * 2.6)
+    NLLineW(146, y0 + 162, 164 + 5 * wv, y0 + 196 + 4 * Sin(t * 2.6 + 1.2), skin, 9)
+    NLRR(143, y0 + 172, 9, 5, 2, gold)
+    NLDisc(166 + 6 * wv, y0 + 194 + 4 * Sin(t * 2.6 + 1.2), 5.5, skin)
+    NLRR(112, y0 + 146, 16, 12, 4, skin)
+
+    ; face
+    HWOval(120, y0 + 114, 50, 46, skin)
+    HWOval(83, y0 + 139, 8, 4.4, NLC(255, 165, 188, 90))
+    HWOval(157, y0 + 139, 8, 4.4, NLC(255, 165, 188, 90))
+    CompEyeOff(y0, &ox, &oyy)
+    cyc := Mod(t, 11.0)
+    happy := (cyc > 8.6 && cyc < 11.0)
+    blink := (Mod(t, 4.6) > 4.42)
+    for e in [[98, 1], [142, -1]] {
+        ex := e[1]
+        if (happy) {
+            NLLineW(ex - 10, y0 + 127, ex, y0 + 119, ink, 2.8)
+            NLLineW(ex, y0 + 119, ex + 10, y0 + 127, ink, 2.8)
+            continue
+        }
+        if (blink) {
+            HWOval(ex, y0 + 121, 13, 16, skin)
+            NLLineW(ex - 10, y0 + 123, ex, y0 + 127, ink, 2.6)
+            NLLineW(ex, y0 + 127, ex + 10, y0 + 123, ink, 2.6)
+            continue
+        }
+        HWOval(ex, y0 + 122, 11.5, 13.5, NLC(255, 255, 255))
+        HWOval(ex + ox, y0 + 123 + oyy, 8.6, 11.2, NLC(86, 160, 236))
+        HWOval(ex + ox, y0 + 124 + oyy, 5, 7, NLC(30, 56, 150))
+        NLDisc(ex + ox + 3, y0 + 118 + oyy, 3.3, NLC(255, 255, 255))
+        NLDisc(ex + ox - 3, y0 + 128 + oyy, 1.7, NLC(255, 255, 255, 210))
+        ; heavy upper lid and lashes for the calm, slightly sharp look
+        NLLineW(ex - 12 * e[2], y0 + 112, ex + 11 * e[2], y0 + 109, ink, 3.2)
+        NLLineW(ex - 12 * e[2], y0 + 112, ex - 15.5 * e[2], y0 + 115, ink, 2.2)
+        NLLineW(ex + 4 * e[2], y0 + 109.6, ex + 9 * e[2], y0 + 106.6, ink, 1.8)
+    }
+    if (talking) {
+        HWOval(120, y0 + 143, 3.4, 2.0 + 2.0 * Abs(Sin(t * 12)), NLC(196, 90, 110))
+    } else {
+        NLLineW(114, y0 + 142.5, 120, y0 + 145, NLC(196, 110, 130), 1.5)
+        NLLineW(120, y0 + 145, 126, y0 + 142.5, NLC(196, 110, 130), 1.5)
+    }
+
+    ; messy hair on top: tufts, spiky bangs, long face-framing locks, an ahoge
+    for tf in [[86, 58, -12, -7], [104, 52, -5, -10], [136, 52, 5, -10], [154, 58, 12, -7]] {
+        HWPoly([tf[1] - 10, y0 + tf[2] + 14, tf[1] + tf[3], y0 + tf[2] + tf[4], tf[1] + 10, y0 + tf[2] + 14], CompElfHair(0.05 + (tf[1] > 120 ? 0.04 : 0)))
+    }
+    HWOval(66, y0 + 128, 9, 30, CompElfHair(0.28))
+    HWOval(174, y0 + 128, 9, 30, CompElfHair(0.28))
+    HWPoly([62, y0 + 120, 64, y0 + 70, 88, y0 + 52, 120, y0 + 46, 152, y0 + 52, 176, y0 + 70, 178, y0 + 120, 168, y0 + 96, 160, y0 + 134, 150, y0 + 98
+        , 140, y0 + 126, 130, y0 + 96, 120, y0 + 124, 110, y0 + 96, 100, y0 + 126, 90, y0 + 98, 80, y0 + 134, 72, y0 + 96], CompElfHair(0.05))
+    Loop 6 {
+        k := A_Index
+        NLLineW(120, y0 + 49, 62 + k * 19, y0 + 104 + (k = 1 || k = 6 ? 22 : 0), NLC(140, 190, 244, 120), 1.5)
+    }
+    ; long locks in front of the shoulders
+    for side in [-1, 1] {
+        Loop 13 {
+            f := (A_Index - 1) / 12
+            px := 120 + side * (58 + 3 * f) + sway * 5 * f * side + 3 * Sin(f * 7 + t * 1.2) * f
+            py := y0 + 126 + 124 * f
+            HWOval(px, py, 6.2 - 3.2 * f, 9 - 3 * f, CompElfHair(0.15 + f * 0.85))
+        }
+    }
+    NLLineW(120, y0 + 50, 114, y0 + 36, CompElfHair(0.3), 3)
+    NLLineW(114, y0 + 36, 121, y0 + 25, CompElfHair(0.3), 3)
+    NLLineW(121, y0 + 25, 133, y0 + 27, CompElfHair(0.3), 3)
+
+    ; floating ice sparkles
+    Loop 4 {
+        k := A_Index
+        sx := 120 + 94 * Cos(t * 0.7 + k * 1.6), sy := y0 + 110 + 70 * Sin(t * 0.7 + k * 1.6)
+        s := 3.2 + 2.2 * Sin(t * 4.6 + k)
+        NLLineW(sx - s, sy, sx + s, sy, NLC(190, 230, 255, 210), 1.5)
+        NLLineW(sx, sy - s, sx, sy + s, NLC(190, 230, 255, 210), 1.5)
+    }
+}
+
+CompDrawImg(t)
+{
+    global NLG, CompCache, CompImgW, CompImgH, CompScale
+    if (!CompCache)
+        return
+    sc := CompScale / 100
+    bob := 4 * Sin(t * 1.6)
+    w := Round(300 * sc), h := Round(300 * sc * CompImgH / CompImgW)
+    ; draw in device pixels (1:1): undo the world scale for this one copy
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", NLG)
+    ; a fractional position with a smoothing filter, so the float moves in sub-pixel steps instead of jumping a whole pixel at a time
+    DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", NLG, "Int", 6)
+    DllCall("gdiplus\GdipDrawImageRect", "Ptr", NLG, "Ptr", CompCache, "Float", 0.0, "Float", (80 + bob) * sc, "Float", w, "Float", h)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", NLG, "Float", sc, "Float", sc, "Int", 0)
+}
+
+CompDraw(t)
+{
+    global SPSkin, CompUseImg
+    if (CompUseImg)
+        CompDrawImg(t)
+    else if (CompWho() = "blair")
+        CompDrawBlair(t)
+    else
+        CompDrawElf(t)
+    CompDrawBubble()
+}
+
+CompDrawBubble()
+{
+    global NLFontSm, NLAlphaPage, AccentColor, CompBubbleText, CompBubbleStart, CompBubbleUntil, CompW
+    if (CompBubbleText != "" && A_TickCount < CompBubbleUntil + 300) {
+        a := Min(1.0, (A_TickCount - CompBubbleStart) / 180)
+        rem := CompBubbleUntil - A_TickCount
+        if (rem < 300)
+            a := Max(0.0, rem / 300)
+        NLAlphaPage := a
+        lines := Min(3, Max(1, Ceil(StrLen(CompBubbleText) / 26)))
+        bh := 18 + lines * 15
+        bx := CompW / 2 - 106, bw := 212, by := 62 - bh
+        NLRR(bx + 1, by + 3, bw, bh, 12, NLC(0, 0, 0, 50))
+        NLRR(bx, by, bw, bh, 12, NLC(255, 250, 255, 244))
+        NLRRLine(bx, by, bw, bh, 12, NLAccent(220))
+        HWPoly([CompW / 2 - 8, by + bh - 1, CompW / 2 + 10, by + bh - 1, CompW / 2, by + bh + 9], NLC(255, 250, 255, 244))
+        NLText(CompBubbleText, bx + 12, by + 8, NLC(58, 38, 72), NLFontSm, bw - 24, bh - 12, 1, 0, true)
+        NLAlphaPage := 1.0
+    }
+}
+
+SPPageCompanion()
+{
+    global CompOn, CompScale, CompHairSel, CompHat, CompFollow, CompBubbleOn, CompReactOn, SPSkin
+    SPSection("Waifus")
+    SPToggleRow("t_comp", "Show the waifu", CompOn, CompToggle, true)
+    SPSliderRow("s_compsize", "Size (%)", 60, 200, CompScale, CompSetScale)
+    SPDropRow("p_compchar", "Character", CompCharSel)
+    SPDropRow("p_compstyle", "Style", CompStyleSel)
+    SPToggleRow("t_compfollow", "Eyes follow the mouse", CompFollow, CompToggleFollow, true)
+    SPToggleRow("t_compbubble", "Speech bubbles", CompBubbleOn, CompToggleBubble, true)
+    SPToggleRow("t_compreact", "Comment on my macros", CompReactOn, CompToggleReact, true)
+    SPButtonRow("b_compsay", "Make " CompName() " say something", "Talk", CompSayRandom)
+    SPButtonRow("b_compget", CompHaveArt() ? "2D artwork (already downloaded)" : "Get the 2D artwork", "Download", CompGetArt)
+    SPButtonRow("b_compfolder", "Open the waifus folder", "Open", CompOpenFolder)
+    SPButtonRow("b_comppos", "Put " CompName() " back in the corner", "Reset", CompResetPos)
+    SPParaCard(CompName() " lives in a small window on your screen. Drag " (SPSkin = "hw" ? "her" : "her") " anywhere while this menu is open; when you play, she stays click-through. While a macro is running, " CompName() " now and then cheers you on.", 76)
+}
