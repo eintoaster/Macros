@@ -13263,10 +13263,23 @@ ReloadAction(*)
     try CompHide()
     ; a card in the middle of the screen says what is happening, then the script restarts
     ExitCardText := "Reloading M0MENT4M"
-    SetTimer(Reload, -2200)                           ; (safety)
+    SetTimer(M0MReload, -2200)                        ; (safety)
     try ExitCardShow()
     SetTimer(ReloadAnimTick, 15)
     ReloadAnimTick(true)
+}
+
+; Started by the loader (straight from memory, no file): a reload asks the loader to start the newest version again.
+M0MReload(*)
+{
+    global M0MLoaderPath, M0MLoaderDir
+    if (IsSet(M0MLoaderPath) && M0MLoaderPath != "" && FileExist(M0MLoaderPath)) {
+        try {
+            Run('"' A_AhkPath '" "' M0MLoaderPath '" /launch', M0MLoaderDir)
+            ExitApp
+        }
+    }
+    Reload()
 }
 
 ReloadAnimTick(first := false)
@@ -13278,7 +13291,7 @@ ReloadAnimTick(first := false)
     try ExitCardRender(tc)
     if (tc >= 1) {
         SetTimer(ReloadAnimTick, 0)
-        Reload()
+        M0MReload()
     }
 }
 
