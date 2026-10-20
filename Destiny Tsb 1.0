@@ -16,9 +16,16 @@ CoordMode("Menu", "Screen")
 ; --- Game Process Target ---
 Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
 Global TargetProcess := "RobloxPlayerBeta.exe"
-Global ConfigDir := (IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir) "\Destiny\configs"   ; (everything in a Destiny folder, next to the script or the loader)
-if (!IsSet(M0MLoaderDir) && DirExist(A_ScriptDir "\configs") && !DirExist(ConfigDir))   ; (configs from before are copied into it)
-    try DirCopy(A_ScriptDir "\configs", ConfigDir)
+Global ConfigBase := IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir
+Global ConfigDir := ConfigBase "\Destiny TSB\configs"   ; (everything in a Destiny TSB folder, next to the script or the loader)
+if (!DirExist(ConfigDir)) {                                                    ; (configs from before are copied into it)
+    if (DirExist(ConfigBase "\Destiny\configs")) {
+        try DirCopy(ConfigBase "\Destiny\configs", ConfigDir)
+    } else if (!IsSet(M0MLoaderDir) && DirExist(A_ScriptDir "\configs")) {
+        try DirCopy(A_ScriptDir "\configs", ConfigDir)
+    }
+    try DirCreate(ConfigDir)
+}
 Global ConfigExt := ".json"
 
 ; --- Theme Colors (weave palette) ---
