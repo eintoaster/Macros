@@ -16,7 +16,7 @@ CoordMode("Menu", "Screen")
 ; --- Game Process Target ---
 Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
 Global TargetProcess := "RobloxPlayerBeta.exe"
-Global ConfigBase := IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir
+Global ConfigBase := RTrim(IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir, "\")   ; (no double backslash when it sits on a drive like D:\)
 Global ConfigDir := ConfigBase "\Destiny TSB\configs"   ; (everything in a Destiny TSB folder, next to the script or the loader)
 if (!DirExist(ConfigDir)) {                                                    ; (configs from before are copied into it)
     if (DirExist(ConfigBase "\Destiny\configs")) {
@@ -24,6 +24,10 @@ if (!DirExist(ConfigDir)) {                                                    ;
     } else if (!IsSet(M0MLoaderDir) && DirExist(A_ScriptDir "\configs")) {
         try DirCopy(A_ScriptDir "\configs", ConfigDir)
     }
+    try DirCreate(ConfigDir)
+}
+if (!DirExist(ConfigDir)) {                                                    ; (Windows does not allow a folder there: the configs go to AppData instead)
+    ConfigDir := A_AppData "\Destiny TSB\configs"
     try DirCreate(ConfigDir)
 }
 Global ConfigExt := ".json"
@@ -1898,8 +1902,13 @@ RegisterRawMouseInput() {
 
 EnsureConfigDir() {
     global ConfigDir
-    if !DirExist(ConfigDir)
-        DirCreate(ConfigDir)
+    if DirExist(ConfigDir)
+        return
+    try DirCreate(ConfigDir)
+    catch {
+        ConfigDir := A_AppData "\Destiny TSB\configs"          ; (not allowed there: AppData instead)
+        try DirCreate(ConfigDir)
+    }
 }
 
 SaveProfileInternal(configName) {
