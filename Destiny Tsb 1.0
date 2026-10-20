@@ -16,7 +16,9 @@ CoordMode("Menu", "Screen")
 ; --- Game Process Target ---
 Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
 Global TargetProcess := "RobloxPlayerBeta.exe"
-Global ConfigDir := A_ScriptDir "\configs"
+Global ConfigDir := (IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir) "\Destiny\configs"   ; (everything in a Destiny folder, next to the script or the loader)
+if (!IsSet(M0MLoaderDir) && DirExist(A_ScriptDir "\configs") && !DirExist(ConfigDir))   ; (configs from before are copied into it)
+    try DirCopy(A_ScriptDir "\configs", ConfigDir)
 Global ConfigExt := ".json"
 
 ; --- Theme Colors (weave palette) ---
@@ -1527,10 +1529,22 @@ CancelBind(*) {
 ;  SYSTEM HOTKEYS & PANIC LOCK
 
 
+; started by the loader there is no script file to reload: the loader starts the newest version again
+TsbReload(*) {
+    global M0MLoaderPath, M0MLoaderDir
+    if (IsSet(M0MLoaderPath) && M0MLoaderPath != "" && FileExist(M0MLoaderPath)) {
+        try {
+            Run('"' A_AhkPath '" "' M0MLoaderPath '" /launch', M0MLoaderDir)
+            ExitApp
+        }
+    }
+    Reload()
+}
+
 RegisterSystemHotkeys() {
     global curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey
     if (curReloadKey != "")
-        try Hotkey("*" curReloadKey, (*) => Reload(), "On")
+        try Hotkey("*" curReloadKey, TsbReload, "On")
     if (curMinimizeKey != "")
         try Hotkey("*" curMinimizeKey, (*) => ToggleMainGui(), "On")
     if (curMacroLockKey != "")
