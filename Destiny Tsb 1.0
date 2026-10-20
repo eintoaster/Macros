@@ -1,0 +1,2372 @@
+#Requires AutoHotkey v2.0
+#SingleInstance Force
+ProcessSetPriority("High")
+DllCall("Winmm.dll\timeBeginPeriod", "UInt", 1)
+SetKeyDelay(-1, -1)
+SetWinDelay(-1)
+SetControlDelay(-1)
+SendMode("Input")
+CoordMode("Mouse", "Screen")
+CoordMode("Menu", "Screen")
+
+
+;  Destiny // TSB  (AutoHotkey v2)
+
+
+; --- Game Process Target ---
+Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
+Global TargetProcess := "RobloxPlayerBeta.exe"
+Global ConfigDir := A_ScriptDir "\configs"
+Global ConfigExt := ".json"
+
+; --- Theme Colors (weave palette) ---
+Global C_Accent      := "D76014"   ; Orange accent (ImGuiCol_Scheme)
+Global C_Text        := "FFFFFF"
+Global C_TextDim     := "646464"
+Global C_TextHover   := "BFBFBF"
+Global C_WindowBg    := "101010"   ; Content / nav list background
+Global C_ChildBg     := "141414"   ; Cards and headers
+Global C_Header      := "1A1A1A"   ; Card title strips, footer
+Global C_Border      := "1F1F1F"
+Global C_Line        := "282828"
+Global C_Frame       := "101010"   ; Checkbox / input background
+Global C_FrameHover  := "181818"
+Global C_Button      := "1A1A1A"
+Global C_ButtonHover := "242424"
+Global C_Key         := "010101"   ; Transparent key color for the window gaps
+Global UI_Font       := "Segoe UI"
+Global UI_Icons      := "Segoe MDL2 Assets"
+
+; Aliases still used by the HUD / lock code
+Global DestinyAccent := C_Accent
+Global AccentColor   := C_Accent
+
+; Hover tracking
+Global HoverItems := Map()
+Global HoverHwnd  := 0
+
+; --- Navigation State ---
+Global CurrentTab := 1
+Global CurrentSubTab := 1
+
+; --- HUD State ---
+Global ShowSidebarIndicators := true
+Global ShowStatusNotifs      := true
+Global HudOpacity            := 220
+Global HudPosition           := "Top-Left"
+Global BlinkTimers           := Map()
+Global HudDots               := []
+
+; --- Macro Checkbox States ---
+Global IsExtender1Checked    := false
+Global IsExtender2Checked    := false
+Global IsExtender3Checked    := false
+Global IsExtender4Checked    := false
+Global IsBD1Checked          := false
+Global IsBD2Checked          := false
+Global IsBD3Checked          := false
+Global IsJumpBugChecked      := false
+Global IsLagSwitchChecked    := false
+
+Global SavedExt1Checked      := false
+Global SavedExt2Checked      := false
+Global SavedExt3Checked      := false
+Global SavedExt4Checked      := false
+Global SavedBD1Checked       := false
+Global SavedBD2Checked       := false
+Global SavedBD3Checked       := false
+Global SavedJumpBugChecked   := false
+Global SavedLagChecked       := false
+
+; --- Macro Runtime Running States ---
+Global isExtender1Running    := false
+Global isExtender2Running    := false
+Global isExtender3Running    := false
+Global isExtender4Running    := false
+Global isJumpBugRunning      := false
+Global isLagRunning          := false
+
+; --- Lagswitch Configurations & Timings ---
+Global FreezeDuration        := 250    ; ms lagswitch
+Global IsLagPrecision        := true
+Global IsLagBurst            := false
+Global LagBurstCount         := 3
+Global IsLagHold             := false
+Global IsLagVignette         := true
+Global VignetteColor         := "E01B5D"
+Global VignetteThickness     := 8
+
+; --- Sensitivity Settings (Instant Lethal & Camera Tech) ---
+Global RobloxSensitivity     := 0.36
+Global BaseSensitivity       := 0.8
+
+; --- Hotkeys ---
+Global Extender1Key          := ""
+Global Extender2Key          := ""
+Global Extender3Key          := ""
+Global Extender4Key          := ""
+Global JumpBugKey            := ""
+Global LagKey                := ""
+
+; System Hotkeys
+Global ReloadKey             := "Insert"
+Global MinimizeKey           := "F8"
+Global MacroLockKey          := "F5"
+Global ExitKey               := "Delete"
+
+; Current tracking keys
+Global curExtender1Key       := Extender1Key
+Global curExtender2Key       := Extender2Key
+Global curExtender3Key       := Extender3Key
+Global curExtender4Key       := Extender4Key
+Global curJumpBugKey         := JumpBugKey
+Global curLagKey             := LagKey
+
+Global curReloadKey          := ReloadKey
+Global curMinimizeKey        := MinimizeKey
+Global curMacroLockKey       := MacroLockKey
+Global curExitKey            := ExitKey
+
+; Panic lock state
+Global IsMacrosLocked        := false
+
+; Raw Input tracking
+Global RawMouseDeltaX        := 0
+Global RawInputRegistered    := false
+
+; Vignette GUIs
+Global VignetteGuis := []
+
+
+;  GUI CONSTRUCTION - "WEAVE" STYLE (sidebar nav + card layout)
+
+
+GuiWidth  := 760
+GuiHeight := 500
+NavW      := 176
+MainX     := 185
+MainW     := GuiWidth - MainX
+
+MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow -Theme", "Destiny // TSB")
+MainGui.BackColor := C_Key
+MainGui.MarginX := 0
+MainGui.MarginY := 0
+
+; Controls collection per tab (6 tabs) and sub-tabs for Tab 1
+Global PageControls   := [[], [], [], [], [], []]
+Global SubTabControls := [[], [], []]
+Global BuildList      := []
+Global RoundQueue     := []
+
+; Tab definitions (icon glyphs from Segoe MDL2 Assets)
+Global Tabs := [
+    {icon: Chr(0xE945), name: "Macros",   subs: ["Extenders", "Backdash", "Movement"]},
+    {icon: Chr(0xEA86), name: "Misc",     subs: []},
+    {icon: Chr(0xE765), name: "Keybinds", subs: []},
+    {icon: Chr(0xE890), name: "Visuals",  subs: []},
+    {icon: Chr(0xE713), name: "Settings", subs: []},
+    {icon: Chr(0xE946), name: "Info",     subs: []}
+]
+
+
+; SIDEBAR
+; Tab list background (drawn first so everything else sits on top)
+NavListBg := MainGui.Add("Text", "x0 y42 w" NavW " h" (GuiHeight - 84) " Background" C_WindowBg)
+
+; Brand
+NavBrand := MainGui.Add("Text", "x0 y0 w" NavW " h40 Background" C_ChildBg)
+QueueRound(NavBrand, 4, "top")
+MainGui.Add("Text", "x0 y40 w" NavW " h2 Background" C_Accent)
+NavLogo := MainGui.Add("Text", "x0 y9 w" NavW " h22 Center +0x200 Background" C_ChildBg " c" C_Accent, "DESTINY")
+NavLogo.SetFont("s12 Bold Italic", "Segoe UI Black")
+
+; Tabs
+Global TabRows := []
+for idx, t in Tabs {
+    row  := MainGui.Add("Text", "x0 y0 w" NavW " h38 Background" C_WindowBg)
+    row.OnEvent("Click", SwitchTab.Bind(idx))
+    icon := MainGui.Add("Text", "x15 y0 w20 h38 +0x200 Background" C_WindowBg " c" C_TextDim, t.icon)
+    icon.SetFont("s10", UI_Icons)
+    name := MainGui.Add("Text", "x40 y0 w100 h38 +0x200 Background" C_WindowBg " c" C_TextDim, t.name)
+    name.SetFont("s10", UI_Font)
+    chev := ""
+    if (t.subs.Length) {
+        chev := MainGui.Add("Text", "x" (NavW - 30) " y0 w16 h38 +0x200 Background" C_WindowBg " c" C_Text, Chr(0xE76C))
+        chev.SetFont("s7", UI_Icons)
+    }
+    sep := MainGui.Add("Text", "x40 y0 w" (NavW - 40) " h1 Background" C_Border)
+    subs := []
+    for sIdx, sName in t.subs {
+        s := MainGui.Add("Text", "x40 y0 w" (NavW - 50) " h18 +0x200 Background" C_WindowBg " c" C_TextDim, sName)
+        s.SetFont("s9", UI_Font)
+        s.OnEvent("Click", SwitchSubTab.Bind(sIdx))
+        AddHover(s, HoverSub.Bind(idx, sIdx, true), HoverSub.Bind(idx, sIdx, false))
+        subs.Push(s)
+    }
+    TabRows.Push({row: row, icon: icon, name: name, chev: chev, sep: sep, subs: subs})
+    AddHover(row, HoverTab.Bind(idx, true), HoverTab.Bind(idx, false))
+}
+
+; Profile footer
+NavFoot := MainGui.Add("Text", "x0 y" (GuiHeight - 42) " w" NavW " h42 Background" C_Header)
+QueueRound(NavFoot, 4, "bottom")
+MainGui.Add("Text", "x0 y" (GuiHeight - 42) " w" NavW " h1 Background" C_Line)
+_userName := A_UserName
+NavAvatar := MainGui.Add("Text", "x15 y" (GuiHeight - 33) " w24 h24 Center +0x200 Background" C_Accent " c" C_Text, StrUpper(SubStr(_userName, 1, 1)))
+NavAvatar.SetFont("s9 Bold", UI_Font)
+QueueRound(NavAvatar, 12, "ellipse")
+NavUser := MainGui.Add("Text", "x47 y" (GuiHeight - 42) " w90 h42 +0x200 Background" C_Header " c" C_Text, _userName)
+NavUser.SetFont("s9 Bold", UI_Font)
+NavVer := MainGui.Add("Text", "x" (NavW - 55) " y" (GuiHeight - 42) " w40 h42 Right +0x200 Background" C_Header " c" C_TextDim, "TSB")
+NavVer.SetFont("s9 Bold", UI_Font)
+
+; ------------------------------------------------------------------------------
+; MAIN PANEL (header + content background)
+; ------------------------------------------------------------------------------
+MainContentBg := MainGui.Add("Text", "x" MainX " y42 w" MainW " h" (GuiHeight - 42) " Background" C_WindowBg)
+QueueRound(MainContentBg, 4, "bottom")
+
+HeaderBg := MainGui.Add("Text", "x" MainX " y0 w" MainW " h40 Background" C_ChildBg)
+QueueRound(HeaderBg, 4, "top")
+MainGui.Add("Text", "x" MainX " y40 w" MainW " h2 Background" C_Accent)
+
+HdrIcon := MainGui.Add("Text", "x" (MainX + 15) " y0 w20 h40 +0x200 Background" C_ChildBg " c" C_Text, "")
+HdrIcon.SetFont("s10", UI_Icons)
+HdrName := MainGui.Add("Text", "x" (MainX + 40) " y0 w100 h40 +0x200 Background" C_ChildBg " c" C_Text, "")
+HdrName.SetFont("s10 Bold", UI_Font)
+HdrArrow := MainGui.Add("Text", "x0 y0 w12 h40 +0x200 Background" C_ChildBg " c" C_Text, Chr(0xE76C))
+HdrArrow.SetFont("s7", UI_Icons)
+HdrSub := MainGui.Add("Text", "x0 y0 w120 h40 +0x200 Background" C_ChildBg " c" C_Accent, "")
+HdrSub.SetFont("s10 Bold", UI_Font)
+
+; Window controls
+BtnMin := MainGui.Add("Text", "x" (GuiWidth - 64) " y8 w24 h24 Center +0x200 Background" C_ChildBg " c" C_TextDim, Chr(0xE921))
+BtnMin.SetFont("s8", UI_Icons)
+BtnMin.OnEvent("Click", (*) => MinimizeApp())
+AddHover(BtnMin, (*) => SetColor(BtnMin, C_Text), (*) => SetColor(BtnMin, C_TextDim))
+BtnClose := MainGui.Add("Text", "x" (GuiWidth - 36) " y8 w24 h24 Center +0x200 Background" C_ChildBg " c" C_TextDim, Chr(0xE8BB))
+BtnClose.SetFont("s8", UI_Icons)
+BtnClose.OnEvent("Click", (*) => ExitApp())
+AddHover(BtnClose, (*) => SetColor(BtnClose, C_Accent), (*) => SetColor(BtnClose, C_TextDim))
+
+; Content grid
+CX := MainX + 15, CY := 57, CW := MainW - 30, CH := GuiHeight - 72
+COL1W := (CW - 10) // 2
+COL2X := CX + COL1W + 10
+COL2W := CW - COL1W - 10
+
+
+;  TAB 1: MACROS
+
+
+; --- Sub-tab 1: Extenders ---
+BuildList := SubTabControls[1]
+p := Card(CX, CY, COL1W, CH, "Extender Tech")
+ChkExt1 := Checkbox(p.x, p.y,       "Instant Lethal", ToggleExt1Box)
+ChkExt2 := Checkbox(p.x, p.y + 32,  "Instant Twisted", ToggleExt2Box)
+ChkExt3 := Checkbox(p.x, p.y + 64,  "Solitude Dash (WIP)", ToggleExt3Box)
+ChkExt4 := Checkbox(p.x, p.y + 96,  "Dripz Tech", ToggleExt4Box)
+p := Card(COL2X, CY, COL2W, CH, "Details")
+Label(p.x, p.y,       p.w, "Instant Lethal", C_Text, "s9 Bold")
+Label(p.x, p.y + 18,  p.w, "instant lethal extender", C_TextDim, "s8", 30)
+Label(p.x, p.y + 64,  p.w, "Instant Twisted", C_Text, "s9 Bold")
+Label(p.x, p.y + 82,  p.w, "instant twisted extender.", C_TextDim, "s8", 30)
+Label(p.x, p.y + 128, p.w, "Solitude Dash", C_Text, "s9 Bold")
+Label(p.x, p.y + 146, p.w, "the solitude dash, still in work.", C_TextDim, "s8", 30)
+Label(p.x, p.y + 192, p.w, "Dripz Tech", C_Text, "s9 Bold")
+Label(p.x, p.y + 210, p.w, "the usual dripz dash, right timing is needed", C_TextDim, "s8", 30)
+
+; --- Sub-tab 2: Backdash ---
+BuildList := SubTabControls[2]
+p := Card(CX, CY, COL1W, CH, "Backdash Tech")
+ChkBD1 := Checkbox(p.x, p.y,      "Backdash 1", ToggleBD1Box)
+ChkBD2 := Checkbox(p.x, p.y + 32, "Side Backdash", ToggleBD2Box)
+ChkBD3 := Checkbox(p.x, p.y + 64, "Instant Backdash", ToggleBD3Box)
+p := Card(COL2X, CY, COL2W, CH, "Details")
+Label(p.x, p.y, p.w, "not done yet....", C_TextDim, "s8", 60)
+
+; --- Sub-tab 3: Movement ---
+BuildList := SubTabControls[3]
+p := Card(CX, CY, COL1W, CH, "Movement Tech")
+ChkJumpBug := Checkbox(p.x, p.y, "Jump Bug", ToggleJumpBugBox)
+p := Card(COL2X, CY, COL2W, CH, "Details")
+Label(p.x, p.y,      p.w, "Jump Bug", C_Text, "s9 Bold")
+Label(p.x, p.y + 18, p.w, "you fly around trashcans/fences .", C_TextDim, "s8", 30)
+
+
+;  TAB 2: MISC
+
+BuildList := PageControls[2]
+p := Card(CX, CY, COL1W, CH, "Lagswitch")
+ChkLag := Checkbox(p.x, p.y, "Enable Lagswitch", ToggleLagBox)
+Label(p.x, p.y + 34, p.w, "Freeze duration (ms)", C_TextDim, "s8")
+EditLagDur := EditBox(p.x, p.y + 54, 110, FreezeDuration)
+Button(p.x + 120, p.y + 54, p.w - 120, 27, "Apply", ApplyLagSettings)
+Button(p.x, p.y + 95, p.w, 32, "Test Freeze", TestFreeze)
+LagStatusText := Label(p.x, CY + CH - 34, p.w, "Status: Ready", C_Accent, "s9 Bold")
+
+p := Card(COL2X, CY, COL2W, CH, "Modes")
+ChkLagPrec := Checkbox(p.x, p.y,      "High-precision timing", ToggleLagPrecisionBox, IsLagPrecision)
+ChkLagBrst := Checkbox(p.x, p.y + 32, "Burst mode", ToggleLagBurstBox, IsLagBurst)
+LagBurstSlider := FlatSlider(p.x, p.y + 64, p.w, "Burst count", 1, 20, LagBurstCount, "{}", UpdateLagBurstCount)
+ChkLagHld := Checkbox(p.x, p.y + 110, "Hold key to freeze", ToggleLagHoldBox, IsLagHold)
+
+
+;  TAB 3: KEYBINDS
+
+BuildList := PageControls[3]
+p := Card(CX, CY, COL1W, CH, "Macro Keybinds")
+BtnK_Ext1    := HotkeyRow(p.x, p.y,       p.w, "Instant Lethal",  FormatKeyName(Extender1Key), StartBindExt1)
+BtnK_Ext2    := HotkeyRow(p.x, p.y + 41,  p.w, "Instant Twisted", FormatKeyName(Extender2Key), StartBindExt2)
+BtnK_Ext3    := HotkeyRow(p.x, p.y + 82,  p.w, "Solitude Dash",   FormatKeyName(Extender3Key), StartBindExt3)
+BtnK_Ext4    := HotkeyRow(p.x, p.y + 123, p.w, "Dripz Tech",      FormatKeyName(Extender4Key), StartBindExt4)
+BtnK_JumpBug := HotkeyRow(p.x, p.y + 164, p.w, "Jump Bug",        FormatKeyName(JumpBugKey),   StartBindJumpBug)
+BtnK_Lag     := HotkeyRow(p.x, p.y + 205, p.w, "Lagswitch",       FormatKeyName(LagKey),       StartBindLag)
+
+p := Card(COL2X, CY, COL2W, CH, "System Keybinds")
+BtnK_Lock := HotkeyRow(p.x, p.y,       p.w, "Panic lock",     FormatKeyName(MacroLockKey), StartBindLock)
+BtnK_Min  := HotkeyRow(p.x, p.y + 41,  p.w, "Menu toggle",    FormatKeyName(MinimizeKey),  StartBindMin)
+BtnK_Rel  := HotkeyRow(p.x, p.y + 82,  p.w, "Reload script",  FormatKeyName(ReloadKey),    StartBindRel)
+BtnK_Exit := HotkeyRow(p.x, p.y + 123, p.w, "Emergency exit", FormatKeyName(ExitKey),      StartBindExit)
+Label(p.x, p.y + 175, p.w, "Click a key box, then press a key or mouse button (Mouse 4/5, middle and right click work). Press Escape to clear.", C_TextDim, "s8", 60)
+
+
+;  TAB 4: VISUALS
+
+BuildList := PageControls[4]
+p := Card(CX, CY, COL1W, CH, "Overlay HUD")
+ChkHudShow   := Checkbox(p.x, p.y,      "Show macro overlay HUD", ToggleSidebarIndicators, ShowSidebarIndicators)
+ChkNotifShow := Checkbox(p.x, p.y + 32, "Show status popups", ToggleStatusNotifs, ShowStatusNotifs)
+Label(p.x, p.y + 66, p.w, "HUD position", C_TextDim, "s8")
+HudPosDDL := FlatDropdown(p.x, p.y + 86, p.w, ["Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right"], UpdateHudPosition)
+HudPosDDL.Text := HudPosition
+HudOpSlider := FlatSlider(p.x, p.y + 127, p.w, "HUD opacity", 10, 100, Round(HudOpacity / 2.55), "{}%", SetHudOpacity)
+
+p := Card(COL2X, CY, COL2W, CH, "Lagswitch Vignette")
+ChkLagVig := Checkbox(p.x, p.y, "Red border while frozen", ToggleLagVignetteBox, IsLagVignette)
+VigSlider := FlatSlider(p.x, p.y + 32, p.w, "Border thickness", 2, 30, VignetteThickness, "{} px", SetVignetteThickness)
+
+
+;  TAB 5: SETTINGS
+
+BuildList := PageControls[5]
+p := Card(CX, CY, COL1W, CH, "Configs")
+Label(p.x, p.y, p.w, "Config name", C_TextDim, "s8")
+EditProfileName := EditBox(p.x, p.y + 20, p.w, "Default")
+_half := (p.w - 10) // 2
+Button(p.x, p.y + 59, _half, 32, "Save", SaveCustomProfile)
+Button(p.x + _half + 10, p.y + 59, p.w - _half - 10, 32, "Load", LoadCustomProfile)
+Label(p.x, p.y + 105, p.w, "Saved configs", C_TextDim, "s8")
+ProfileDDL := FlatDropdown(p.x, p.y + 125, p.w, [], "")
+RefreshProfileList()
+Button(p.x, p.y + 166, _half, 32, "Delete", DeleteCustomProfile)
+Button(p.x + _half + 10, p.y + 166, p.w - _half - 10, 32, "Reset Defaults", ResetDefaults)
+
+p := Card(COL2X, CY, COL2W, CH, "Roblox Sensitivity")
+Label(p.x, p.y, p.w, "Set this to your in-game camera sensitivity. Macro camera flicks scale to it.", C_TextDim, "s8", 30)
+Label(p.x, p.y + 44, p.w, "Roblox sens", C_TextDim, "s8")
+EditSens := EditBox(p.x, p.y + 64, 110, String(RobloxSensitivity))
+Button(p.x + 120, p.y + 64, p.w - 120, 27, "Apply", ApplySensitivity)
+Label(p.x, p.y + 105, p.w, "Presets", C_TextDim, "s8")
+_pw := (p.w - 4 * 6) // 5
+for i, v in [0.25, 0.36, 0.50, 0.80, 1.00]
+    Button(p.x + (i - 1) * (_pw + 6), p.y + 125, _pw, 27, Format("{:.2f}", v), SetSensPreset.Bind(v))
+SensStatusText := Label(p.x, p.y + 166, p.w, "Active sens: " RobloxSensitivity, C_Accent, "s9 Bold")
+
+
+;  TAB 6: INFO
+
+BuildList := PageControls[6]
+p := Card(CX, CY, CW, CH, "About")
+Label(p.x, p.y, p.w, "Destiny // TSB Edition ", C_Accent, "s11 Bold", 22)
+Label(p.x, p.y + 32, p.w, "Macro for Roblox: The Strongest Battlegrounds.", C_TextDim, "s9", 40)
+Label(p.x, p.y + 90, p.w, "Default shortcuts", C_Text, "s9 Bold")
+Label(p.x, p.y + 112, p.w, "F5        Panic lock (disables all macros)`nF8        Show / hide this menu`nInsert    Reload script`nDelete    Exit", C_TextDim, "s9", 80, "Consolas")
+
+BuildList := []
+
+
+;  OVERLAY HUD
+
+
+IndicatorHud := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
+IndicatorHud.BackColor := C_WindowBg
+HudLabels := ["LETHAL", "TWISTED", "SOLITUDE", "DRIPZ", "LAGSW", "LOCK"]
+Loop 6 {
+    _d := IndicatorHud.Add("Text", "x4 y" (4 + (A_Index-1)*28) " w72 h22 Center +0x200", HudLabels[A_Index])
+    _d.SetFont("s8 Bold", UI_Font)
+    _d.Opt("Background" C_ChildBg " c" C_TextDim)
+    HudDots.Push(_d)
+}
+_hp := GetHudShowStr()
+IndicatorHud.Show("x" _hp.x " y" _hp.y " w80 h" (6*28+8) " NoActivate")
+WinSetTransparent(HudOpacity, IndicatorHud)
+if (!ShowSidebarIndicators)
+    IndicatorHud.Hide()
+
+SetTimer(KeepHudOnTop, 1000)
+
+; Window dragging (clicks on any non-interactive area)
+OnMessage(0x0201, WM_LBUTTONDOWN)
+WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
+    if (hwnd == MainGui.Hwnd)
+        PostMessage(0xA1, 2, 0, MainGui.Hwnd)
+}
+OnMessage(0x0200, WM_MOUSEMOVE)
+
+; Hide focus rectangles
+DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x127, "Ptr", 0x10001, "Ptr", 0)
+
+; Initialize
+SwitchTab(1)
+RegisterRawMouseInput()
+RegisterHotkeys()
+RegisterSystemHotkeys()
+
+MainGui.Show("w" GuiWidth " h" GuiHeight)
+WinSetTransColor(C_Key, MainGui)
+for item in RoundQueue
+    RoundCtrl(item.ctrl, item.r, item.mode)
+
+
+;  UI WIDGET HELPERS
+
+
+Track(ctrl) {
+    global BuildList
+    BuildList.Push(ctrl)
+    return ctrl
+}
+
+QueueRound(ctrl, r, mode := "all") {
+    global RoundQueue
+    RoundQueue.Push({ctrl: ctrl, r: r, mode: mode})
+}
+
+; Clips a control to a rounded shape. mode: all | top | bottom | ellipse
+RoundCtrl(ctrl, r, mode := "all") {
+    rc := Buffer(16, 0)
+    DllCall("GetClientRect", "Ptr", ctrl.Hwnd, "Ptr", rc)
+    w := NumGet(rc, 8, "Int"), h := NumGet(rc, 12, "Int")
+    r := Round(r * A_ScreenDPI / 96)
+    if (mode = "ellipse") {
+        rgn := DllCall("CreateEllipticRgn", "Int", 0, "Int", 0, "Int", w + 1, "Int", h + 1, "Ptr")
+    } else {
+        y1 := (mode = "bottom") ? -r * 2 : 0
+        y2 := (mode = "top") ? h + r * 2 : h + 1
+        rgn := DllCall("CreateRoundRectRgn", "Int", 0, "Int", y1, "Int", w + 1, "Int", y2, "Int", r * 2, "Int", r * 2, "Ptr")
+    }
+    DllCall("SetWindowRgn", "Ptr", ctrl.Hwnd, "Ptr", rgn, "Int", true)
+}
+
+SetColor(ctrl, hex) {
+    ctrl.Opt("c" hex)
+    ctrl.Redraw()
+}
+
+; Card with a header strip (ui::begin_child). Returns the content origin.
+Card(x, y, w, h, title) {
+    bg := Track(MainGui.Add("Text", "x" x " y" y " w" w " h" h " Background" C_ChildBg))
+    QueueRound(bg, 4)
+    hd := Track(MainGui.Add("Text", "x" x " y" y " w" w " h33 Background" C_Header))
+    QueueRound(hd, 4, "top")
+    Track(MainGui.Add("Text", "x" x " y" (y + 33) " w" w " h1 Background" C_Line))
+    t := Track(MainGui.Add("Text", "x" (x + 13) " y" y " w" (w - 26) " h33 +0x200 Background" C_Header " c" C_Text, title))
+    t.SetFont("s9 Bold", UI_Font)
+    return {x: x + 13, y: y + 49, w: w - 26}
+}
+
+Label(x, y, w, text, color := "", fontOpts := "s9", h := 18, fontName := "") {
+    color := color = "" ? C_Text : color
+    c := Track(MainGui.Add("Text", "x" x " y" y " w" w " h" h " Background" C_ChildBg " c" color, text))
+    c.SetFont(fontOpts, fontName = "" ? UI_Font : fontName)
+    return c
+}
+
+; 18px checkbox: accent fill + check glyph when on. Returns the box control.
+Checkbox(x, y, text, callback, checked := false) {
+    Track(MainGui.Add("Text", "x" x " y" y " w18 h18 Background" C_Border))
+    box := Track(MainGui.Add("Text", "x" (x + 1) " y" (y + 1) " w16 h16 Center +0x200 Background" C_Frame " c" C_Text))
+    box.SetFont("s7", UI_Icons)
+    box.OnEvent("Click", callback)
+    lbl := Track(MainGui.Add("Text", "x" (x + 26) " y" y " w200 h18 +0x200 Background" C_ChildBg " c" C_Text, text))
+    lbl.SetFont("s9", UI_Font)
+    lbl.OnEvent("Click", callback)
+    SetCheck(box, checked)
+    return box
+}
+
+SetCheck(box, state) {
+    box.Opt("Background" (state ? C_Accent : C_Frame))
+    box.Text := state ? Chr(0xE73E) : ""
+    box.Redraw()
+}
+
+Button(x, y, w, h, text, callback) {
+    b := Track(MainGui.Add("Text", "x" x " y" y " w" w " h" h " Center +0x200 Background" C_Button " c" C_Text, text))
+    b.SetFont("s9", UI_Font)
+    b.OnEvent("Click", callback)
+    AddHover(b, (*) => (b.Opt("Background" C_ButtonHover), b.Redraw()), (*) => (b.Opt("Background" C_Button), b.Redraw()))
+    return b
+}
+
+EditBox(x, y, w, text) {
+    Track(MainGui.Add("Text", "x" x " y" y " w" w " h27 Background" C_Border))
+    Track(MainGui.Add("Text", "x" (x + 1) " y" (y + 1) " w" (w - 2) " h25 Background" C_Frame))
+    e := Track(MainGui.Add("Edit", "x" (x + 7) " y" (y + 5) " w" (w - 14) " h18 -E0x200 -VScroll Background" C_Frame " c" C_Text, text))
+    e.SetFont("s9", UI_Font)
+    return e
+}
+
+; Label on the left, key box on the right (ImGui::Hotkey). Returns the key box.
+HotkeyRow(x, y, w, text, keyText, callback) {
+    lbl := Track(MainGui.Add("Text", "x" x " y" y " w" (w - 140) " h27 +0x200 Background" C_ChildBg " c" C_Text, text))
+    lbl.SetFont("s9", UI_Font)
+    Track(MainGui.Add("Text", "x" (x + w - 132) " y" y " w132 h27 Background" C_Border))
+    k := Track(MainGui.Add("Text", "x" (x + w - 131) " y" (y + 1) " w130 h25 Center +0x200 Background" C_Frame " c" C_Text, keyText))
+    k.SetFont("s9", UI_Font)
+    k.OnEvent("Click", callback)
+    AddHover(k, (*) => (k.Opt("Background" C_FrameHover), k.Redraw()), (*) => (k.Opt("Background" C_Frame), k.Redraw()))
+    return k
+}
+
+; Label + value on one line, thin track with accent fill underneath.
+class FlatSlider {
+    __New(x, y, w, text, min, max, val, fmt, onChange) {
+        this.min := min, this.max := max, this.w := w, this.fmt := fmt, this.onChange := onChange
+        lbl := Track(MainGui.Add("Text", "x" x " y" y " w" (w - 60) " h18 +0x200 Background" C_ChildBg " c" C_Text, text))
+        lbl.SetFont("s9", UI_Font)
+        this.valLbl := Track(MainGui.Add("Text", "x" (x + w - 60) " y" y " w60 h18 Right +0x200 Background" C_ChildBg " c" C_TextDim))
+        this.valLbl.SetFont("s9", UI_Font)
+        this.track := Track(MainGui.Add("Text", "x" x " y" (y + 24) " w" w " h8 Background" C_Frame))
+        this.fill := Track(MainGui.Add("Text", "x" x " y" (y + 24) " w1 h8 Background" C_Accent))
+        this.x := x, this.y := y + 24
+        drag := ObjBindMethod(this, "Drag")
+        this.track.OnEvent("Click", drag)
+        this.fill.OnEvent("Click", drag)
+        this.Value := val
+    }
+    Value {
+        get => this.val
+        set {
+            this.val := Max(this.min, Min(this.max, Round(value)))
+            fw := Max(1, Round((this.val - this.min) / (this.max - this.min) * this.w))
+            this.fill.Move(this.x, this.y, fw, 8)
+            this.fill.Redraw()
+            this.valLbl.Text := Format(this.fmt, this.val)
+        }
+    }
+    Drag(*) {
+        rc := Buffer(16, 0)
+        DllCall("GetWindowRect", "Ptr", this.track.Hwnd, "Ptr", rc)
+        left := NumGet(rc, 0, "Int"), right := NumGet(rc, 8, "Int")
+        last := ""
+        while GetKeyState("LButton", "P") {
+            MouseGetPos(&mx)
+            ratio := Max(0, Min(1, (mx - left) / (right - left)))
+            this.Value := this.min + ratio * (this.max - this.min)
+            if (this.val != last) {
+                last := this.val
+                if (this.onChange)
+                    this.onChange.Call(this.val)
+            }
+            Sleep(15)
+        }
+    }
+}
+
+; Box showing the selected item; click opens a popup menu.
+; Exposes .Text, .Delete() and .Add() like a DropDownList.
+class FlatDropdown {
+    __New(x, y, w, items, onChange) {
+        this.items := [], this.cur := "", this.onChange := onChange
+        Track(MainGui.Add("Text", "x" x " y" y " w" w " h27 Background" C_Border))
+        this.box := Track(MainGui.Add("Text", "x" (x + 1) " y" (y + 1) " w" (w - 2) " h25 +0x200 Background" C_Frame " c" C_Text))
+        this.box.SetFont("s9", UI_Font)
+        this.arrow := Track(MainGui.Add("Text", "x" (x + w - 24) " y" (y + 1) " w20 h25 Center +0x200 Background" C_Frame " c" C_TextDim, Chr(0xE70D)))
+        this.arrow.SetFont("s7", UI_Icons)
+        open := ObjBindMethod(this, "Open")
+        this.box.OnEvent("Click", open)
+        this.arrow.OnEvent("Click", open)
+        this.Add(items)
+    }
+    Text {
+        get => this.cur
+        set {
+            this.cur := value
+            this.box.Text := "   " value
+        }
+    }
+    Add(arr) {
+        for it in arr
+            this.items.Push(it)
+        if (this.cur = "" && this.items.Length)
+            this.Text := this.items[1]
+    }
+    Delete() {
+        this.items := []
+        this.Text := ""
+    }
+    Open(*) {
+        if (!this.items.Length)
+            return
+        m := Menu()
+        for it in this.items {
+            m.Add(it, ObjBindMethod(this, "Pick", it))
+            if (it = this.cur)
+                m.Check(it)
+        }
+        rc := Buffer(16, 0)
+        DllCall("GetWindowRect", "Ptr", this.box.Hwnd, "Ptr", rc)
+        m.Show(NumGet(rc, 0, "Int") - 1, NumGet(rc, 12, "Int") + 1)
+    }
+    Pick(it, *) {
+        this.Text := it
+        if (this.onChange)
+            this.onChange.Call()
+    }
+}
+
+
+;  HOVER TRACKING
+
+
+AddHover(ctrl, onFn, offFn) {
+    global HoverItems
+    HoverItems[ctrl.Hwnd] := {on: onFn, off: offFn}
+}
+
+WM_MOUSEMOVE(wParam, lParam, msg, hwnd) {
+    global HoverHwnd, HoverItems
+    if (hwnd = HoverHwnd)
+        return
+    if (HoverHwnd && HoverItems.Has(HoverHwnd))
+        HoverItems[HoverHwnd].off.Call()
+    HoverHwnd := HoverItems.Has(hwnd) ? hwnd : 0
+    if (HoverHwnd) {
+        HoverItems[HoverHwnd].on.Call()
+        SetTimer(HoverLeaveCheck, 50)
+    }
+}
+
+HoverLeaveCheck() {
+    global HoverHwnd, HoverItems
+    if (!HoverHwnd) {
+        SetTimer(HoverLeaveCheck, 0)
+        return
+    }
+    rc := Buffer(16, 0)
+    DllCall("GetWindowRect", "Ptr", HoverHwnd, "Ptr", rc)
+    MouseGetPos(&mx, &my)
+    inside := mx >= NumGet(rc, 0, "Int") && mx < NumGet(rc, 8, "Int") && my >= NumGet(rc, 4, "Int") && my < NumGet(rc, 12, "Int")
+    if (!inside || !DllCall("IsWindowVisible", "Ptr", HoverHwnd)) {
+        if HoverItems.Has(HoverHwnd)
+            HoverItems[HoverHwnd].off.Call()
+        HoverHwnd := 0
+        SetTimer(HoverLeaveCheck, 0)
+    }
+}
+
+HoverTab(idx, on, *) {
+    global CurrentTab, TabRows
+    if (idx = CurrentTab)
+        return
+    col := on ? C_TextHover : C_TextDim
+    SetColor(TabRows[idx].icon, col)
+    SetColor(TabRows[idx].name, col)
+}
+
+HoverSub(tabIdx, subIdx, on, *) {
+    global CurrentSubTab, TabRows
+    if (subIdx = CurrentSubTab)
+        return
+    SetColor(TabRows[tabIdx].subs[subIdx], on ? C_Text : C_TextDim)
+}
+
+
+;  TAB & NAVIGATION FUNCTIONS
+
+
+MeasureText(text, fontOpts, fontName) {
+    g := Gui()
+    g.SetFont(fontOpts, fontName)
+    c := g.Add("Text", , text)
+    c.GetPos(, , &w)
+    g.Destroy()
+    return w
+}
+
+; Stacks the sidebar rows; the selected tab expands to show its sub-tabs.
+LayoutNav() {
+    global TabRows, Tabs, CurrentTab, CurrentSubTab, NavW
+    y := 42
+    for idx, r in TabRows {
+        sel := (idx = CurrentTab)
+        r.row.Move(0, y)
+        r.icon.Move(15, y)
+        r.name.Move(40, y)
+        r.icon.Opt("c" (sel ? C_Text : C_TextDim))
+        r.name.Opt("c" (sel ? C_Text : C_TextDim))
+        r.name.SetFont(sel ? "Bold" : "Norm")
+        if (r.chev) {
+            r.chev.Move(NavW - 30, y)
+            r.chev.Text := sel ? Chr(0xE70D) : Chr(0xE76C)
+        }
+        y += 38
+        for sIdx, s in r.subs {
+            if (sel) {
+                s.Move(40, y + 2 + (sIdx - 1) * 26)
+                s.Opt("c" (sIdx = CurrentSubTab ? C_Accent : C_TextDim))
+                s.Visible := true
+                s.Redraw()
+            } else {
+                s.Visible := false
+            }
+        }
+        if (sel && r.subs.Length)
+            y += r.subs.Length * 26 + 6
+        r.sep.Move(40, y)
+        y += 1
+        for c in [r.row, r.icon, r.name, r.sep]
+            c.Redraw()
+        if (r.chev)
+            r.chev.Redraw()
+    }
+}
+
+UpdateHeader() {
+    global Tabs, CurrentTab, CurrentSubTab, HdrIcon, HdrName, HdrArrow, HdrSub, MainX
+    t := Tabs[CurrentTab]
+    HdrIcon.Text := t.icon
+    HdrName.Text := t.name
+    nameW := MeasureText(t.name, "s10 Bold", UI_Font)
+    HdrName.Move(, , nameW + 4)
+    if (t.subs.Length) {
+        HdrName.Opt("c" C_TextDim)
+        HdrArrow.Move(MainX + 40 + nameW + 8, 0)
+        HdrSub.Move(MainX + 40 + nameW + 26, 0)
+        HdrSub.Text := t.subs[CurrentSubTab]
+        HdrArrow.Visible := true
+        HdrSub.Visible := true
+    } else {
+        HdrName.Opt("c" C_Text)
+        HdrArrow.Visible := false
+        HdrSub.Visible := false
+    }
+    HdrName.Redraw()
+}
+
+SwitchTab(tabIndex, *) {
+    global CurrentTab, PageControls, SubTabControls
+    CurrentTab := tabIndex
+    for i, ctrls in PageControls {
+        for c in ctrls
+            c.Visible := (i = tabIndex)
+    }
+    if (tabIndex = 1) {
+        SwitchSubTab(CurrentSubTab)
+        return
+    }
+    for ctrls in SubTabControls {
+        for c in ctrls
+            c.Visible := false
+    }
+    LayoutNav()
+    UpdateHeader()
+}
+
+SwitchSubTab(subIndex, *) {
+    global CurrentSubTab, SubTabControls
+    CurrentSubTab := subIndex
+    for i, ctrls in SubTabControls {
+        for c in ctrls
+            c.Visible := (i = subIndex)
+    }
+    LayoutNav()
+    UpdateHeader()
+}
+
+
+;  SLIDER CALLBACKS
+
+
+SetVignetteThickness(val) {
+    global VignetteThickness
+    VignetteThickness := val
+    DestroyVignette()
+}
+
+SetHudOpacity(val) {
+    global HudOpacity, IndicatorHud
+    HudOpacity := Round(val * 2.55)
+    WinSetTransparent(HudOpacity, IndicatorHud)
+}
+
+UpdateLagBurstCount(val) {
+    global LagBurstCount
+    LagBurstCount := val
+}
+
+ApplySensitivity(*) {
+    global RobloxSensitivity, EditSens, SensStatusText
+    val := Float(EditSens.Value)
+    if (val <= 0 || val > 10.0) {
+        ShowStatus("INVALID SENS (0.01 - 10)", "0x2A0808", 400)
+        return
+    }
+    RobloxSensitivity := val
+    EditSens.Value := String(val)
+    SensStatusText.Text := "Active sens: " RobloxSensitivity
+    ShowStatus("SENS APPLIED: " RobloxSensitivity, "0x082A13", 400)
+}
+
+SetSensPreset(presetVal, *) {
+    global RobloxSensitivity, EditSens, SensStatusText
+    RobloxSensitivity := presetVal
+    EditSens.Value := String(presetVal)
+    SensStatusText.Text := "Active sens: " RobloxSensitivity
+    ShowStatus("SENS APPLIED: " presetVal, "0x082A13", 400)
+}
+
+
+;  CHECKBOX TOGGLERS
+
+
+ToggleExt1Box(*) {
+    global IsExtender1Checked, ChkExt1
+    IsExtender1Checked := !IsExtender1Checked
+    SetCheck(ChkExt1, IsExtender1Checked)
+    UpdateSidebarIndicators()
+}
+
+ToggleExt2Box(*) {
+    global IsExtender2Checked, ChkExt2
+    IsExtender2Checked := !IsExtender2Checked
+    SetCheck(ChkExt2, IsExtender2Checked)
+    UpdateSidebarIndicators()
+}
+
+ToggleExt3Box(*) {
+    global IsExtender3Checked, ChkExt3
+    IsExtender3Checked := !IsExtender3Checked
+    SetCheck(ChkExt3, IsExtender3Checked)
+    UpdateSidebarIndicators()
+}
+
+ToggleExt4Box(*) {
+    global IsExtender4Checked, ChkExt4
+    IsExtender4Checked := !IsExtender4Checked
+    SetCheck(ChkExt4, IsExtender4Checked)
+    UpdateSidebarIndicators()
+}
+
+ToggleBD1Box(*) {
+    global IsBD1Checked, ChkBD1
+    IsBD1Checked := !IsBD1Checked
+    SetCheck(ChkBD1, IsBD1Checked)
+    UpdateSidebarIndicators()
+}
+
+ToggleBD2Box(*) {
+    global IsBD2Checked, ChkBD2
+    IsBD2Checked := !IsBD2Checked
+    SetCheck(ChkBD2, IsBD2Checked)
+    UpdateSidebarIndicators()
+}
+
+ToggleBD3Box(*) {
+    global IsBD3Checked, ChkBD3
+    IsBD3Checked := !IsBD3Checked
+    SetCheck(ChkBD3, IsBD3Checked)
+    UpdateSidebarIndicators()
+}
+
+ToggleJumpBugBox(*) {
+    global IsJumpBugChecked, ChkJumpBug
+    IsJumpBugChecked := !IsJumpBugChecked
+    SetCheck(ChkJumpBug, IsJumpBugChecked)
+    UpdateSidebarIndicators()
+}
+
+ToggleLagBox(*) {
+    global IsLagSwitchChecked, ChkLag
+    IsLagSwitchChecked := !IsLagSwitchChecked
+    SetCheck(ChkLag, IsLagSwitchChecked)
+    UpdateSidebarIndicators()
+}
+
+ToggleLagPrecisionBox(*) {
+    global IsLagPrecision, ChkLagPrec
+    IsLagPrecision := !IsLagPrecision
+    SetCheck(ChkLagPrec, IsLagPrecision)
+}
+
+ToggleLagBurstBox(*) {
+    global IsLagBurst, ChkLagBrst
+    IsLagBurst := !IsLagBurst
+    SetCheck(ChkLagBrst, IsLagBurst)
+}
+
+ToggleLagHoldBox(*) {
+    global IsLagHold, ChkLagHld
+    IsLagHold := !IsLagHold
+    SetCheck(ChkLagHld, IsLagHold)
+}
+
+ToggleLagVignetteBox(*) {
+    global IsLagVignette, ChkLagVig
+    IsLagVignette := !IsLagVignette
+    SetCheck(ChkLagVig, IsLagVignette)
+    if (!IsLagVignette)
+        DestroyVignette()
+}
+
+
+;  MACRO EXECUTION LOGIC (ROBLOX PROCESS ISOLATED)
+
+
+Ext1Cond(*)    => IsExtender1Checked && WinActive(GAME_EXE)
+Ext2Cond(*)    => IsExtender2Checked && WinActive(GAME_EXE)
+Ext3Cond(*)    => IsExtender3Checked && WinActive(GAME_EXE)
+Ext4Cond(*)    => IsExtender4Checked && WinActive(GAME_EXE)
+JumpBugCond(*) => IsJumpBugChecked && WinActive(GAME_EXE)
+LagCond(*)     => IsLagSwitchChecked && WinActive(GAME_EXE)
+
+; --- Macro 1: Instant Lethal ---
+ExecuteExtender1(*) {
+    global isExtender1Running, RobloxSensitivity, BaseSensitivity
+    if (!IsExtender1Checked || isExtender1Running || !WinActive(GAME_EXE))
+        return
+    isExtender1Running := true
+    ShowStatus("INSTANT LETHAL", "0x082A13", 100)
+    BlinkIndicator(1)
+    
+    ; Sensitivity scaling (OREO Instant Lethal)
+    a2 := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
+    b2 := (BaseSensitivity > 0) ? BaseSensitivity : 0.8
+    f1_2 := 0
+    g1_2 := 1360
+    
+    ; Straight dash
+    Send("{Space down}")
+    Sleep(10)
+    Send("{q down}")
+    Sleep(10)
+    Send("{q up}")
+    Send("{Space up}")
+    Sleep(15)
+    
+    j1 := Round(f1_2 * (b2 / a2))
+    if (j1 != 0)
+        DllCall("mouse_event", "UInt", 0x0001, "Int", j1, "Int", 0, "UInt", 0, "UPtr", 0)
+        
+    Sleep(150)
+    
+    l1 := Round(g1_2 * (b2 / a2))
+    DllCall("mouse_event", "UInt", 0x0001, "Int", l1, "Int", 0, "UInt", 0, "UPtr", 0)
+    
+    isExtender1Running := false
+}
+
+; --- Macro 2: Instant Twisted ---
+ExecuteExtender2(*) {
+    global isExtender2Running, RobloxSensitivity
+    if (!IsExtender2Checked || isExtender2Running || !WinActive(GAME_EXE))
+        return
+    isExtender2Running := true
+    ShowStatus("INSTANT TWISTED", "0x082A13", 200)
+    BlinkIndicator(2)
+    
+    ; Universal sensitivity scaling (Twisted Macro)
+    V2 := 900
+    V3 := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
+    V4 := 90
+    V5 := 110
+    V6 := 10
+    
+    pxR :=  Round((V4 * V2) / (360 * V3))
+    pxL := -Round((V5 * V2) / (360 * V3))
+    
+    DllCall("mouse_event", "UInt", 0x0001, "Int", pxR, "Int", 0, "UInt", 0, "UPtr", 0)
+    Sleep(V6)
+    Send("{q down}")
+    Sleep(80)
+    Send("{q up}")
+    Sleep(V6)
+    DllCall("mouse_event", "UInt", 0x0001, "Int", pxL, "Int", 0, "UInt", 0, "UPtr", 0)
+    
+    isExtender2Running := false
+}
+
+; --- Macro 3: Solitude Dash (Fast Left Arc + Right Torso Lock) ---
+ExecuteExtender3(*) {
+    global isExtender3Running, RobloxSensitivity
+    if (!IsExtender3Checked || isExtender3Running || !WinActive(GAME_EXE))
+        return
+    isExtender3Running := true
+    
+    sens := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
+    baseSens := 0.36
+    
+    ; Faster timings & tighter right landing
+    postQDelay    := 95     ; Faster forward launch before curve (ms)
+    flick         := 1200   ; Total left sweep magnitude (px)
+    flickSteps    := 14     ; Smooth sub-steps
+    flickStepDelay:= 7      ; Faster step delay (ms) -> ~98ms curve duration
+    correction    := 260    ; Stronger RIGHT snap to close the gap onto dummy torso (px)
+    corrDelay     := 4      ; Immediate snap delay (ms)
+    
+    ; === 1. Q tap ===
+    SendInput("{q down}")
+    DllCall("Sleep", "UInt", 5)
+    SendInput("{q up}")
+    
+    ; === 2. Forward flight ===
+    DllCall("Sleep", "UInt", postQDelay)
+    
+    ; === 3. Fast LEFT arc ===
+    scaledFlick := Round(flick * (baseSens / sens))
+    perStep     := Round(scaledFlick / flickSteps)
+    Loop flickSteps {
+        DllCall("mouse_event", "UInt", 0x01, "Int", -perStep, "Int", 0, "UInt", 0, "UPtr", 0)
+        DllCall("Sleep", "UInt", flickStepDelay)
+    }
+    
+    ; === 4. Strong RIGHT snap — locks tight onto torso ===
+    DllCall("Sleep", "UInt", corrDelay)
+    scaledCorr := Round(correction * (baseSens / sens))
+    DllCall("mouse_event", "UInt", 0x01, "Int", scaledCorr, "Int", 0, "UInt", 0, "UPtr", 0)
+    
+    SetTimer(() => ShowStatus("SOLITUDE DASH", "0x082A13", 300), -1)
+    SetTimer(() => BlinkIndicator(3), -1)
+    
+    isExtender3Running := false
+}
+
+; --- Macro 4: Dripz Tech (Dripz Perfect Dash) ---
+ExecuteExtender4(*) {
+    global isExtender4Running, RobloxSensitivity, BaseSensitivity
+    if (!IsExtender4Checked || isExtender4Running || !WinActive(GAME_EXE))
+        return
+    isExtender4Running := true
+    SetTimer(() => ShowStatus("DRIPZ TECH", "0x082A13", 250), -1)
+    SetTimer(() => BlinkIndicator(4), -1)
+    
+    a2 := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
+    b2 := (BaseSensitivity > 0) ? BaseSensitivity : 0.8
+    preQDelay := 291
+    postQDelay := 160
+    flick := 1260
+    flickSteps := 12
+    flickStepDelay := 6
+    correction := 120
+    correctionDelay := 4
+    
+    ; === 1. TSB UPPERCUT SEQUENCE ===
+    SendInput("{Space down}")
+    DllCall("Sleep", "UInt", 20)
+    SendInput("{LButton down}")
+    DllCall("Sleep", "UInt", 20)
+    SendInput("{Space up}")
+    DllCall("Sleep", "UInt", 50)
+    SendInput("{LButton up}")
+    
+    ; === 2. Wait before Q dash ===
+    DllCall("Sleep", "UInt", preQDelay)
+    
+    ; === 3. Tap Q — dash fires FORWARD ===
+    SendInput("{q down}")
+    DllCall("Sleep", "UInt", 5)
+    SendInput("{q up}")
+    
+    ; === 4. Fly short distance (dripz tight timing) ===
+    DllCall("Sleep", "UInt", postQDelay)
+    
+    ; === 5. Continuous Smooth Orbital Curve ===
+    scaledFlick := Round(flick * (b2 / a2))
+    perStep := Round(scaledFlick / flickSteps)
+    
+    Loop flickSteps {
+        DllCall("mouse_event", "UInt", 0x01, "Int", perStep, "Int", 0, "UInt", 0, "UPtr", 0)
+        DllCall("Sleep", "UInt", flickStepDelay)
+    }
+    
+    ; === 6. Micro Landing Alignment ===
+    if (correction != 0) {
+        DllCall("Sleep", "UInt", correctionDelay)
+        scaledCorr := Round(correction * (b2 / a2))
+        DllCall("mouse_event", "UInt", 0x01, "Int", scaledCorr, "Int", 0, "UInt", 0, "UPtr", 0)
+    }
+    
+    isExtender4Running := false
+}
+
+; --- Macro: Jump Bug ---
+ExecuteJumpBug(*) {
+    global isJumpBugRunning
+    if (!IsJumpBugChecked || isJumpBugRunning || !WinActive(GAME_EXE))
+        return
+    isJumpBugRunning := true
+    ShowStatus("JUMP BUG", "0x082A13", 150)
+    
+    SendInput("{d down}{Space down}{q down}")
+    Sleep(100)
+    SendInput("{d up}{Space up}{q up}")
+    
+    isJumpBugRunning := false
+}
+
+
+;  LAGSWITCH SYSTEM (NTDLL NT-SUSPEND)
+
+
+ApplyLagSettings(*) {
+    global FreezeDuration, EditLagDur, LagStatusText
+    val := Integer(EditLagDur.Value)
+    if (val < 1 || val > 10000)
+        val := 250
+    FreezeDuration := val
+    EditLagDur.Value := val
+    LagStatusText.Text := "Status: Applied (" FreezeDuration "ms)"
+}
+
+TestFreeze(*) {
+    global LagStatusText
+    LagStatusText.Text := "Status: Testing Freeze..."
+    ExecuteLagswitch()
+    LagStatusText.Text := "Status: Ready"
+}
+
+ExecuteLagswitch(*) {
+    global FreezeDuration, TargetProcess, LagKey, IsLagPrecision, IsLagBurst, LagBurstCount, IsLagHold, IsLagVignette, LagStatusText
+    
+    RobloxPID := ProcessExist(TargetProcess)
+    if (!RobloxPID) {
+        LagStatusText.Text := "Status: Roblox not running!"
+        return
+    }
+    
+    if (IsLagVignette)
+        ShowVignette()
+    
+    if (IsLagPrecision)
+        DllCall("winmm\timeBeginPeriod", "UInt", 1)
+        
+    hProcess := DllCall("OpenProcess", "UInt", 0x1F0FFF, "Int", 0, "UInt", RobloxPID)
+    if (hProcess) {
+        BlinkIndicator(4)
+        if (IsLagHold && LagKey != "") {
+            LagStatusText.Text := "Status: Freezing (Hold)..."
+            DllCall("ntdll\NtSuspendProcess", "Ptr", hProcess)
+            cleanKey := RegExReplace(LagKey, "^[~*$&<>]", "")
+            try KeyWait(cleanKey)
+            DllCall("ntdll\NtResumeProcess", "Ptr", hProcess)
+            LagStatusText.Text := "Status: Resumed"
+        } else if (IsLagBurst) {
+            LagStatusText.Text := "Status: Freeze Burst..."
+            baseBurst := Max(10, Round(FreezeDuration / LagBurstCount))
+            Loop LagBurstCount {
+                DllCall("ntdll\NtSuspendProcess", "Ptr", hProcess)
+                Sleep(baseBurst)
+                DllCall("ntdll\NtResumeProcess", "Ptr", hProcess)
+                if (A_Index < LagBurstCount)
+                    Sleep(15)
+            }
+        } else {
+            LagStatusText.Text := "Status: Frozen " FreezeDuration "ms"
+            DllCall("ntdll\NtSuspendProcess", "Ptr", hProcess)
+            Sleep(FreezeDuration)
+            DllCall("ntdll\NtResumeProcess", "Ptr", hProcess)
+        }
+        DllCall("CloseHandle", "Ptr", hProcess)
+    }
+    
+    if (IsLagPrecision)
+        DllCall("winmm\timeEndPeriod", "UInt", 1)
+        
+    if (IsLagVignette)
+        HideVignette()
+        
+    SetTimer(() => LagStatusText.Text := "Status: Ready", -2000)
+}
+
+ShowVignette() {
+    global VignetteGuis, VignetteColor, VignetteThickness
+    if (VignetteGuis.Length = 0) {
+        sw := A_ScreenWidth
+        sh := A_ScreenHeight
+        bw := VignetteThickness
+        
+        topG   := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
+        botG   := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
+        leftG  := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
+        rightG := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
+        
+        for g in [topG, botG, leftG, rightG]
+            g.BackColor := "0x" VignetteColor
+            
+        VignetteGuis := [
+            {gui: topG,   pos: "x0 y0 w" sw " h" bw},
+            {gui: botG,   pos: "x0 y" (sh - bw) " w" sw " h" bw},
+            {gui: leftG,  pos: "x0 y0 w" bw " h" sh},
+            {gui: rightG, pos: "x" (sw - bw) " y0 w" bw " h" sh}
+        ]
+        for item in VignetteGuis
+            WinSetTransparent(180, item.gui)
+    }
+    for item in VignetteGuis
+        item.gui.Show(item.pos " NoActivate")
+}
+
+HideVignette() {
+    global VignetteGuis
+    for item in VignetteGuis
+        item.gui.Hide()
+}
+
+DestroyVignette() {
+    global VignetteGuis
+    for item in VignetteGuis
+        item.gui.Destroy()
+    VignetteGuis := []
+}
+
+
+;  DYNAMIC HOTKEY BINDING ENGINE (KEYBOARD & MOUSE)
+
+
+RegisterHotkeys() {
+    global curExtender1Key, curExtender2Key, curExtender3Key, curExtender4Key, curJumpBugKey, curLagKey
+    
+    if (curExtender1Key != "") {
+        HotIf(Ext1Cond)
+        try Hotkey("*" curExtender1Key, ExecuteExtender1, "On")
+        HotIf()
+    }
+    if (curExtender2Key != "") {
+        HotIf(Ext2Cond)
+        try Hotkey("*" curExtender2Key, ExecuteExtender2, "On")
+        HotIf()
+    }
+    if (curExtender3Key != "") {
+        HotIf(Ext3Cond)
+        try Hotkey("*" curExtender3Key, ExecuteExtender3, "On")
+        HotIf()
+    }
+    if (curExtender4Key != "") {
+        HotIf(Ext4Cond)
+        try Hotkey("*" curExtender4Key, ExecuteExtender4, "On")
+        HotIf()
+    }
+    if (curJumpBugKey != "") {
+        HotIf(JumpBugCond)
+        try Hotkey("*" curJumpBugKey, ExecuteJumpBug, "On")
+        HotIf()
+    }
+    if (curLagKey != "") {
+        HotIf(LagCond)
+        try Hotkey("~*" curLagKey, ExecuteLagswitch, "On")
+        HotIf()
+    }
+}
+
+
+
+InputKeyOrMouse() {
+    ; Complete list of keys including mouse buttons
+    MouseList := ["XButton1", "XButton2", "MButton", "RButton", "LButton"]
+    KeyList   := ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z",
+                  "1","2","3","4","5","6","7","8","9","0","Space","Tab","Enter","Shift","Ctrl","Alt","CapsLock",
+                  "F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12",
+                  "Numpad0","Numpad1","Numpad2","Numpad3","Numpad4","Numpad5","Numpad6","Numpad7","Numpad8","Numpad9"]
+    
+    ; Wait until LButton is fully released from the initial click
+    while GetKeyState("LButton", "P")
+        Sleep(10)
+    
+    Loop {
+        Sleep(10)
+        if GetKeyState("Escape", "P") {
+            KeyWait("Escape")
+            return "Escape"
+        }
+        ; Check mouse buttons first
+        for m in MouseList {
+            if GetKeyState(m, "P") {
+                KeyWait(m)
+                return m
+            }
+        }
+        ; Check keyboard keys
+        for k in KeyList {
+            if GetKeyState(k, "P") {
+                KeyWait(k)
+                return k
+            }
+        }
+    }
+}
+
+FormatKeyName(key) {
+    if (key == "")
+        return "NONE"
+    if (key = "XButton1")
+        return "Mouse 4 (Side 1)"
+    if (key = "XButton2")
+        return "Mouse 5 (Side 2)"
+    if (key = "MButton")
+        return "Mid Mouse"
+    if (key = "LButton")
+        return "Left Mouse"
+    if (key = "RButton")
+        return "Right Mouse"
+    return StrUpper(key)
+}
+
+; --- Dedicated StartBind functions per hotkey (M0MENT4M pattern, no ByRef) ---
+
+StartBindExt1(*) {
+    global Extender1Key, curExtender1Key
+    KeyWait("LButton")
+    BtnK_Ext1.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterExt1Key(curExtender1Key)
+            if (Key != "Escape") {
+                Extender1Key   := Key
+                curExtender1Key := Key
+                BtnK_Ext1.Text := FormatKeyName(Extender1Key)
+            } else {
+                Extender1Key   := ""
+                curExtender1Key := ""
+                BtnK_Ext1.Text := "NONE"
+            }
+            RegisterHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindExt2(*) {
+    global Extender2Key, curExtender2Key
+    KeyWait("LButton")
+    BtnK_Ext2.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterExt2Key(curExtender2Key)
+            if (Key != "Escape") {
+                Extender2Key   := Key
+                curExtender2Key := Key
+                BtnK_Ext2.Text := FormatKeyName(Extender2Key)
+            } else {
+                Extender2Key   := ""
+                curExtender2Key := ""
+                BtnK_Ext2.Text := "NONE"
+            }
+            RegisterHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindExt3(*) {
+    global Extender3Key, curExtender3Key
+    KeyWait("LButton")
+    BtnK_Ext3.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterExt3Key(curExtender3Key)
+            if (Key != "Escape") {
+                Extender3Key   := Key
+                curExtender3Key := Key
+                BtnK_Ext3.Text := FormatKeyName(Extender3Key)
+            } else {
+                Extender3Key   := ""
+                curExtender3Key := ""
+                BtnK_Ext3.Text := "NONE"
+            }
+            RegisterHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindExt4(*) {
+    global Extender4Key, curExtender4Key
+    KeyWait("LButton")
+    BtnK_Ext4.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterExt4Key(curExtender4Key)
+            if (Key != "Escape") {
+                Extender4Key   := Key
+                curExtender4Key := Key
+                BtnK_Ext4.Text := FormatKeyName(Extender4Key)
+            } else {
+                Extender4Key   := ""
+                curExtender4Key := ""
+                BtnK_Ext4.Text := "NONE"
+            }
+            RegisterHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindJumpBug(*) {
+    global JumpBugKey, curJumpBugKey
+    KeyWait("LButton")
+    BtnK_JumpBug.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterJumpBugKey(curJumpBugKey)
+            if (Key != "Escape") {
+                JumpBugKey    := Key
+                curJumpBugKey := Key
+                BtnK_JumpBug.Text := FormatKeyName(JumpBugKey)
+            } else {
+                JumpBugKey    := ""
+                curJumpBugKey := ""
+                BtnK_JumpBug.Text := "NONE"
+            }
+            RegisterHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindLag(*) {
+    global LagKey, curLagKey
+    KeyWait("LButton")
+    BtnK_Lag.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterLagKey(curLagKey)
+            if (Key != "Escape") {
+                LagKey    := Key
+                curLagKey := Key
+                BtnK_Lag.Text := FormatKeyName(LagKey)
+            } else {
+                LagKey    := ""
+                curLagKey := ""
+                BtnK_Lag.Text := "NONE"
+            }
+            RegisterHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+; Per-key unregister helpers
+UnregisterExt1Key(key) {
+    if (key == "")
+        return
+    HotIf(Ext1Cond)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+UnregisterExt2Key(key) {
+    if (key == "")
+        return
+    HotIf(Ext2Cond)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+UnregisterExt3Key(key) {
+    if (key == "")
+        return
+    HotIf(Ext3Cond)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+UnregisterExt4Key(key) {
+    if (key == "")
+        return
+    HotIf(Ext4Cond)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+UnregisterJumpBugKey(key) {
+    if (key == "")
+        return
+    HotIf(JumpBugCond)
+    try Hotkey("*" key, "Off")
+    HotIf()
+}
+UnregisterLagKey(key) {
+    if (key == "")
+        return
+    HotIf(LagCond)
+    try Hotkey("~*" key, "Off")
+    HotIf()
+}
+
+CancelBind(*) {
+    return
+}
+
+
+;  SYSTEM HOTKEYS & PANIC LOCK
+
+
+RegisterSystemHotkeys() {
+    global curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey
+    if (curReloadKey != "")
+        try Hotkey("*" curReloadKey, (*) => Reload(), "On")
+    if (curMinimizeKey != "")
+        try Hotkey("*" curMinimizeKey, (*) => ToggleMainGui(), "On")
+    if (curMacroLockKey != "")
+        try Hotkey("*" curMacroLockKey, MacroLockToggle, "On")
+    if (curExitKey != "")
+        try Hotkey("*" curExitKey, (*) => ExitApp(), "On")
+}
+
+UnregisterSystemHotkeys() {
+    global curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey
+    for k in [curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey] {
+        if (k != "")
+            try Hotkey("*" k, "Off")
+    }
+}
+
+StartBindLock(*) {
+    global MacroLockKey, curMacroLockKey
+    KeyWait("LButton")
+    BtnK_Lock.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterSystemHotkeys()
+            if (Key != "Escape") {
+                MacroLockKey   := Key
+                curMacroLockKey := Key
+                BtnK_Lock.Text := FormatKeyName(MacroLockKey)
+            } else {
+                MacroLockKey   := ""
+                curMacroLockKey := ""
+                BtnK_Lock.Text := "NONE"
+            }
+            RegisterSystemHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindMin(*) {
+    global MinimizeKey, curMinimizeKey
+    KeyWait("LButton")
+    BtnK_Min.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterSystemHotkeys()
+            if (Key != "Escape") {
+                MinimizeKey   := Key
+                curMinimizeKey := Key
+                BtnK_Min.Text := FormatKeyName(MinimizeKey)
+            } else {
+                MinimizeKey   := ""
+                curMinimizeKey := ""
+                BtnK_Min.Text := "NONE"
+            }
+            RegisterSystemHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindRel(*) {
+    global ReloadKey, curReloadKey
+    KeyWait("LButton")
+    BtnK_Rel.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterSystemHotkeys()
+            if (Key != "Escape") {
+                ReloadKey   := Key
+                curReloadKey := Key
+                BtnK_Rel.Text := FormatKeyName(ReloadKey)
+            } else {
+                ReloadKey   := ""
+                curReloadKey := ""
+                BtnK_Rel.Text := "NONE"
+            }
+            RegisterSystemHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+StartBindExit(*) {
+    global ExitKey, curExitKey
+    KeyWait("LButton")
+    BtnK_Exit.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    Loop {
+        Key := InputKeyOrMouse()
+        if (Key != "") {
+            UnregisterSystemHotkeys()
+            if (Key != "Escape") {
+                ExitKey   := Key
+                curExitKey := Key
+                BtnK_Exit.Text := FormatKeyName(ExitKey)
+            } else {
+                ExitKey   := ""
+                curExitKey := ""
+                BtnK_Exit.Text := "NONE"
+            }
+            RegisterSystemHotkeys()
+            break
+        }
+    }
+    try Hotkey("~*Escape", CancelBind, "Off")
+}
+
+MacroLockToggle(*) {
+    global IsMacrosLocked, DestinyAccent
+    global IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsLagSwitchChecked
+    global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsJumpBugChecked
+    global SavedExt1Checked, SavedExt2Checked, SavedExt3Checked, SavedExt4Checked, SavedLagChecked
+    global SavedBD1Checked, SavedBD2Checked, SavedBD3Checked, SavedJumpBugChecked
+    global ChkExt1, ChkExt2, ChkExt3, ChkExt4, ChkLag, ChkBD1, ChkBD2, ChkBD3, ChkJumpBug, HudDots
+    
+    if (IsMacrosLocked) {
+        IsExtender1Checked := SavedExt1Checked
+        IsExtender2Checked := SavedExt2Checked
+        IsExtender3Checked := SavedExt3Checked
+        IsExtender4Checked := SavedExt4Checked
+        IsLagSwitchChecked := SavedLagChecked
+        IsBD1Checked       := SavedBD1Checked
+        IsBD2Checked       := SavedBD2Checked
+        IsBD3Checked       := SavedBD3Checked
+        IsJumpBugChecked   := SavedJumpBugChecked
+        
+        SetCheck(ChkExt1, IsExtender1Checked)
+        SetCheck(ChkExt2, IsExtender2Checked)
+        SetCheck(ChkExt3, IsExtender3Checked)
+        SetCheck(ChkExt4, IsExtender4Checked)
+        SetCheck(ChkLag, IsLagSwitchChecked)
+        SetCheck(ChkBD1, IsBD1Checked)
+        SetCheck(ChkBD2, IsBD2Checked)
+        SetCheck(ChkBD3, IsBD3Checked)
+        SetCheck(ChkJumpBug, IsJumpBugChecked)
+        
+        IsMacrosLocked := false
+        
+        HudDots[6].Opt("Background" C_ChildBg " c" C_TextDim)
+        HudDots[6].Redraw()
+        UpdateSidebarIndicators()
+        ShowStatus("MACROS RESTORED", "0x082A13", 380, true)
+    } else {
+        SavedExt1Checked := IsExtender1Checked
+        SavedExt2Checked := IsExtender2Checked
+        SavedExt3Checked := IsExtender3Checked
+        SavedExt4Checked := IsExtender4Checked
+        SavedLagChecked  := IsLagSwitchChecked
+        SavedBD1Checked  := IsBD1Checked
+        SavedBD2Checked  := IsBD2Checked
+        SavedBD3Checked  := IsBD3Checked
+        SavedJumpBugChecked := IsJumpBugChecked
+        
+        IsExtender1Checked := false
+        IsExtender2Checked := false
+        IsExtender3Checked := false
+        IsExtender4Checked := false
+        IsLagSwitchChecked := false
+        IsBD1Checked       := false
+        IsBD2Checked       := false
+        IsBD3Checked       := false
+        IsJumpBugChecked   := false
+        
+        SetCheck(ChkExt1, false)
+        SetCheck(ChkExt2, false)
+        SetCheck(ChkExt3, false)
+        SetCheck(ChkExt4, false)
+        SetCheck(ChkLag, false)
+        SetCheck(ChkBD1, false)
+        SetCheck(ChkBD2, false)
+        SetCheck(ChkBD3, false)
+        SetCheck(ChkJumpBug, false)
+        
+        IsMacrosLocked := true
+        
+        HudDots[6].Opt("Background" DestinyAccent " c0xFFFFFF")
+        HudDots[6].Redraw()
+        UpdateSidebarIndicators()
+        ShowStatus("ALL MACROS LOCKED", "0x2A0808", 380, true)
+    }
+}
+
+
+;  HUD OVERLAY & NOTIFICATIONS
+
+
+UpdateSidebarIndicators() {
+    global HudDots, ShowSidebarIndicators, AccentColor, BlinkTimers
+    global isExtender1Running, isExtender2Running, isExtender3Running, isExtender4Running, isLagRunning
+    if (!ShowSidebarIndicators)
+        return
+    states := [isExtender1Running, isExtender2Running, isExtender3Running, isExtender4Running, isLagRunning]
+    Loop 5 {
+        i := A_Index
+        dot := HudDots[i]
+        if (states[i]) {
+            dot.Opt("Background" AccentColor " cFFFFFF")
+        } else {
+            if BlinkTimers.Has(i) {
+                SetTimer(BlinkTimers[i], 0)
+                BlinkTimers.Delete(i)
+            }
+            dot.Opt("Background" C_ChildBg " c" C_TextDim)
+        }
+        dot.Redraw()
+    }
+}
+
+ToggleSidebarIndicators(*) {
+    global ShowSidebarIndicators, ChkHudShow, IndicatorHud, HudOpacity
+    ShowSidebarIndicators := !ShowSidebarIndicators
+    SetCheck(ChkHudShow, ShowSidebarIndicators)
+    if (ShowSidebarIndicators) {
+        pos := GetHudShowStr()
+        IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
+        WinSetTransparent(HudOpacity, IndicatorHud)
+        UpdateSidebarIndicators()
+    } else {
+        IndicatorHud.Hide()
+    }
+}
+
+ToggleStatusNotifs(*) {
+    global ShowStatusNotifs, ChkNotifShow
+    ShowStatusNotifs := !ShowStatusNotifs
+    SetCheck(ChkNotifShow, ShowStatusNotifs)
+}
+
+BlinkIndicator(dotIndex) {
+    global HudDots, ShowSidebarIndicators, AccentColor, BlinkTimers
+    if (!ShowSidebarIndicators || dotIndex < 1 || dotIndex > 5)
+        return
+    if BlinkTimers.Has(dotIndex)
+        SetTimer(BlinkTimers[dotIndex], 0)
+    dot := HudDots[dotIndex]
+    state := {count: 0}
+    bf := BlinkStep.Bind(dotIndex, state, dot)
+    BlinkTimers[dotIndex] := bf
+    SetTimer(bf, 80)
+}
+
+BlinkStep(dotIndex, state, dot) {
+    global AccentColor, BlinkTimers
+    state.count++
+    if (state.count > 5) {
+        if BlinkTimers.Has(dotIndex)
+            SetTimer(BlinkTimers[dotIndex], 0)
+        BlinkTimers.Delete(dotIndex)
+        dot.Opt("Background" C_ChildBg " c" C_TextDim)
+        dot.Redraw()
+        return
+    }
+    dot.Opt(Mod(state.count, 2) = 1 ? "BackgroundFFFFFF c000000" : "Background" AccentColor " cFFFFFF")
+    dot.Redraw()
+}
+
+GetHudShowStr() {
+    global HudPosition
+    hudW := 80
+    hudH := 6 * 28 + 8
+    sw := A_ScreenWidth
+    sh := A_ScreenHeight
+    switch HudPosition {
+        case "Top-Left":     return {x: 10, y: 80}
+        case "Top-Right":    return {x: sw - hudW - 10, y: 80}
+        case "Bottom-Left":  return {x: 10, y: sh - hudH - 20}
+        case "Bottom-Right": return {x: sw - hudW - 10, y: sh - hudH - 20}
+        default:             return {x: 10, y: 80}
+    }
+}
+
+KeepHudOnTop() {
+    global IndicatorHud, ShowSidebarIndicators
+    if (!ShowSidebarIndicators)
+        return
+    try {
+        WinSetAlwaysOnTop(1, "ahk_id " IndicatorHud.Hwnd)
+        if (!WinExist("ahk_id " IndicatorHud.Hwnd) || !DllCall("IsWindowVisible", "Ptr", IndicatorHud.Hwnd)) {
+            pos := GetHudShowStr()
+            IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
+        }
+    }
+}
+
+UpdateHudPosition(*) {
+    global HudPosition, HudPosDDL, IndicatorHud, ShowSidebarIndicators
+    HudPosition := HudPosDDL.Text
+    if (ShowSidebarIndicators) {
+        pos := GetHudShowStr()
+        IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
+    }
+}
+
+ShowStatus(text, colorHex, xPos, force := false) {
+    global AccentColor, ShowStatusNotifs
+    if (!ShowStatusNotifs && !force)
+        return
+    static activeGuis := Map()
+    if (activeGuis.Has(xPos) && activeGuis[xPos]) {
+        activeGuis[xPos].Destroy()
+    }
+    
+    statusGui := Gui("+AlwaysOnTop -Caption +ToolWindow")
+    statusGui.BackColor := colorHex
+    statusGui.SetFont("s9 Bold", "Consolas")
+    statusGui.Add("Text", "c0xFFFFFF w140 Center", text)
+    
+    screenHeight := A_ScreenHeight
+    statusGui.Show("x" xPos " y" (screenHeight - 80) " NoActivate")
+    activeGuis[xPos] := statusGui
+    SetTimer(() => (statusGui ? statusGui.Destroy() : ""), -1200)
+}
+
+
+;  RAW MOUSE INPUT REGISTRATION
+
+
+RegisterRawMouseInput() {
+    global RawInputRegistered, MainGui
+    if (RawInputRegistered)
+        return
+    ridSize := 8 + A_PtrSize
+    rid := Buffer(ridSize, 0)
+    NumPut("UShort", 0x01, rid, 0)
+    NumPut("UShort", 0x02, rid, 2)
+    NumPut("UInt", 0x00000100, rid, 4) ; RIDEV_INPUTSINK
+    NumPut("Ptr", MainGui.Hwnd, rid, 8)
+    if DllCall("RegisterRawInputDevices", "Ptr", rid, "UInt", 1, "UInt", ridSize)
+        RawInputRegistered := true
+}
+
+
+;  PROFILE & CONFIGURATION PERSISTENCE
+
+
+EnsureConfigDir() {
+    global ConfigDir
+    if !DirExist(ConfigDir)
+        DirCreate(ConfigDir)
+}
+
+SaveProfileInternal(configName) {
+    global ConfigDir, ConfigExt
+    global IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsLagSwitchChecked
+    global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsJumpBugChecked
+    global FreezeDuration, RobloxSensitivity
+    global Extender1Key, Extender2Key, Extender3Key, Extender4Key, JumpBugKey, LagKey
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    global ShowSidebarIndicators, ShowStatusNotifs, HudPosition, HudOpacity
+    
+    EnsureConfigDir()
+    cfg := {
+        macros: {
+            ext1: IsExtender1Checked,
+            ext2: IsExtender2Checked,
+            ext3: IsExtender3Checked,
+            ext4: IsExtender4Checked,
+            bd1: IsBD1Checked,
+            bd2: IsBD2Checked,
+            bd3: IsBD3Checked,
+            jump_bug: IsJumpBugChecked,
+            lagswitch: IsLagSwitchChecked
+        },
+        timings: {
+            freeze_dur: FreezeDuration,
+            roblox_sens: RobloxSensitivity
+        },
+        keybinds: {
+            ext1_key: Extender1Key,
+            ext2_key: Extender2Key,
+            ext3_key: Extender3Key,
+            ext4_key: Extender4Key,
+            jump_bug_key: JumpBugKey,
+            lag_key: LagKey
+        },
+        system: {
+            reload_key: ReloadKey,
+            minimize_key: MinimizeKey,
+            lock_key: MacroLockKey,
+            exit_key: ExitKey,
+            hud_show: ShowSidebarIndicators,
+            notif_show: ShowStatusNotifs,
+            hud_pos: HudPosition,
+            hud_opacity: HudOpacity
+        }
+    }
+    
+    filePath := ConfigDir "\" configName ConfigExt
+    try FileDelete(filePath)
+    f := FileOpen(filePath, "w")
+    if (f) {
+        f.Write(ObjToJson(cfg))
+        f.Close()
+        ShowStatus("CONFIG SAVED", "0x082A13", 500)
+    }
+}
+
+LoadProfileInternal(configName) {
+    global ConfigDir, ConfigExt
+    global IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsLagSwitchChecked
+    global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsJumpBugChecked
+    global FreezeDuration, RobloxSensitivity
+    global Extender1Key, Extender2Key, Extender3Key, Extender4Key, JumpBugKey, LagKey
+    global curExtender1Key, curExtender2Key, curExtender3Key, curExtender4Key, curJumpBugKey, curLagKey
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    global curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey
+    global BtnK_Ext1, BtnK_Ext2, BtnK_Ext3, BtnK_Ext4, BtnK_JumpBug, BtnK_Lag
+    global BtnK_Lock, BtnK_Min, BtnK_Rel, BtnK_Exit
+    global ChkExt1, ChkExt2, ChkExt3, ChkExt4, ChkLag, ChkBD1, ChkBD2, ChkBD3, ChkJumpBug
+    global EditLagDur, EditSens, SensStatusText
+    global ShowSidebarIndicators, ShowStatusNotifs, HudPosition, HudOpacity, ChkHudShow, ChkNotifShow, HudPosDDL
+    
+    filePath := ConfigDir "\" configName ConfigExt
+    if !FileExist(filePath) {
+        ShowStatus("CONFIG NOT FOUND", "0x2A0808", 500)
+        return
+    }
+    
+    try {
+        content := FileRead(filePath)
+        cfg := JsonToObj(content)
+    } catch {
+        ShowStatus("CONFIG LOAD ERROR", "0x2A0808", 500)
+        return
+    }
+    
+    UnregisterExt1Key(curExtender1Key)
+    UnregisterExt2Key(curExtender2Key)
+    UnregisterExt3Key(curExtender3Key)
+    UnregisterExt4Key(curExtender4Key)
+    UnregisterJumpBugKey(curJumpBugKey)
+    UnregisterLagKey(curLagKey)
+    UnregisterSystemHotkeys()
+    
+    IsExtender1Checked := cfg.macros.HasOwnProp("ext1") ? cfg.macros.ext1 : false
+    IsExtender2Checked := cfg.macros.HasOwnProp("ext2") ? cfg.macros.ext2 : false
+    IsExtender3Checked := cfg.macros.HasOwnProp("ext3") ? cfg.macros.ext3 : false
+    IsExtender4Checked := cfg.macros.HasOwnProp("ext4") ? cfg.macros.ext4 : false
+    IsBD1Checked       := cfg.macros.HasOwnProp("bd1") ? cfg.macros.bd1 : false
+    IsBD2Checked       := cfg.macros.HasOwnProp("bd2") ? cfg.macros.bd2 : false
+    IsBD3Checked       := cfg.macros.HasOwnProp("bd3") ? cfg.macros.bd3 : false
+    IsJumpBugChecked   := cfg.macros.HasOwnProp("jump_bug") ? cfg.macros.jump_bug : false
+    IsLagSwitchChecked := cfg.macros.HasOwnProp("lagswitch") ? cfg.macros.lagswitch : false
+    
+    SetCheck(ChkExt1, IsExtender1Checked)
+    SetCheck(ChkExt2, IsExtender2Checked)
+    SetCheck(ChkExt3, IsExtender3Checked)
+    SetCheck(ChkExt4, IsExtender4Checked)
+    SetCheck(ChkBD1, IsBD1Checked)
+    SetCheck(ChkBD2, IsBD2Checked)
+    SetCheck(ChkBD3, IsBD3Checked)
+    SetCheck(ChkJumpBug, IsJumpBugChecked)
+    SetCheck(ChkLag, IsLagSwitchChecked)
+    
+    FreezeDuration := cfg.timings.freeze_dur
+    EditLagDur.Value := FreezeDuration
+    
+    RobloxSensitivity := cfg.timings.HasOwnProp("roblox_sens") ? cfg.timings.roblox_sens : 0.36
+    EditSens.Value := String(RobloxSensitivity)
+    SensStatusText.Text := "Active sens: " RobloxSensitivity
+    
+    Extender1Key := cfg.keybinds.ext1_key
+    Extender2Key := cfg.keybinds.ext2_key
+    Extender3Key := cfg.keybinds.ext3_key
+    Extender4Key := cfg.keybinds.HasOwnProp("ext4_key") ? cfg.keybinds.ext4_key : ""
+    JumpBugKey   := cfg.keybinds.HasOwnProp("jump_bug_key") ? cfg.keybinds.jump_bug_key : ""
+    LagKey       := cfg.keybinds.lag_key
+    
+    curExtender1Key := Extender1Key
+    curExtender2Key := Extender2Key
+    curExtender3Key := Extender3Key
+    curExtender4Key := Extender4Key
+    curJumpBugKey   := JumpBugKey
+    curLagKey       := LagKey
+    
+    BtnK_Ext1.Text := FormatKeyName(Extender1Key)
+    BtnK_Ext2.Text := FormatKeyName(Extender2Key)
+    BtnK_Ext3.Text := FormatKeyName(Extender3Key)
+    BtnK_Ext4.Text := FormatKeyName(Extender4Key)
+    BtnK_JumpBug.Text := FormatKeyName(JumpBugKey)
+    BtnK_Lag.Text  := FormatKeyName(LagKey)
+    
+    ReloadKey    := cfg.system.reload_key
+    MinimizeKey  := cfg.system.minimize_key
+    MacroLockKey := cfg.system.lock_key
+    ExitKey      := cfg.system.exit_key
+    
+    curReloadKey    := ReloadKey
+    curMinimizeKey  := MinimizeKey
+    curMacroLockKey := MacroLockKey
+    curExitKey      := ExitKey
+    
+    BtnK_Rel.Text  := FormatKeyName(ReloadKey)
+    BtnK_Min.Text  := FormatKeyName(MinimizeKey)
+    BtnK_Lock.Text := FormatKeyName(MacroLockKey)
+    BtnK_Exit.Text := FormatKeyName(ExitKey)
+    
+    RegisterHotkeys()
+    RegisterSystemHotkeys()
+    UpdateSidebarIndicators()
+    ShowStatus("CONFIG LOADED", "0x082A13", 500)
+}
+
+
+SaveCustomProfile(*) {
+    global EditProfileName
+    name := Trim(EditProfileName.Value)
+    if (name = "") {
+        ShowStatus("ENTER PROFILE NAME", "0x2A0808", 500)
+        return
+    }
+    SaveProfileInternal(name)
+    RefreshProfileList()
+}
+
+LoadCustomProfile(*) {
+    global ProfileDDL
+    name := ProfileDDL.Text
+    if (name = "") {
+        ShowStatus("SELECT PROFILE", "0x2A0808", 500)
+        return
+    }
+    LoadProfileInternal(name)
+}
+
+DeleteCustomProfile(*) {
+    global ProfileDDL, ConfigDir, ConfigExt
+    name := ProfileDDL.Text
+    if (name = "")
+        return
+    filePath := ConfigDir "\" name ConfigExt
+    try FileDelete(filePath)
+    RefreshProfileList()
+    ShowStatus("PROFILE DELETED", "0x2A0808", 500)
+}
+
+RefreshProfileList() {
+    global ConfigDir, ConfigExt, ProfileDDL
+    EnsureConfigDir()
+    ProfileDDL.Delete()
+    Loop Files, ConfigDir "\*" ConfigExt {
+        ProfileDDL.Add([SubStr(A_LoopFileName, 1, -StrLen(ConfigExt))])
+    }
+}
+
+ResetDefaults(*) {
+    global FreezeDuration, RobloxSensitivity
+    global Extender1Key, Extender2Key, Extender3Key, Extender4Key, JumpBugKey, LagKey
+    global ReloadKey, MinimizeKey, MacroLockKey, ExitKey
+    global curExtender1Key, curExtender2Key, curExtender3Key, curExtender4Key, curJumpBugKey, curLagKey
+    global curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey
+    global IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsLagSwitchChecked
+    global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsJumpBugChecked
+    global ChkExt1, ChkExt2, ChkExt3, ChkExt4, ChkLag, ChkBD1, ChkBD2, ChkBD3, ChkJumpBug
+    global BtnK_Ext1, BtnK_Ext2, BtnK_Ext3, BtnK_Ext4, BtnK_JumpBug, BtnK_Lag
+    global BtnK_Lock, BtnK_Min, BtnK_Rel, BtnK_Exit
+    global EditLagDur, EditSens, SensStatusText
+    
+    UnregisterExt1Key(curExtender1Key)
+    UnregisterExt2Key(curExtender2Key)
+    UnregisterExt3Key(curExtender3Key)
+    UnregisterExt4Key(curExtender4Key)
+    UnregisterJumpBugKey(curJumpBugKey)
+    UnregisterLagKey(curLagKey)
+    UnregisterSystemHotkeys()
+    
+    IsExtender1Checked := false
+    IsExtender2Checked := false
+    IsExtender3Checked := false
+    IsExtender4Checked := false
+    IsBD1Checked       := false
+    IsBD2Checked       := false
+    IsBD3Checked       := false
+    IsJumpBugChecked   := false
+    IsLagSwitchChecked := false
+    
+    SetCheck(ChkExt1, false)
+    SetCheck(ChkExt2, false)
+    SetCheck(ChkExt3, false)
+    SetCheck(ChkExt4, false)
+    SetCheck(ChkBD1, false)
+    SetCheck(ChkBD2, false)
+    SetCheck(ChkBD3, false)
+    SetCheck(ChkJumpBug, false)
+    SetCheck(ChkLag, false)
+    
+    FreezeDuration := 250
+    EditLagDur.Value := "250"
+    
+    RobloxSensitivity := 0.36
+    EditSens.Value := "0.36"
+    SensStatusText.Text := "Active sens: 0.36"
+    
+    Extender1Key := ""
+    Extender2Key := ""
+    Extender3Key := ""
+    Extender4Key := ""
+    JumpBugKey   := ""
+    LagKey       := ""
+    
+    ReloadKey    := "Insert"
+    MinimizeKey  := "F8"
+    MacroLockKey := "F5"
+    ExitKey      := "Delete"
+    
+    curExtender1Key := Extender1Key
+    curExtender2Key := Extender2Key
+    curExtender3Key := Extender3Key
+    curExtender4Key := Extender4Key
+    curJumpBugKey   := JumpBugKey
+    curLagKey       := LagKey
+    
+    curReloadKey    := ReloadKey
+    curMinimizeKey  := MinimizeKey
+    curMacroLockKey := MacroLockKey
+    curExitKey      := ExitKey
+    
+    BtnK_Ext1.Text := FormatKeyName(Extender1Key)
+    BtnK_Ext2.Text := FormatKeyName(Extender2Key)
+    BtnK_Ext3.Text := FormatKeyName(Extender3Key)
+    BtnK_Ext4.Text := FormatKeyName(Extender4Key)
+    BtnK_JumpBug.Text := FormatKeyName(JumpBugKey)
+    BtnK_Lag.Text  := FormatKeyName(LagKey)
+    
+    BtnK_Rel.Text  := FormatKeyName(ReloadKey)
+    BtnK_Min.Text  := FormatKeyName(MinimizeKey)
+    BtnK_Lock.Text := FormatKeyName(MacroLockKey)
+    BtnK_Exit.Text := FormatKeyName(ExitKey)
+    
+    RegisterHotkeys()
+    RegisterSystemHotkeys()
+    UpdateSidebarIndicators()
+    ShowStatus("RESET TO DEFAULTS", "0x2A0808", 500)
+}
+
+; --- JSON Parser & Stringifier Helpers ---
+ObjToJson(obj, indent := 0) {
+    Q := Chr(34)
+    if (obj is String)
+        return Q EscapeJsonString(obj) Q
+    if (obj is Number)
+        return obj
+    if (obj is Array) {
+        result := "["
+        Loop obj.Length {
+            if (A_Index > 1)
+                result .= ","
+            result .= ObjToJson(obj[A_Index], indent + 1)
+        }
+        return result "]"
+    }
+    if (obj is Object) {
+        result := "{"
+        first := true
+        for key, value in obj.OwnProps() {
+            if (!first)
+                result .= ","
+            result .= Q key Q ":" ObjToJson(value, indent + 1)
+            first := false
+        }
+        return result "}"
+    }
+    return obj
+}
+
+EscapeJsonString(str) {
+    Q := Chr(34)
+    str := StrReplace(str, "\", "\\")
+    str := StrReplace(str, Q, "\" Q)
+    str := StrReplace(str, "`n", "\n")
+    str := StrReplace(str, "`r", "\r")
+    str := StrReplace(str, "`t", "\t")
+    return str
+}
+
+JsonToObj(jsonStr) {
+    pos := 1
+    return ParseJsonValue(jsonStr, &pos)
+}
+
+ParseJsonValue(jsonStr, &pos) {
+    Q := Chr(34)
+    SkipWhitespace(jsonStr, &pos)
+    if (SubStr(jsonStr, pos, 1) = "{")
+        return ParseJsonObject(jsonStr, &pos)
+    else if (SubStr(jsonStr, pos, 1) = "[")
+        return ParseJsonArray(jsonStr, &pos)
+    else if (SubStr(jsonStr, pos, 1) = Q)
+        return ParseJsonString(jsonStr, &pos)
+    else if (SubStr(jsonStr, pos, 4) = "true") {
+        pos += 4
+        return true
+    } else if (SubStr(jsonStr, pos, 5) = "false") {
+        pos += 5
+        return false
+    } else if (SubStr(jsonStr, pos, 4) = "null") {
+        pos += 4
+        return ""
+    } else {
+        return ParseJsonNumber(jsonStr, &pos)
+    }
+}
+
+ParseJsonObject(jsonStr, &pos) {
+    obj := {}
+    pos++
+    SkipWhitespace(jsonStr, &pos)
+    if (SubStr(jsonStr, pos, 1) = "}") {
+        pos++
+        return obj
+    }
+    Loop {
+        SkipWhitespace(jsonStr, &pos)
+        key := ParseJsonString(jsonStr, &pos)
+        SkipWhitespace(jsonStr, &pos)
+        pos++
+        SkipWhitespace(jsonStr, &pos)
+        value := ParseJsonValue(jsonStr, &pos)
+        obj.%key% := value
+        SkipWhitespace(jsonStr, &pos)
+        if (SubStr(jsonStr, pos, 1) = ",")
+            pos++
+        else
+            break
+    }
+    SkipWhitespace(jsonStr, &pos)
+    pos++
+    return obj
+}
+
+ParseJsonArray(jsonStr, &pos) {
+    arr := []
+    pos++
+    SkipWhitespace(jsonStr, &pos)
+    if (SubStr(jsonStr, pos, 1) = "]") {
+        pos++
+        return arr
+    }
+    Loop {
+        value := ParseJsonValue(jsonStr, &pos)
+        arr.Push(value)
+        SkipWhitespace(jsonStr, &pos)
+        if (SubStr(jsonStr, pos, 1) = ",")
+            pos++
+        else
+            break
+    }
+    SkipWhitespace(jsonStr, &pos)
+    pos++
+    return arr
+}
+
+ParseJsonString(jsonStr, &pos) {
+    Q := Chr(34)
+    pos++
+    result := ""
+    Loop {
+        char := SubStr(jsonStr, pos, 1)
+        if (char = Q) {
+            pos++
+            break
+        } else if (char = "\") {
+            pos++
+            nextChar := SubStr(jsonStr, pos, 1)
+            if (nextChar = "n")
+                result .= "`n"
+            else if (nextChar = "r")
+                result .= "`r"
+            else if (nextChar = "t")
+                result .= "`t"
+            else if (nextChar = Q)
+                result .= Q
+            else if (nextChar = "\")
+                result .= "\"
+            else
+                result .= nextChar
+            pos++
+        } else {
+            result .= char
+            pos++
+        }
+    }
+    return result
+}
+
+ParseJsonNumber(jsonStr, &pos) {
+    num := ""
+    while (pos <= StrLen(jsonStr)) {
+        char := SubStr(jsonStr, pos, 1)
+        if (char ~= "[0-9.\-+e]") {
+            num .= char
+            pos++
+        } else {
+            break
+        }
+    }
+    return Integer(num)
+}
+
+SkipWhitespace(jsonStr, &pos) {
+    while (pos <= StrLen(jsonStr) && SubStr(jsonStr, pos, 1) ~= "[\s]")
+        pos++
+}
+
+
+;  APP WINDOW VISIBILITY & TRAY
+
+
+isAppMinimized := false
+
+MinimizeApp(*) {
+    global MainGui, isAppMinimized
+    MainGui.Hide()
+    isAppMinimized := true
+}
+
+ToggleMainGui(*) {
+    global MainGui, isAppMinimized
+    if (isAppMinimized) {
+        MainGui.Show()
+        isAppMinimized := false
+    } else {
+        MainGui.Hide()
+        isAppMinimized := true
+    }
+}
+
+A_TrayMenu.Add("Show / Hide Destiny", ToggleMainGui)
+A_TrayMenu.Default := "Show / Hide Destiny"
+A_TrayMenu.ClickCount := 1
