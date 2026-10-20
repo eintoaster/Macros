@@ -682,7 +682,7 @@ PageControls[3].Push(p4a, p4b, FreezeEdit, ApplyBtn, TestBtn, p4c, BtnLagKey, Ch
 
 ; ===== PAGE 5: INFO =====
 p5a := MainGui.Add("Text", "x104 y95 w300 c0xD98484 BackgroundTrans", "SYSTEM INFO")
-p5b := MainGui.Add("Text", "x104 y120 w300 c0xD98484 BackgroundTrans", "Version: 2.0 M0MENT4M")
+p5b := MainGui.Add("Text", "x104 y120 w300 c0xD98484 BackgroundTrans", "Version: 2.1 M0MENT4M")
 p5d := MainGui.Add("Text", "x104 y150 w300 h66 c0xD98484 BackgroundTrans", "Full movement macro script for Evade. Not bannable, no executor. AutoHotkey v2. For further bugs, report them in the Discord server.")
 p5patchHeader := MainGui.Add("Text", "x104 y228 w300 c0xD98484 BackgroundTrans", "── PATCH NOTES ──")
 p5patchHeader.SetFont("s9 Bold")
@@ -866,7 +866,7 @@ ConfigText() {
     global VigMulti, BurstSyncSound, BurstSyncPill
     config := {
         config_version: ConfigVersion,
-        app_version: "2.0",
+        app_version: "2.1",
         design: CurrentDesign,
         widgets: WHudStyleObj(),
         lag_sound: {idx: VigSoundIdx, file: VigSoundFile, multi: VigMultiText(), sync: BurstSyncSound ? 1 : 0},
@@ -8603,7 +8603,7 @@ CopyDiagnostics(*)
     global IsSlideChecked, IsBhopChecked, IsStrafeChecked, IsComboChecked, IsCSpamChecked, IsClickChecked, IsSpinbotChecked
     global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey, LagKey
     global FreezeDuration, IsLagBurstChecked, LagBurstCount, LagBurstGap, IsLagHoldChecked, IsLagPrecisionChecked, VigStyle, ShakeOn, ShakeStyle
-    t := "M0MENT4M 2.0 diagnostics`n"
+    t := "M0MENT4M 2.1 diagnostics`n"
     t .= "Config version: " ConfigVersion "`n"
     t .= "Time: " FormatTime(, "yyyy-MM-dd HH:mm") "`n"
     t .= "Windows: " A_OSVersion (A_Is64bitOS ? " 64-bit" : " 32-bit") "`n"
