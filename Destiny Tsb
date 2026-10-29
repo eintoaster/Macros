@@ -32,32 +32,6 @@ if (!DirExist(ConfigDir)) {                                                    ;
 }
 Global ConfigExt := ".json"
 
-; --- Theme Colors (weave palette) ---
-Global C_Accent      := "D76014"   ; Orange accent (ImGuiCol_Scheme)
-Global C_Text        := "FFFFFF"
-Global C_TextDim     := "646464"
-Global C_TextHover   := "BFBFBF"
-Global C_WindowBg    := "101010"   ; Content / nav list background
-Global C_ChildBg     := "141414"   ; Cards and headers
-Global C_Header      := "1A1A1A"   ; Card title strips, footer
-Global C_Border      := "1F1F1F"
-Global C_Line        := "282828"
-Global C_Frame       := "101010"   ; Checkbox / input background
-Global C_FrameHover  := "181818"
-Global C_Button      := "1A1A1A"
-Global C_ButtonHover := "242424"
-Global C_Key         := "010101"   ; Transparent key color for the window gaps
-Global UI_Font       := "Segoe UI"
-Global UI_Icons      := "Segoe MDL2 Assets"
-
-; Aliases still used by the HUD / lock code
-Global DestinyAccent := C_Accent
-Global AccentColor   := C_Accent
-
-; Hover tracking
-Global HoverItems := Map()
-Global HoverHwnd  := 0
-
 ; --- Navigation State ---
 Global CurrentTab := 1
 Global CurrentSubTab := 1
@@ -150,658 +124,1636 @@ Global RawInputRegistered    := false
 ; Vignette GUIs
 Global VignetteGuis := []
 
+; ==============================================================================
+;  DESTINY UI  -  custom drawn (GDI+) layered window, HUD and notification cards
+; ==============================================================================
 
-;  GUI CONSTRUCTION - "WEAVE" STYLE (sidebar nav + card layout)
-
-
-GuiWidth  := 760
-GuiHeight := 500
-NavW      := 176
-MainX     := 185
-MainW     := GuiWidth - MainX
-
-MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow -Theme", "Destiny // TSB")
-MainGui.BackColor := C_Key
-MainGui.MarginX := 0
-MainGui.MarginY := 0
-
-; Controls collection per tab (6 tabs) and sub-tabs for Tab 1
-Global PageControls   := [[], [], [], [], [], []]
-Global SubTabControls := [[], [], []]
-Global BuildList      := []
-Global RoundQueue     := []
-
-; Tab definitions (icon glyphs from Segoe MDL2 Assets)
-Global Tabs := [
-    {icon: Chr(0xE945), name: "Macros",   subs: ["Extenders", "Backdash", "Movement"]},
-    {icon: Chr(0xEA86), name: "Misc",     subs: []},
-    {icon: Chr(0xE765), name: "Keybinds", subs: []},
-    {icon: Chr(0xE890), name: "Visuals",  subs: []},
-    {icon: Chr(0xE713), name: "Settings", subs: []},
-    {icon: Chr(0xE946), name: "Info",     subs: []}
+; --- Look (saved in ui.ini next to the configs folder) ---
+Global AccentPresets := [
+    {name: "Ember",   a: "F26B1D", b: "E8336D"},
+    {name: "Crimson", a: "E8336D", b: "8B5CF6"},
+    {name: "Violet",  a: "8B5CF6", b: "22A6F2"},
+    {name: "Ocean",   a: "22A6F2", b: "10B981"},
+    {name: "Mint",    a: "10B981", b: "A3E635"},
+    {name: "Gold",    a: "F5B82E", b: "F26B1D"}
 ]
+Global GradNames := ["Accent Flow", "Aurora", "Dusk", "Tide", "Inferno", "Spectrum", "Candy", "Mono"]
+Global AccentIdx := 1, AccentColor := "F26B1D", AccentColor2 := "E8336D", DestinyAccent := "F26B1D"
+Global LogoGrad := 1, LogoAnimated := true, GradeAmt := 60
+; which kinds of notification cards show (Visuals > Notifications)
+Global NotifCats := Map("toggle", true, "fire", false, "slider", false, "pick", false, "key", false, "system", true)
+Global HudGrad := 1, HudBorder := 3, HudCompact := false, HudShowKeys := true
+Global HudCustom := false, HudCX := 10, HudCY := 80
+Global UPrefsFile := RegExReplace(ConfigDir, "\\configs$") "\ui.ini"
 
+; --- Window / engine state ---
+Global UW := 880, UH := 600, USide := 220, UTop := 92
+Global UGui := "", UHwnd := 0, UShown := false, UToken := 0, UInited := false
+Global US := 0, UG := 0, UFmt := 0, UFmtW := 0, UBgBmp := 0, UBgG := 0, UBgKey := ""
+Global F_UI := 0, F_Sm := 0, F_B := 0, F_H := 0, F_Logo := 0, F_Tiny := 0, F_Icon := 0, F_IconSm := 0, F_Mono := 0
+Global UAnim := Map(), UAnimating := false, UAlpha := 1.0, UFrameK := 1.0, UFrameAt := 0
+Global UHits := [], UHitsB := [], UMx := -1, UMy := -1, UHover := "", UDown := false, UActive := 0, ULastBtn := false
+Global UDrag := 0, USlider := 0, UScrollDrag := 0, UTimerOn := false
+Global UWinT := 0.0, UWinTarget := 1, UWinHide := false, UPageT := 0.0, UScroll := 0.0, UScrollT := 0.0, UContentH := 0
+Global UEdit := 0, UDD := 0, UCardH := Map()
+Global UX := (A_ScreenWidth - 880) // 2, UY := (A_ScreenHeight - 600) // 2
+Global UCX := 0, UCY := 0, UCW := 0, UCardTop := 0, UCardId := ""
+Global UBrushes := Map(), UPens := Map(), UPaths := Map()
+Global isAppMinimized := false
 
-; SIDEBAR
-; Tab list background (drawn first so everything else sits on top)
-NavListBg := MainGui.Add("Text", "x0 y42 w" NavW " h" (GuiHeight - 84) " Background" C_WindowBg)
-
-; Brand
-NavBrand := MainGui.Add("Text", "x0 y0 w" NavW " h40 Background" C_ChildBg)
-QueueRound(NavBrand, 4, "top")
-MainGui.Add("Text", "x0 y40 w" NavW " h2 Background" C_Accent)
-NavLogo := MainGui.Add("Text", "x0 y9 w" NavW " h22 Center +0x200 Background" C_ChildBg " c" C_Accent, "DESTINY")
-NavLogo.SetFont("s12 Bold Italic", "Segoe UI Black")
-
-; Tabs
-Global TabRows := []
-for idx, t in Tabs {
-    row  := MainGui.Add("Text", "x0 y0 w" NavW " h38 Background" C_WindowBg)
-    row.OnEvent("Click", SwitchTab.Bind(idx))
-    icon := MainGui.Add("Text", "x15 y0 w20 h38 +0x200 Background" C_WindowBg " c" C_TextDim, t.icon)
-    icon.SetFont("s10", UI_Icons)
-    name := MainGui.Add("Text", "x40 y0 w100 h38 +0x200 Background" C_WindowBg " c" C_TextDim, t.name)
-    name.SetFont("s10", UI_Font)
-    chev := ""
-    if (t.subs.Length) {
-        chev := MainGui.Add("Text", "x" (NavW - 30) " y0 w16 h38 +0x200 Background" C_WindowBg " c" C_Text, Chr(0xE76C))
-        chev.SetFont("s7", UI_Icons)
-    }
-    sep := MainGui.Add("Text", "x40 y0 w" (NavW - 40) " h1 Background" C_Border)
-    subs := []
-    for sIdx, sName in t.subs {
-        s := MainGui.Add("Text", "x40 y0 w" (NavW - 50) " h18 +0x200 Background" C_WindowBg " c" C_TextDim, sName)
-        s.SetFont("s9", UI_Font)
-        s.OnEvent("Click", SwitchSubTab.Bind(sIdx))
-        AddHover(s, HoverSub.Bind(idx, sIdx, true), HoverSub.Bind(idx, sIdx, false))
-        subs.Push(s)
-    }
-    TabRows.Push({row: row, icon: icon, name: name, chev: chev, sep: sep, subs: subs})
-    AddHover(row, HoverTab.Bind(idx, true), HoverTab.Bind(idx, false))
-}
-
-; Profile footer
-NavFoot := MainGui.Add("Text", "x0 y" (GuiHeight - 42) " w" NavW " h42 Background" C_Header)
-QueueRound(NavFoot, 4, "bottom")
-MainGui.Add("Text", "x0 y" (GuiHeight - 42) " w" NavW " h1 Background" C_Line)
-_userName := A_UserName
-NavAvatar := MainGui.Add("Text", "x15 y" (GuiHeight - 33) " w24 h24 Center +0x200 Background" C_Accent " c" C_Text, StrUpper(SubStr(_userName, 1, 1)))
-NavAvatar.SetFont("s9 Bold", UI_Font)
-QueueRound(NavAvatar, 12, "ellipse")
-NavUser := MainGui.Add("Text", "x47 y" (GuiHeight - 42) " w90 h42 +0x200 Background" C_Header " c" C_Text, _userName)
-NavUser.SetFont("s9 Bold", UI_Font)
-NavVer := MainGui.Add("Text", "x" (NavW - 55) " y" (GuiHeight - 42) " w40 h42 Right +0x200 Background" C_Header " c" C_TextDim, "TSB")
-NavVer.SetFont("s9 Bold", UI_Font)
-
-; ------------------------------------------------------------------------------
-; MAIN PANEL (header + content background)
-; ------------------------------------------------------------------------------
-MainContentBg := MainGui.Add("Text", "x" MainX " y42 w" MainW " h" (GuiHeight - 42) " Background" C_WindowBg)
-QueueRound(MainContentBg, 4, "bottom")
-
-HeaderBg := MainGui.Add("Text", "x" MainX " y0 w" MainW " h40 Background" C_ChildBg)
-QueueRound(HeaderBg, 4, "top")
-MainGui.Add("Text", "x" MainX " y40 w" MainW " h2 Background" C_Accent)
-
-HdrIcon := MainGui.Add("Text", "x" (MainX + 15) " y0 w20 h40 +0x200 Background" C_ChildBg " c" C_Text, "")
-HdrIcon.SetFont("s10", UI_Icons)
-HdrName := MainGui.Add("Text", "x" (MainX + 40) " y0 w100 h40 +0x200 Background" C_ChildBg " c" C_Text, "")
-HdrName.SetFont("s10 Bold", UI_Font)
-HdrArrow := MainGui.Add("Text", "x0 y0 w12 h40 +0x200 Background" C_ChildBg " c" C_Text, Chr(0xE76C))
-HdrArrow.SetFont("s7", UI_Icons)
-HdrSub := MainGui.Add("Text", "x0 y0 w120 h40 +0x200 Background" C_ChildBg " c" C_Accent, "")
-HdrSub.SetFont("s10 Bold", UI_Font)
-
-; Window controls
-BtnMin := MainGui.Add("Text", "x" (GuiWidth - 64) " y8 w24 h24 Center +0x200 Background" C_ChildBg " c" C_TextDim, Chr(0xE921))
-BtnMin.SetFont("s8", UI_Icons)
-BtnMin.OnEvent("Click", (*) => MinimizeApp())
-AddHover(BtnMin, (*) => SetColor(BtnMin, C_Text), (*) => SetColor(BtnMin, C_TextDim))
-BtnClose := MainGui.Add("Text", "x" (GuiWidth - 36) " y8 w24 h24 Center +0x200 Background" C_ChildBg " c" C_TextDim, Chr(0xE8BB))
-BtnClose.SetFont("s8", UI_Icons)
-BtnClose.OnEvent("Click", (*) => ExitApp())
-AddHover(BtnClose, (*) => SetColor(BtnClose, C_Accent), (*) => SetColor(BtnClose, C_TextDim))
-
-; Content grid
-CX := MainX + 15, CY := 57, CW := MainW - 30, CH := GuiHeight - 72
-COL1W := (CW - 10) // 2
-COL2X := CX + COL1W + 10
-COL2W := CW - COL1W - 10
-
-
-;  TAB 1: MACROS
-
-
-; --- Sub-tab 1: Extenders ---
-BuildList := SubTabControls[1]
-p := Card(CX, CY, COL1W, CH, "Extender Tech")
-ChkExt1 := Checkbox(p.x, p.y,       "Instant Lethal", ToggleExt1Box)
-ChkExt2 := Checkbox(p.x, p.y + 32,  "Instant Twisted", ToggleExt2Box)
-ChkExt3 := Checkbox(p.x, p.y + 64,  "Solitude Dash (WIP)", ToggleExt3Box)
-ChkExt4 := Checkbox(p.x, p.y + 96,  "Dripz Tech", ToggleExt4Box)
-p := Card(COL2X, CY, COL2W, CH, "Details")
-Label(p.x, p.y,       p.w, "Instant Lethal", C_Text, "s9 Bold")
-Label(p.x, p.y + 18,  p.w, "instant lethal extender", C_TextDim, "s8", 30)
-Label(p.x, p.y + 64,  p.w, "Instant Twisted", C_Text, "s9 Bold")
-Label(p.x, p.y + 82,  p.w, "instant twisted extender.", C_TextDim, "s8", 30)
-Label(p.x, p.y + 128, p.w, "Solitude Dash", C_Text, "s9 Bold")
-Label(p.x, p.y + 146, p.w, "the solitude dash, still in work.", C_TextDim, "s8", 30)
-Label(p.x, p.y + 192, p.w, "Dripz Tech", C_Text, "s9 Bold")
-Label(p.x, p.y + 210, p.w, "the usual dripz dash, right timing is needed", C_TextDim, "s8", 30)
-
-; --- Sub-tab 2: Backdash ---
-BuildList := SubTabControls[2]
-p := Card(CX, CY, COL1W, CH, "Backdash Tech")
-ChkBD1 := Checkbox(p.x, p.y,      "Backdash 1", ToggleBD1Box)
-ChkBD2 := Checkbox(p.x, p.y + 32, "Side Backdash", ToggleBD2Box)
-ChkBD3 := Checkbox(p.x, p.y + 64, "Instant Backdash", ToggleBD3Box)
-p := Card(COL2X, CY, COL2W, CH, "Details")
-Label(p.x, p.y, p.w, "not done yet....", C_TextDim, "s8", 60)
-
-; --- Sub-tab 3: Movement ---
-BuildList := SubTabControls[3]
-p := Card(CX, CY, COL1W, CH, "Movement Tech")
-ChkJumpBug := Checkbox(p.x, p.y, "Jump Bug", ToggleJumpBugBox)
-p := Card(COL2X, CY, COL2W, CH, "Details")
-Label(p.x, p.y,      p.w, "Jump Bug", C_Text, "s9 Bold")
-Label(p.x, p.y + 18, p.w, "you fly around trashcans/fences .", C_TextDim, "s8", 30)
-
-
-;  TAB 2: MISC
-
-BuildList := PageControls[2]
-p := Card(CX, CY, COL1W, CH, "Lagswitch")
-ChkLag := Checkbox(p.x, p.y, "Enable Lagswitch", ToggleLagBox)
-Label(p.x, p.y + 34, p.w, "Freeze duration (ms)", C_TextDim, "s8")
-EditLagDur := EditBox(p.x, p.y + 54, 110, FreezeDuration)
-Button(p.x + 120, p.y + 54, p.w - 120, 27, "Apply", ApplyLagSettings)
-Button(p.x, p.y + 95, p.w, 32, "Test Freeze", TestFreeze)
-LagStatusText := Label(p.x, CY + CH - 34, p.w, "Status: Ready", C_Accent, "s9 Bold")
-
-p := Card(COL2X, CY, COL2W, CH, "Modes")
-ChkLagPrec := Checkbox(p.x, p.y,      "High-precision timing", ToggleLagPrecisionBox, IsLagPrecision)
-ChkLagBrst := Checkbox(p.x, p.y + 32, "Burst mode", ToggleLagBurstBox, IsLagBurst)
-LagBurstSlider := FlatSlider(p.x, p.y + 64, p.w, "Burst count", 1, 20, LagBurstCount, "{}", UpdateLagBurstCount)
-ChkLagHld := Checkbox(p.x, p.y + 110, "Hold key to freeze", ToggleLagHoldBox, IsLagHold)
-
-
-;  TAB 3: KEYBINDS
-
-BuildList := PageControls[3]
-p := Card(CX, CY, COL1W, CH, "Macro Keybinds")
-BtnK_Ext1    := HotkeyRow(p.x, p.y,       p.w, "Instant Lethal",  FormatKeyName(Extender1Key), StartBindExt1)
-BtnK_Ext2    := HotkeyRow(p.x, p.y + 41,  p.w, "Instant Twisted", FormatKeyName(Extender2Key), StartBindExt2)
-BtnK_Ext3    := HotkeyRow(p.x, p.y + 82,  p.w, "Solitude Dash",   FormatKeyName(Extender3Key), StartBindExt3)
-BtnK_Ext4    := HotkeyRow(p.x, p.y + 123, p.w, "Dripz Tech",      FormatKeyName(Extender4Key), StartBindExt4)
-BtnK_JumpBug := HotkeyRow(p.x, p.y + 164, p.w, "Jump Bug",        FormatKeyName(JumpBugKey),   StartBindJumpBug)
-BtnK_Lag     := HotkeyRow(p.x, p.y + 205, p.w, "Lagswitch",       FormatKeyName(LagKey),       StartBindLag)
-
-p := Card(COL2X, CY, COL2W, CH, "System Keybinds")
-BtnK_Lock := HotkeyRow(p.x, p.y,       p.w, "Panic lock",     FormatKeyName(MacroLockKey), StartBindLock)
-BtnK_Min  := HotkeyRow(p.x, p.y + 41,  p.w, "Menu toggle",    FormatKeyName(MinimizeKey),  StartBindMin)
-BtnK_Rel  := HotkeyRow(p.x, p.y + 82,  p.w, "Reload script",  FormatKeyName(ReloadKey),    StartBindRel)
-BtnK_Exit := HotkeyRow(p.x, p.y + 123, p.w, "Emergency exit", FormatKeyName(ExitKey),      StartBindExit)
-Label(p.x, p.y + 175, p.w, "Click a key box, then press a key or mouse button (Mouse 4/5, middle and right click work). Press Escape to clear.", C_TextDim, "s8", 60)
-
-
-;  TAB 4: VISUALS
-
-BuildList := PageControls[4]
-p := Card(CX, CY, COL1W, CH, "Overlay HUD")
-ChkHudShow   := Checkbox(p.x, p.y,      "Show macro overlay HUD", ToggleSidebarIndicators, ShowSidebarIndicators)
-ChkNotifShow := Checkbox(p.x, p.y + 32, "Show status popups", ToggleStatusNotifs, ShowStatusNotifs)
-Label(p.x, p.y + 66, p.w, "HUD position", C_TextDim, "s8")
-HudPosDDL := FlatDropdown(p.x, p.y + 86, p.w, ["Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right"], UpdateHudPosition)
-HudPosDDL.Text := HudPosition
-HudOpSlider := FlatSlider(p.x, p.y + 127, p.w, "HUD opacity", 10, 100, Round(HudOpacity / 2.55), "{}%", SetHudOpacity)
-
-p := Card(COL2X, CY, COL2W, CH, "Lagswitch Vignette")
-ChkLagVig := Checkbox(p.x, p.y, "Red border while frozen", ToggleLagVignetteBox, IsLagVignette)
-VigSlider := FlatSlider(p.x, p.y + 32, p.w, "Border thickness", 2, 30, VignetteThickness, "{} px", SetVignetteThickness)
-
-
-;  TAB 5: SETTINGS
-
-BuildList := PageControls[5]
-p := Card(CX, CY, COL1W, CH, "Configs")
-Label(p.x, p.y, p.w, "Config name", C_TextDim, "s8")
-EditProfileName := EditBox(p.x, p.y + 20, p.w, "Default")
-_half := (p.w - 10) // 2
-Button(p.x, p.y + 59, _half, 32, "Save", SaveCustomProfile)
-Button(p.x + _half + 10, p.y + 59, p.w - _half - 10, 32, "Load", LoadCustomProfile)
-Label(p.x, p.y + 105, p.w, "Saved configs", C_TextDim, "s8")
-ProfileDDL := FlatDropdown(p.x, p.y + 125, p.w, [], "")
-RefreshProfileList()
-Button(p.x, p.y + 166, _half, 32, "Delete", DeleteCustomProfile)
-Button(p.x + _half + 10, p.y + 166, p.w - _half - 10, 32, "Reset Defaults", ResetDefaults)
-
-p := Card(COL2X, CY, COL2W, CH, "Roblox Sensitivity")
-Label(p.x, p.y, p.w, "Set this to your in-game camera sensitivity. Macro camera flicks scale to it.", C_TextDim, "s8", 30)
-Label(p.x, p.y + 44, p.w, "Roblox sens", C_TextDim, "s8")
-EditSens := EditBox(p.x, p.y + 64, 110, String(RobloxSensitivity))
-Button(p.x + 120, p.y + 64, p.w - 120, 27, "Apply", ApplySensitivity)
-Label(p.x, p.y + 105, p.w, "Presets", C_TextDim, "s8")
-_pw := (p.w - 4 * 6) // 5
-for i, v in [0.25, 0.36, 0.50, 0.80, 1.00]
-    Button(p.x + (i - 1) * (_pw + 6), p.y + 125, _pw, 27, Format("{:.2f}", v), SetSensPreset.Bind(v))
-SensStatusText := Label(p.x, p.y + 166, p.w, "Active sens: " RobloxSensitivity, C_Accent, "s9 Bold")
-
-
-;  TAB 6: INFO
-
-BuildList := PageControls[6]
-p := Card(CX, CY, CW, CH, "About")
-Label(p.x, p.y, p.w, "Destiny // TSB Edition ", C_Accent, "s11 Bold", 22)
-Label(p.x, p.y + 32, p.w, "Macro for Roblox: The Strongest Battlegrounds.", C_TextDim, "s9", 40)
-Label(p.x, p.y + 90, p.w, "Default shortcuts", C_Text, "s9 Bold")
-Label(p.x, p.y + 112, p.w, "F5        Panic lock (disables all macros)`nF8        Show / hide this menu`nInsert    Reload script`nDelete    Exit", C_TextDim, "s9", 80, "Consolas")
-
-BuildList := []
-
-
-;  OVERLAY HUD
-
-
-IndicatorHud := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
-IndicatorHud.BackColor := C_WindowBg
-HudLabels := ["LETHAL", "TWISTED", "SOLITUDE", "DRIPZ", "LAGSW", "LOCK"]
-Loop 6 {
-    _d := IndicatorHud.Add("Text", "x4 y" (4 + (A_Index-1)*28) " w72 h22 Center +0x200", HudLabels[A_Index])
-    _d.SetFont("s8 Bold", UI_Font)
-    _d.Opt("Background" C_ChildBg " c" C_TextDim)
-    HudDots.Push(_d)
-}
-_hp := GetHudShowStr()
-IndicatorHud.Show("x" _hp.x " y" _hp.y " w80 h" (6*28+8) " NoActivate")
-WinSetTransparent(HudOpacity, IndicatorHud)
-if (!ShowSidebarIndicators)
-    IndicatorHud.Hide()
-
-SetTimer(KeepHudOnTop, 1000)
-
-; Window dragging (clicks on any non-interactive area)
-OnMessage(0x0201, WM_LBUTTONDOWN)
-WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
-    if (hwnd == MainGui.Hwnd)
-        PostMessage(0xA1, 2, 0, MainGui.Hwnd)
-}
-OnMessage(0x0200, WM_MOUSEMOVE)
-
-; Hide focus rectangles
-DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x127, "Ptr", 0x10001, "Ptr", 0)
-
-; Initialize
-SwitchTab(1)
-RegisterRawMouseInput()
-RegisterHotkeys()
-RegisterSystemHotkeys()
-
-MainGui.Show("w" GuiWidth " h" GuiHeight)
-WinSetTransColor(C_Key, MainGui)
-for item in RoundQueue
-    RoundCtrl(item.ctrl, item.r, item.mode)
-
-
-;  UI WIDGET HELPERS
-
-
-Track(ctrl) {
-    global BuildList
-    BuildList.Push(ctrl)
-    return ctrl
-}
-
-QueueRound(ctrl, r, mode := "all") {
-    global RoundQueue
-    RoundQueue.Push({ctrl: ctrl, r: r, mode: mode})
-}
-
-; Clips a control to a rounded shape. mode: all | top | bottom | ellipse
-RoundCtrl(ctrl, r, mode := "all") {
-    rc := Buffer(16, 0)
-    DllCall("GetClientRect", "Ptr", ctrl.Hwnd, "Ptr", rc)
-    w := NumGet(rc, 8, "Int"), h := NumGet(rc, 12, "Int")
-    r := Round(r * A_ScreenDPI / 96)
-    if (mode = "ellipse") {
-        rgn := DllCall("CreateEllipticRgn", "Int", 0, "Int", 0, "Int", w + 1, "Int", h + 1, "Ptr")
-    } else {
-        y1 := (mode = "bottom") ? -r * 2 : 0
-        y2 := (mode = "top") ? h + r * 2 : h + 1
-        rgn := DllCall("CreateRoundRectRgn", "Int", 0, "Int", y1, "Int", w + 1, "Int", y2, "Int", r * 2, "Int", r * 2, "Ptr")
-    }
-    DllCall("SetWindowRgn", "Ptr", ctrl.Hwnd, "Ptr", rgn, "Int", true)
-}
-
-SetColor(ctrl, hex) {
-    ctrl.Opt("c" hex)
-    ctrl.Redraw()
-}
-
-; Card with a header strip (ui::begin_child). Returns the content origin.
-Card(x, y, w, h, title) {
-    bg := Track(MainGui.Add("Text", "x" x " y" y " w" w " h" h " Background" C_ChildBg))
-    QueueRound(bg, 4)
-    hd := Track(MainGui.Add("Text", "x" x " y" y " w" w " h33 Background" C_Header))
-    QueueRound(hd, 4, "top")
-    Track(MainGui.Add("Text", "x" x " y" (y + 33) " w" w " h1 Background" C_Line))
-    t := Track(MainGui.Add("Text", "x" (x + 13) " y" y " w" (w - 26) " h33 +0x200 Background" C_Header " c" C_Text, title))
-    t.SetFont("s9 Bold", UI_Font)
-    return {x: x + 13, y: y + 49, w: w - 26}
-}
-
-Label(x, y, w, text, color := "", fontOpts := "s9", h := 18, fontName := "") {
-    color := color = "" ? C_Text : color
-    c := Track(MainGui.Add("Text", "x" x " y" y " w" w " h" h " Background" C_ChildBg " c" color, text))
-    c.SetFont(fontOpts, fontName = "" ? UI_Font : fontName)
-    return c
-}
-
-; 18px checkbox: accent fill + check glyph when on. Returns the box control.
-Checkbox(x, y, text, callback, checked := false) {
-    Track(MainGui.Add("Text", "x" x " y" y " w18 h18 Background" C_Border))
-    box := Track(MainGui.Add("Text", "x" (x + 1) " y" (y + 1) " w16 h16 Center +0x200 Background" C_Frame " c" C_Text))
-    box.SetFont("s7", UI_Icons)
-    box.OnEvent("Click", callback)
-    lbl := Track(MainGui.Add("Text", "x" (x + 26) " y" y " w200 h18 +0x200 Background" C_ChildBg " c" C_Text, text))
-    lbl.SetFont("s9", UI_Font)
-    lbl.OnEvent("Click", callback)
-    SetCheck(box, checked)
-    return box
-}
-
-SetCheck(box, state) {
-    box.Opt("Background" (state ? C_Accent : C_Frame))
-    box.Text := state ? Chr(0xE73E) : ""
-    box.Redraw()
-}
-
-Button(x, y, w, h, text, callback) {
-    b := Track(MainGui.Add("Text", "x" x " y" y " w" w " h" h " Center +0x200 Background" C_Button " c" C_Text, text))
-    b.SetFont("s9", UI_Font)
-    b.OnEvent("Click", callback)
-    AddHover(b, (*) => (b.Opt("Background" C_ButtonHover), b.Redraw()), (*) => (b.Opt("Background" C_Button), b.Redraw()))
-    return b
-}
-
-EditBox(x, y, w, text) {
-    Track(MainGui.Add("Text", "x" x " y" y " w" w " h27 Background" C_Border))
-    Track(MainGui.Add("Text", "x" (x + 1) " y" (y + 1) " w" (w - 2) " h25 Background" C_Frame))
-    e := Track(MainGui.Add("Edit", "x" (x + 7) " y" (y + 5) " w" (w - 14) " h18 -E0x200 -VScroll Background" C_Frame " c" C_Text, text))
-    e.SetFont("s9", UI_Font)
-    return e
-}
-
-; Label on the left, key box on the right (ImGui::Hotkey). Returns the key box.
-HotkeyRow(x, y, w, text, keyText, callback) {
-    lbl := Track(MainGui.Add("Text", "x" x " y" y " w" (w - 140) " h27 +0x200 Background" C_ChildBg " c" C_Text, text))
-    lbl.SetFont("s9", UI_Font)
-    Track(MainGui.Add("Text", "x" (x + w - 132) " y" y " w132 h27 Background" C_Border))
-    k := Track(MainGui.Add("Text", "x" (x + w - 131) " y" (y + 1) " w130 h25 Center +0x200 Background" C_Frame " c" C_Text, keyText))
-    k.SetFont("s9", UI_Font)
-    k.OnEvent("Click", callback)
-    AddHover(k, (*) => (k.Opt("Background" C_FrameHover), k.Redraw()), (*) => (k.Opt("Background" C_Frame), k.Redraw()))
-    return k
-}
-
-; Label + value on one line, thin track with accent fill underneath.
-class FlatSlider {
-    __New(x, y, w, text, min, max, val, fmt, onChange) {
-        this.min := min, this.max := max, this.w := w, this.fmt := fmt, this.onChange := onChange
-        lbl := Track(MainGui.Add("Text", "x" x " y" y " w" (w - 60) " h18 +0x200 Background" C_ChildBg " c" C_Text, text))
-        lbl.SetFont("s9", UI_Font)
-        this.valLbl := Track(MainGui.Add("Text", "x" (x + w - 60) " y" y " w60 h18 Right +0x200 Background" C_ChildBg " c" C_TextDim))
-        this.valLbl.SetFont("s9", UI_Font)
-        this.track := Track(MainGui.Add("Text", "x" x " y" (y + 24) " w" w " h8 Background" C_Frame))
-        this.fill := Track(MainGui.Add("Text", "x" x " y" (y + 24) " w1 h8 Background" C_Accent))
-        this.x := x, this.y := y + 24
-        drag := ObjBindMethod(this, "Drag")
-        this.track.OnEvent("Click", drag)
-        this.fill.OnEvent("Click", drag)
-        this.Value := val
+; --- Stand-ins for the old GUI controls (the macro code still reads / writes these) ---
+class UVal {
+    __New(v := "") {
+        this._v := v
     }
     Value {
-        get => this.val
+        get => this._v
         set {
-            this.val := Max(this.min, Min(this.max, Round(value)))
-            fw := Max(1, Round((this.val - this.min) / (this.max - this.min) * this.w))
-            this.fill.Move(this.x, this.y, fw, 8)
-            this.fill.Redraw()
-            this.valLbl.Text := Format(this.fmt, this.val)
+            this._v := value
+            UReq()
         }
     }
-    Drag(*) {
-        rc := Buffer(16, 0)
-        DllCall("GetWindowRect", "Ptr", this.track.Hwnd, "Ptr", rc)
-        left := NumGet(rc, 0, "Int"), right := NumGet(rc, 8, "Int")
-        last := ""
-        while GetKeyState("LButton", "P") {
-            MouseGetPos(&mx)
-            ratio := Max(0, Min(1, (mx - left) / (right - left)))
-            this.Value := this.min + ratio * (this.max - this.min)
-            if (this.val != last) {
-                last := this.val
-                if (this.onChange)
-                    this.onChange.Call(this.val)
-            }
-            Sleep(15)
+    Text {
+        get => this._v
+        set {
+            this._v := value
+            if (InStr(value, "Press"))                       ; a key box starts listening: show it right now
+                UShowListening()
+            UReq()
         }
     }
 }
 
-; Box showing the selected item; click opens a popup menu.
-; Exposes .Text, .Delete() and .Add() like a DropDownList.
-class FlatDropdown {
-    __New(x, y, w, items, onChange) {
-        this.items := [], this.cur := "", this.onChange := onChange
-        Track(MainGui.Add("Text", "x" x " y" y " w" w " h27 Background" C_Border))
-        this.box := Track(MainGui.Add("Text", "x" (x + 1) " y" (y + 1) " w" (w - 2) " h25 +0x200 Background" C_Frame " c" C_Text))
-        this.box.SetFont("s9", UI_Font)
-        this.arrow := Track(MainGui.Add("Text", "x" (x + w - 24) " y" (y + 1) " w20 h25 Center +0x200 Background" C_Frame " c" C_TextDim, Chr(0xE70D)))
-        this.arrow.SetFont("s7", UI_Icons)
-        open := ObjBindMethod(this, "Open")
-        this.box.OnEvent("Click", open)
-        this.arrow.OnEvent("Click", open)
-        this.Add(items)
+UMouseOverMenu() {
+    global UShown, UHwnd
+    if (!UShown)
+        return false
+    MouseGetPos(, , &win)
+    return win = UHwnd
+}
+
+UShowListening() {
+    global UShown, UTimerOn
+    if (!UShown)
+        return
+    URender()
+    UTimerOn := false                                        ; (never trust a stale "already running" flag here)
+    UReq()
+}
+
+class UList {
+    __New(items, idx := 1, onChoose := "") {
+        this.items := items
+        this.idx := items.Length ? idx : 0
+        this.onChoose := onChoose
     }
+    Value => this.idx
     Text {
-        get => this.cur
+        get => (this.idx >= 1 && this.idx <= this.items.Length) ? this.items[this.idx] : ""
         set {
-            this.cur := value
-            this.box.Text := "   " value
+            for i, it in this.items {
+                if (it = value) {
+                    this.idx := i
+                    return
+                }
+            }
         }
+    }
+    Choose(i) {
+        this.idx := i
+        if (this.onChoose)
+            this.onChoose.Call(i)
+        UReq()
+    }
+    Delete() {
+        this.items := []
+        this.idx := 0
     }
     Add(arr) {
         for it in arr
             this.items.Push(it)
-        if (this.cur = "" && this.items.Length)
-            this.Text := this.items[1]
-    }
-    Delete() {
-        this.items := []
-        this.Text := ""
-    }
-    Open(*) {
-        if (!this.items.Length)
-            return
-        m := Menu()
-        for it in this.items {
-            m.Add(it, ObjBindMethod(this, "Pick", it))
-            if (it = this.cur)
-                m.Check(it)
-        }
-        rc := Buffer(16, 0)
-        DllCall("GetWindowRect", "Ptr", this.box.Hwnd, "Ptr", rc)
-        m.Show(NumGet(rc, 0, "Int") - 1, NumGet(rc, 12, "Int") + 1)
-    }
-    Pick(it, *) {
-        this.Text := it
-        if (this.onChange)
-            this.onChange.Call()
+        if (!this.idx && this.items.Length)
+            this.idx := 1
     }
 }
 
+Global ChkExt1 := 0, ChkExt2 := 0, ChkExt3 := 0, ChkExt4 := 0, ChkBD1 := 0, ChkBD2 := 0, ChkBD3 := 0, ChkJumpBug := 0
+Global ChkLag := 0, ChkLagPrec := 0, ChkLagBrst := 0, ChkLagHld := 0, ChkLagVig := 0, ChkHudShow := 0, ChkNotifShow := 0
+Global BtnK_Ext1 := UVal(FormatKeyName(Extender1Key)), BtnK_Ext2 := UVal(FormatKeyName(Extender2Key))
+Global BtnK_Ext3 := UVal(FormatKeyName(Extender3Key)), BtnK_Ext4 := UVal(FormatKeyName(Extender4Key))
+Global BtnK_JumpBug := UVal(FormatKeyName(JumpBugKey)), BtnK_Lag := UVal(FormatKeyName(LagKey))
+Global BtnK_Lock := UVal(FormatKeyName(MacroLockKey)), BtnK_Min := UVal(FormatKeyName(MinimizeKey))
+Global BtnK_Rel := UVal(FormatKeyName(ReloadKey)), BtnK_Exit := UVal(FormatKeyName(ExitKey))
+Global EditLagDur := UVal(FreezeDuration), EditSens := UVal(String(RobloxSensitivity)), EditProfileName := UVal("Default")
+Global LagStatusText := UVal("Status: Ready"), SensStatusText := UVal("")
+Global ProfileDDL := UList([])
+Global HudPosDDL := UList(["Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right"], 1, UPickHudPos)
+Global AccentDDL := UList(UPresetNames(), 1, UPickAccent)
+Global LogoGradDDL := UList(GradNames, 1, UPickLogoGrad)
+Global HudGradDDL := UList(GradNames, 1, UPickHudGrad)
+Global HudBorderDDL := UList(["Off", "Accent", "Animated gradient", "Spectrum"], 3, UPickHudBorder)
 
-;  HOVER TRACKING
-
-
-AddHover(ctrl, onFn, offFn) {
-    global HoverItems
-    HoverItems[ctrl.Hwnd] := {on: onFn, off: offFn}
+; a sensitivity without float noise (0.36, not 0.35999999999999999)
+USens(v) {
+    s := Format("{:.4f}", v)
+    s := RTrim(RTrim(s, "0"), ".")
+    return s = "" ? "0" : s
 }
 
-WM_MOUSEMOVE(wParam, lParam, msg, hwnd) {
-    global HoverHwnd, HoverItems
-    if (hwnd = HoverHwnd)
+UPresetNames() {
+    out := []
+    for p in AccentPresets
+        out.Push(p.name)
+    return out
+}
+
+; old helpers the macro code calls: the drawn UI reads the state directly, so a redraw is all they need
+SetCheck(*) => UReq()
+UpdateSidebarIndicators() {
+    RegisterHotkeys()
+    HudRequest()
+    UReq()
+}
+
+; ==============================================================================
+;  PALETTE & COLOURS
+; ==============================================================================
+
+UPal(key) {
+    static P := Map("Win", [15, 15, 18], "Side", [11, 11, 13], "Card", [22, 22, 26], "Hover", [31, 31, 37]
+        , "Border", [37, 37, 44], "Text", [243, 243, 246], "Text2", [168, 168, 180], "Muted", [108, 108, 120]
+        , "Off", [50, 50, 58], "Track", [38, 38, 46], "Pill", [28, 28, 33], "Red", [240, 88, 96], "Green", [52, 211, 153])
+    return P[key]
+}
+
+UHexArr(hex) => [Integer("0x" SubStr(hex, 1, 2)), Integer("0x" SubStr(hex, 3, 2)), Integer("0x" SubStr(hex, 5, 2))]
+
+UC(r, g, b, a := 255) {
+    global UAlpha
+    return (Max(0, Min(255, Round(a * UAlpha))) << 24) | (r << 16) | (g << 8) | b
+}
+UCol(key, a := 255) {
+    c := UPal(key)
+    return UC(c[1], c[2], c[3], a)
+}
+UMix(k1, k2, t, a := 255) {
+    c1 := UPal(k1), c2 := UPal(k2)
+    return UC(Round(c1[1] + (c2[1] - c1[1]) * t), Round(c1[2] + (c2[2] - c1[2]) * t), Round(c1[3] + (c2[3] - c1[3]) * t), a)
+}
+UAcc(a := 255) {
+    c := UHexArr(AccentColor)
+    return UC(c[1], c[2], c[3], a)
+}
+UAcc2(a := 255) {
+    c := UHexArr(AccentColor2)
+    return UC(c[1], c[2], c[3], a)
+}
+; a palette colour blended toward the accent
+UAccMix(key, t, a := 255) {
+    c := UPal(key), ac := UHexArr(AccentColor)
+    return UC(Round(c[1] + (ac[1] - c[1]) * t), Round(c[2] + (ac[2] - c[2]) * t), Round(c[3] + (ac[3] - c[3]) * t), a)
+}
+
+; colour stops of the gradient presets (they loop: the last stop runs back into the first)
+GradStops(idx) {
+    switch idx {
+        case 2: return [[16, 185, 129], [34, 211, 238], [99, 102, 241], [168, 85, 247]]
+        case 3: return [[251, 146, 60], [244, 63, 94], [168, 85, 247]]
+        case 4: return [[34, 211, 238], [59, 130, 246], [20, 184, 166]]
+        case 5: return [[250, 204, 21], [249, 115, 22], [239, 68, 68]]
+        case 6: return [[239, 68, 68], [250, 204, 21], [74, 222, 128], [34, 211, 238], [99, 102, 241], [217, 70, 239]]
+        case 7: return [[244, 114, 182], [125, 211, 252], [134, 239, 172]]
+        case 8: return [UPal("Text"), UPal("Muted")]
+        default: return [UHexArr(AccentColor), UHexArr(AccentColor2)]
+    }
+}
+
+GradSample(st, pos) {
+    m := st.Length
+    pos := pos - Floor(pos)
+    q := pos * m, k := Floor(q), fr := q - k
+    c1 := st[Mod(k, m) + 1], c2 := st[Mod(k + 1, m) + 1]
+    return [Round(c1[1] + (c2[1] - c1[1]) * fr), Round(c1[2] + (c2[2] - c1[2]) * fr), Round(c1[3] + (c2[3] - c1[3]) * fr)]
+}
+
+; ==============================================================================
+;  GDI+ SETUP & PRIMITIVES
+; ==============================================================================
+
+UGdipInit() {
+    global UToken, UFmt, UFmtW, F_UI, F_Sm, F_B, F_H, F_Logo, F_Tiny, F_Icon, F_IconSm, F_Mono
+    if (UToken)
         return
-    if (HoverHwnd && HoverItems.Has(HoverHwnd))
-        HoverItems[HoverHwnd].off.Call()
-    HoverHwnd := HoverItems.Has(hwnd) ? hwnd : 0
-    if (HoverHwnd) {
-        HoverItems[HoverHwnd].on.Call()
-        SetTimer(HoverLeaveCheck, 50)
+    DllCall("LoadLibrary", "Str", "gdiplus")
+    si := Buffer(24, 0)
+    NumPut("UInt", 1, si, 0)
+    tok := 0
+    DllCall("gdiplus\GdiplusStartup", "Ptr*", &tok, "Ptr", si, "Ptr", 0)
+    UToken := tok
+    f := 0
+    DllCall("gdiplus\GdipCreateStringFormat", "Int", 0x5000, "Int", 0, "Ptr*", &f)
+    UFmt := f
+    DllCall("gdiplus\GdipCreateStringFormat", "Int", 0x4000, "Int", 0, "Ptr*", &f)
+    UFmtW := f
+    F_UI := UMakeFont("Segoe UI", 13.5, 0)
+    F_Sm := UMakeFont("Segoe UI", 12, 0)
+    F_B := UMakeFont("Segoe UI Semibold", 13.5, 0)
+    F_H := UMakeFont("Segoe UI", 21, 1)
+    F_Logo := UMakeFont("Segoe UI Black", 22, 0)
+    F_Tiny := UMakeFont("Segoe UI", 10.5, 1)
+    F_Icon := UMakeFont("Segoe MDL2 Assets", 15, 0)
+    F_IconSm := UMakeFont("Segoe MDL2 Assets", 11, 0)
+    F_Mono := UMakeFont("Consolas", 12.5, 0)
+}
+
+UMakeFont(name, px, style) {
+    fam := 0, font := 0
+    DllCall("gdiplus\GdipCreateFontFamilyFromName", "WStr", name, "Ptr", 0, "Ptr*", &fam)
+    if (!fam)
+        DllCall("gdiplus\GdipCreateFontFamilyFromName", "WStr", "Segoe UI", "Ptr", 0, "Ptr*", &fam)
+    DllCall("gdiplus\GdipCreateFont", "Ptr", fam, "Float", px, "Int", style, "Int", 2, "Ptr*", &font)
+    return font
+}
+
+; a 32-bit picture with its own GDI+ graphics, for a layered window
+UMakeSurface(w, h) {
+    dc := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+    bi := Buffer(40, 0)
+    NumPut("Int", 40, bi, 0), NumPut("Int", w, bi, 4), NumPut("Int", -h, bi, 8), NumPut("Short", 1, bi, 12), NumPut("Short", 32, bi, 14)
+    bits := 0
+    hb := DllCall("CreateDIBSection", "Ptr", dc, "Ptr", bi, "UInt", 0, "Ptr*", &bits, "Ptr", 0, "UInt", 0, "Ptr")
+    DllCall("SelectObject", "Ptr", dc, "Ptr", hb)
+    g := 0
+    DllCall("gdiplus\GdipCreateFromHDC", "Ptr", dc, "Ptr*", &g)
+    DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", g, "Int", 4)
+    DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", g, "Int", 4)
+    return {dc: dc, g: g, w: w, h: h}
+}
+
+ULayered(hwnd, dc, w, h, alpha := 255) {
+    sz := Buffer(8, 0), src := Buffer(8, 0), bf := Buffer(4, 0)
+    NumPut("Int", w, sz, 0), NumPut("Int", h, sz, 4)
+    NumPut("UChar", Max(0, Min(255, alpha)), bf, 2), NumPut("UChar", 1, bf, 3)
+    DllCall("UpdateLayeredWindow", "Ptr", hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", dc, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+; Brushes, pens and paths are cached. Every drawing function runs Critical, so the caches are only emptied at the
+; start of a frame, when nothing is holding one of them.
+UCacheTrim() {
+    global UBrushes, UPens, UPaths
+    if (UBrushes.Count > 600) {
+        for k, h in UBrushes
+            DllCall("gdiplus\GdipDeleteBrush", "Ptr", h)
+        UBrushes := Map()
+    }
+    if (UPens.Count > 300) {
+        for k, h in UPens
+            DllCall("gdiplus\GdipDeletePen", "Ptr", h)
+        UPens := Map()
+    }
+    if (UPaths.Count > 600) {
+        for k, h in UPaths
+            DllCall("gdiplus\GdipDeletePath", "Ptr", h)
+        UPaths := Map()
     }
 }
 
-HoverLeaveCheck() {
-    global HoverHwnd, HoverItems
-    if (!HoverHwnd) {
-        SetTimer(HoverLeaveCheck, 0)
+UBrush(argb) {
+    global UBrushes
+    if (UBrushes.Has(argb))
+        return UBrushes[argb]
+    b := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &b)
+    UBrushes[argb] := b
+    return b
+}
+
+UPen(argb, wd := 1) {
+    global UPens
+    key := argb "|" wd
+    if (UPens.Has(key))
+        return UPens[key]
+    p := 0
+    DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", wd, "Int", 2, "Ptr*", &p)
+    DllCall("gdiplus\GdipSetPenStartCap", "Ptr", p, "Int", 2)
+    DllCall("gdiplus\GdipSetPenEndCap", "Ptr", p, "Int", 2)
+    UPens[key] := p
+    return p
+}
+
+UNewPath(x, y, w, h, r) {
+    p := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &p)
+    r := Min(r, w / 2, h / 2)
+    if (r <= 0.5) {
+        DllCall("gdiplus\GdipAddPathRectangle", "Ptr", p, "Float", x, "Float", y, "Float", w, "Float", h)
+        return p
+    }
+    d := r * 2
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", p, "Float", x, "Float", y, "Float", d, "Float", d, "Float", 180, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", p, "Float", x + w - d, "Float", y, "Float", d, "Float", d, "Float", 270, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", p, "Float", x + w - d, "Float", y + h - d, "Float", d, "Float", d, "Float", 0, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", p, "Float", x, "Float", y + h - d, "Float", d, "Float", d, "Float", 90, "Float", 90)
+    DllCall("gdiplus\GdipClosePathFigure", "Ptr", p)
+    return p
+}
+
+; rounded rectangle path at its real position (cached)
+UPath(x, y, w, h, r) {
+    global UPaths
+    key := Round(x, 1) "|" Round(y, 1) "|" Round(w, 1) "|" Round(h, 1) "|" r
+    if (UPaths.Has(key))
+        return UPaths[key]
+    p := UNewPath(x, y, w, h, r)
+    UPaths[key] := p
+    return p
+}
+
+URR(x, y, w, h, r, argb) {
+    global UG
+    if (w <= 0 || h <= 0 || (argb >> 24) = 0)
+        return
+    if (r <= 0)
+        DllCall("gdiplus\GdipFillRectangle", "Ptr", UG, "Ptr", UBrush(argb), "Float", x, "Float", y, "Float", w, "Float", h)
+    else
+        DllCall("gdiplus\GdipFillPath", "Ptr", UG, "Ptr", UBrush(argb), "Ptr", UPath(x, y, w, h, r))
+}
+
+URRLine(x, y, w, h, r, argb, wd := 1) {
+    global UG
+    if ((argb >> 24) = 0)
+        return
+    DllCall("gdiplus\GdipDrawPath", "Ptr", UG, "Ptr", UPen(argb, wd), "Ptr", UPath(x + 0.5, y + 0.5, w - 1, h - 1, r))
+}
+
+UDisc(cx, cy, rad, argb) {
+    global UG
+    if ((argb >> 24) = 0)
+        return
+    DllCall("gdiplus\GdipFillEllipse", "Ptr", UG, "Ptr", UBrush(argb), "Float", cx - rad, "Float", cy - rad, "Float", rad * 2, "Float", rad * 2)
+}
+
+URing(cx, cy, rad, argb, wd := 1.5) {
+    global UG
+    DllCall("gdiplus\GdipDrawEllipse", "Ptr", UG, "Ptr", UPen(argb, wd), "Float", cx - rad, "Float", cy - rad, "Float", rad * 2, "Float", rad * 2)
+}
+
+ULine(x1, y1, x2, y2, argb, wd := 1) {
+    global UG
+    DllCall("gdiplus\GdipDrawLine", "Ptr", UG, "Ptr", UPen(argb, wd), "Float", x1, "Float", y1, "Float", x2, "Float", y2)
+}
+
+; ha: 0 left, 1 centre, 2 right.  va: 0 top, 1 middle.
+UText(str, x, y, argb, font, w := 0, h := 0, ha := 0, va := 0, wrap := false) {
+    global UG, UFmt, UFmtW
+    static lastA := Map(), lastV := Map(), rc := Buffer(16, 0)
+    if (str = "" || (argb >> 24) = 0)
+        return
+    fmt := wrap ? UFmtW : UFmt
+    if (lastA.Get(fmt, -1) != ha) {
+        DllCall("gdiplus\GdipSetStringFormatAlign", "Ptr", fmt, "Int", ha)
+        lastA[fmt] := ha
+    }
+    if (lastV.Get(fmt, -1) != va) {
+        DllCall("gdiplus\GdipSetStringFormatLineAlign", "Ptr", fmt, "Int", va)
+        lastV[fmt] := va
+    }
+    NumPut("Float", x, rc, 0), NumPut("Float", y, rc, 4), NumPut("Float", w ? w : 2000, rc, 8), NumPut("Float", h ? h : 1000, rc, 12)
+    DllCall("gdiplus\GdipDrawString", "Ptr", UG, "WStr", String(str), "Int", -1, "Ptr", font, "Ptr", rc, "Ptr", fmt, "Ptr", UBrush(argb))
+}
+
+; width of a text (cached)
+UTextW(str, font) {
+    global UG, UFmt
+    static known := Map()
+    key := font "|" str
+    if (known.Has(key))
+        return known[key]
+    if (known.Count > 3000)
+        known.Clear()
+    rc := Buffer(16, 0), out := Buffer(16, 0)
+    NumPut("Float", 2000, rc, 8), NumPut("Float", 200, rc, 12)
+    DllCall("gdiplus\GdipMeasureString", "Ptr", UG, "WStr", String(str), "Int", -1, "Ptr", font, "Ptr", rc, "Ptr", UFmt, "Ptr", out, "Ptr", 0, "Ptr", 0)
+    known[key] := NumGet(out, 8, "Float")
+    return known[key]
+}
+
+; moving linear gradient brush; the colours repeat every w (and h) pixels, shift moves them along
+UGradBrush(x, y, w, h, stops, shift, alpha := 1.0) {
+    global UAlpha
+    a := Max(0, Min(255, Round(255 * alpha * UAlpha)))
+    m := stops.Length, n := m + 1
+    cols := Buffer(4 * n), pos := Buffer(4 * n)
+    Loop n {
+        c := stops[Mod(A_Index - 1, m) + 1]
+        NumPut("UInt", (a << 24) | (c[1] << 16) | (c[2] << 8) | c[3], cols, (A_Index - 1) * 4)
+        NumPut("Float", (A_Index - 1) / m, pos, (A_Index - 1) * 4)
+    }
+    w := Max(1, w)
+    p1 := Buffer(8), p2 := Buffer(8)
+    NumPut("Float", x, p1, 0), NumPut("Float", y, p1, 4), NumPut("Float", x + w, p2, 0), NumPut("Float", y + h, p2, 4)
+    br := 0
+    DllCall("gdiplus\GdipCreateLineBrush", "Ptr", p1, "Ptr", p2, "UInt", NumGet(cols, 0, "UInt"), "UInt", NumGet(cols, 4 * m, "UInt"), "Int", 0, "Ptr*", &br)
+    DllCall("gdiplus\GdipSetLinePresetBlend", "Ptr", br, "Ptr", cols, "Ptr", pos, "Int", n)
+    f := shift - Floor(shift)
+    if (f)
+        DllCall("gdiplus\GdipTranslateLineTransform", "Ptr", br, "Float", -f * w, "Float", -f * h, "Int", 0)
+    return br
+}
+
+; fill a rounded rectangle with a gradient that spans span pixels (0 = the rectangle's own width)
+UGradFill(x, y, w, h, r, stops, shift := 0, alpha := 1.0, span := 0) {
+    global UG
+    if (w <= 0 || h <= 0 || alpha <= 0.004)
+        return
+    br := UGradBrush(x, y, span ? span : w, 0, stops, shift, alpha)
+    DllCall("gdiplus\GdipFillPath", "Ptr", UG, "Ptr", br, "Ptr", UPath(x, y, w, h, r))
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", br)
+}
+
+UGradBorder(x, y, w, h, r, stops, shift, wd := 1.5, alpha := 1.0) {
+    global UG
+    br := UGradBrush(x, y, w, h, stops, shift, alpha)
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen2", "Ptr", br, "Float", wd, "Int", 2, "Ptr*", &pen)
+    DllCall("gdiplus\GdipDrawPath", "Ptr", UG, "Ptr", pen, "Ptr", UPath(x + 0.5, y + 0.5, w - 1, h - 1, r))
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", br)
+}
+
+; soft round glow: full colour in the middle, fading to nothing at the edge
+UGlow(cx, cy, rx, ry, rgb, a) {
+    global UG
+    if (a <= 0)
+        return
+    path := 0, br := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    DllCall("gdiplus\GdipAddPathEllipse", "Ptr", path, "Float", cx - rx, "Float", cy - ry, "Float", rx * 2, "Float", ry * 2)
+    DllCall("gdiplus\GdipCreatePathGradientFromPath", "Ptr", path, "Ptr*", &br)
+    DllCall("gdiplus\GdipSetPathGradientCenterColor", "Ptr", br, "UInt", (a << 24) | rgb)
+    sc := Buffer(4, 0)
+    NumPut("UInt", rgb, sc, 0)
+    cnt := 1
+    DllCall("gdiplus\GdipSetPathGradientSurroundColorsWithCount", "Ptr", br, "Ptr", sc, "Int*", &cnt)
+    DllCall("gdiplus\GdipFillPath", "Ptr", UG, "Ptr", br, "Ptr", path)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", br)
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+UClip(x, y, w, h) {
+    global UG
+    DllCall("gdiplus\GdipSetClipRectI", "Ptr", UG, "Int", Floor(x), "Int", Floor(y), "Int", Ceil(w), "Int", Ceil(h), "Int", 0)
+}
+UClipReset() {
+    global UG
+    DllCall("gdiplus\GdipResetClip", "Ptr", UG)
+}
+
+; ==============================================================================
+;  ANIMATION, HITS & REDRAW
+; ==============================================================================
+
+; eases v toward target; f is the share covered per 60 fps frame (scaled by the real frame time)
+ULerp(id, target, f) {
+    global UAnim, UAnimating, UFrameK
+    v := UAnim.Has(id) ? UAnim[id] : target
+    v += (target - v) * (1 - (1 - f) ** UFrameK)
+    if (Abs(target - v) < 0.003)
+        v := target
+    else
+        UAnimating := true
+    UAnim[id] := v
+    return v
+}
+
+UEase(t) => 1 - (1 - Max(0.0, Min(1.0, t))) ** 3
+
+UHit(id, x, y, w, h, fn, data := "") {
+    global UHitsB
+    UHitsB.Push({id: id, x: x, y: y, w: w, h: h, fn: fn, data: data})
+}
+
+; a hit inside the scrolling page: only the visible part counts
+UHitP(id, x, y, w, h, fn, data := "") {
+    global UTop, UH
+    y1 := Max(y, UTop - 6), y2 := Min(y + h, UH - 14)
+    if (y2 > y1)
+        UHit(id, x, y1, w, y2 - y1, fn, data)
+}
+
+UHitAt(x, y) {
+    global UHits
+    i := UHits.Length
+    while (i >= 1) {
+        h := UHits[i]
+        if (x >= h.x && x < h.x + h.w && y >= h.y && y < h.y + h.h)
+            return h
+        i--
+    }
+    return 0
+}
+
+UReq() {
+    global UTimerOn, UShown
+    if (!UShown || UTimerOn)
+        return
+    UTimerOn := true
+    SetTimer(UTick, 16)
+}
+
+UTick() {
+    global UShown, UAnimating, UDown, UEdit, UTimerOn
+    ; Critical for the whole tick: a click that starts a key bind must not slip in between "timer off" and
+    ; "UTimerOn := false". The bind waits in a loop, the tick could not finish, and every redraw request after
+    ; that was thrown away (UTimerOn stayed true) - so "press a key" sometimes never showed.
+    Critical
+    if (!UShown) {
+        SetTimer(UTick, 0)
+        UTimerOn := false
         return
     }
-    rc := Buffer(16, 0)
-    DllCall("GetWindowRect", "Ptr", HoverHwnd, "Ptr", rc)
-    MouseGetPos(&mx, &my)
-    inside := mx >= NumGet(rc, 0, "Int") && mx < NumGet(rc, 8, "Int") && my >= NumGet(rc, 4, "Int") && my < NumGet(rc, 12, "Int")
-    if (!inside || !DllCall("IsWindowVisible", "Ptr", HoverHwnd)) {
-        if HoverItems.Has(HoverHwnd)
-            HoverItems[HoverHwnd].off.Call()
-        HoverHwnd := 0
-        SetTimer(HoverLeaveCheck, 0)
+    URender()
+    if (!UAnimating && !UDown && !IsObject(UEdit) && !UListening()) {
+        SetTimer(UTick, 0)
+        UTimerOn := false
     }
 }
 
-HoverTab(idx, on, *) {
-    global CurrentTab, TabRows
-    if (idx = CurrentTab)
-        return
-    col := on ? C_TextHover : C_TextDim
-    SetColor(TabRows[idx].icon, col)
-    SetColor(TabRows[idx].name, col)
+; the brand name keeps flowing while the menu is open (a light 15 frames a second)
+ULogoTick() {
+    global UShown, LogoAnimated, UTimerOn, LogoGrad
+    if (UShown && LogoAnimated && !UTimerOn)
+        URender()
 }
 
-HoverSub(tabIdx, subIdx, on, *) {
-    global CurrentSubTab, TabRows
-    if (subIdx = CurrentSubTab)
-        return
-    SetColor(TabRows[tabIdx].subs[subIdx], on ? C_Text : C_TextDim)
+; a key box is waiting for a key
+UListening() {
+    for b in [BtnK_Ext1, BtnK_Ext2, BtnK_Ext3, BtnK_Ext4, BtnK_JumpBug, BtnK_Lag, BtnK_Lock, BtnK_Min, BtnK_Rel, BtnK_Exit]
+        if (InStr(b.Text, "Press"))
+            return true
+    return false
 }
 
-
-;  TAB & NAVIGATION FUNCTIONS
-
-
-MeasureText(text, fontOpts, fontName) {
-    g := Gui()
-    g.SetFont(fontOpts, fontName)
-    c := g.Add("Text", , text)
-    c.GetPos(, , &w)
-    g.Destroy()
-    return w
+URunHit(fn, *) {
+    try fn.Call()
+    UReq()
 }
 
-; Stacks the sidebar rows; the selected tab expands to show its sub-tabs.
-LayoutNav() {
-    global TabRows, Tabs, CurrentTab, CurrentSubTab, NavW
-    y := 42
-    for idx, r in TabRows {
-        sel := (idx = CurrentTab)
-        r.row.Move(0, y)
-        r.icon.Move(15, y)
-        r.name.Move(40, y)
-        r.icon.Opt("c" (sel ? C_Text : C_TextDim))
-        r.name.Opt("c" (sel ? C_Text : C_TextDim))
-        r.name.SetFont(sel ? "Bold" : "Norm")
-        if (r.chev) {
-            r.chev.Move(NavW - 30, y)
-            r.chev.Text := sel ? Chr(0xE70D) : Chr(0xE76C)
-        }
-        y += 38
-        for sIdx, s in r.subs {
-            if (sel) {
-                s.Move(40, y + 2 + (sIdx - 1) * 26)
-                s.Opt("c" (sIdx = CurrentSubTab ? C_Accent : C_TextDim))
-                s.Visible := true
-                s.Redraw()
-            } else {
-                s.Visible := false
-            }
-        }
-        if (sel && r.subs.Length)
-            y += r.subs.Length * 26 + 6
-        r.sep.Move(40, y)
-        y += 1
-        for c in [r.row, r.icon, r.name, r.sep]
-            c.Redraw()
-        if (r.chev)
-            r.chev.Redraw()
+; ==============================================================================
+;  WINDOW: SHOW / HIDE / INPUT
+; ==============================================================================
+
+UShow() {
+    global UGui, UHwnd, UShown, UInited, US, UG, UX, UY, UW, UH, UWinTarget, UWinHide, UPageT
+    if (!UInited) {
+        UGdipInit()
+        UGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 -DPIScale", "Destiny // TSB")
+        UHwnd := UGui.Hwnd
+        US := UMakeSurface(UW, UH)
+        UG := US.g
+        UInited := true
     }
+    UX := Max(0, Min(A_ScreenWidth - 80, UX)), UY := Max(0, Min(A_ScreenHeight - 60, UY))
+    UShown := true, UWinTarget := 1, UWinHide := false, UPageT := 0.0
+    UAnimSet("win", 0), UAnimSet("page", 0)
+    UGui.Show("x" UX " y" UY " w" UW " h" UH)
+    SetTimer(UInputTick, 16)
+    URender()
+    UReq()
+    HudRequest()                                             ; (the HUD's idle animation runs while the menu is open)
 }
 
-UpdateHeader() {
-    global Tabs, CurrentTab, CurrentSubTab, HdrIcon, HdrName, HdrArrow, HdrSub, MainX
-    t := Tabs[CurrentTab]
-    HdrIcon.Text := t.icon
-    HdrName.Text := t.name
-    nameW := MeasureText(t.name, "s10 Bold", UI_Font)
-    HdrName.Move(, , nameW + 4)
-    if (t.subs.Length) {
-        HdrName.Opt("c" C_TextDim)
-        HdrArrow.Move(MainX + 40 + nameW + 8, 0)
-        HdrSub.Move(MainX + 40 + nameW + 26, 0)
-        HdrSub.Text := t.subs[CurrentSubTab]
-        HdrArrow.Visible := true
-        HdrSub.Visible := true
+UHide() {
+    global UWinTarget, UWinHide
+    UEditStop()
+    UWinTarget := 0, UWinHide := true
+    UReq()
+}
+
+UHideNow() {
+    global UGui, UShown, UX, UY
+    UGui.GetPos(&x, &y)
+    UX := x, UY := y
+    UShown := false
+    UGui.Hide()
+    USavePrefs()
+}
+
+UOnWheel(wParam, lParam, msg, hwnd) {
+    global UHwnd, UScrollT, UContentH, UH, UTop, UDD
+    if (hwnd != UHwnd)
+        return
+    delta := (wParam >> 16) & 0xFFFF
+    if (delta > 32767)
+        delta -= 65536
+    if (IsObject(UDD) && UDD.open) {
+        UDD.scroll := Max(0, Min(Max(0, UDD.list.items.Length - 7) * 30, UDD.scroll - delta / 120 * 30))
     } else {
-        HdrName.Opt("c" C_Text)
-        HdrArrow.Visible := false
-        HdrSub.Visible := false
+        maxS := Max(0, UContentH - (UH - 14 - UTop))
+        UScrollT := Max(0, Min(maxS, UScrollT - delta / 120 * 70))
     }
-    HdrName.Redraw()
+    UReq()
+    return 0
 }
 
-SwitchTab(tabIndex, *) {
-    global CurrentTab, PageControls, SubTabControls
-    CurrentTab := tabIndex
-    for i, ctrls in PageControls {
-        for c in ctrls
-            c.Visible := (i = tabIndex)
-    }
-    if (tabIndex = 1) {
-        SwitchSubTab(CurrentSubTab)
+; The mouse is read directly (position + button) while the menu is visible: while the game holds the mouse,
+; Windows does not send mouse messages to other windows.
+UInputTick() {
+    global UShown, UGui, UHwnd, UW, UH, UMx, UMy, UHover, UDown, UActive, ULastBtn, UDrag, USlider, UScrollDrag, UEdit
+    if (!UShown) {
+        SetTimer(UInputTick, 0)
         return
     }
-    for ctrls in SubTabControls {
-        for c in ctrls
-            c.Visible := false
+    if (IsObject(UEdit) && WinActive(GAME_EXE))
+        UEditStop()
+    pt := Buffer(8, 0)
+    DllCall("GetCursorPos", "Ptr", pt)
+    sx := NumGet(pt, 0, "Int"), sy := NumGet(pt, 4, "Int")
+    UGui.GetPos(&wx, &wy)
+    x := sx - wx, y := sy - wy
+    inside := (x >= 0 && y >= 0 && x < UW && y < UH) && DllCall("WindowFromPoint", "Int64", (sx & 0xFFFFFFFF) | (sy << 32), "Ptr") = UHwnd
+    btn := (DllCall("GetAsyncKeyState", "Int", 1, "Short") & 0x8000) != 0
+    h := inside ? UHitAt(x, y) : 0
+    nid := IsObject(h) ? h.id : ""
+    if (nid != UHover) {
+        UHover := nid
+        UReq()
     }
-    LayoutNav()
-    UpdateHeader()
+    UMx := x, UMy := y
+    if (UListening()) {                                     ; a key box takes the next key / button: clicks are not menu clicks
+        ULastBtn := btn
+        return
+    }
+    if (btn && !ULastBtn) {
+        if (inside) {
+            if (IsObject(UEdit) && !(IsObject(h) && h.id = UEdit.id))
+                UEditStop()
+            UDown := true
+            if (!IsObject(h)) {
+                UActive := 0
+                UDrag := {ox: x, oy: y}
+            } else if (Type(h.fn) = "String" && h.fn = "slider") {
+                UActive := h
+                USlider := h.data
+                USliderMove(x)
+            } else if (Type(h.fn) = "String" && h.fn = "vscroll") {
+                UActive := h
+                UScrollDrag := h.data
+                UScrollMove(y)
+            } else {
+                UActive := h
+            }
+            UReq()
+        }
+    } else if (!btn && ULastBtn) {
+        if (IsObject(UActive) && !IsObject(USlider) && !IsObject(UScrollDrag)) {
+            hh := inside ? UHitAt(x, y) : 0
+            if (IsObject(hh) && hh.id = UActive.id && IsObject(hh.fn))
+                SetTimer(URunHit.Bind(hh.fn), -1)
+        }
+        if (IsObject(UDrag))
+            USavePrefs()
+        if (IsObject(USlider))
+            UNotify(USlider.label, Format(USlider.fmt, USlider.last), true, "slider")
+        UActive := 0, UDrag := 0, USlider := 0, UScrollDrag := 0, UDown := false
+        UReq()
+    } else if (btn) {
+        if (IsObject(USlider)) {
+            USliderMove(x)
+        } else if (IsObject(UScrollDrag)) {
+            UScrollMove(y)
+        } else if (IsObject(UDrag)) {
+            UGui.Move(sx - UDrag.ox, sy - UDrag.oy)
+        }
+    }
+    ULastBtn := btn
 }
 
-SwitchSubTab(subIndex, *) {
-    global CurrentSubTab, SubTabControls
-    CurrentSubTab := subIndex
-    for i, ctrls in SubTabControls {
-        for c in ctrls
-            c.Visible := (i = subIndex)
+USliderMove(x) {
+    global USlider
+    s := USlider
+    v := Round(s.min + Max(0, Min(1, (x - s.tx) / s.tw)) * (s.max - s.min))
+    if (v != s.last) {
+        s.last := v
+        s.setter.Call(v)
     }
-    LayoutNav()
-    UpdateHeader()
+    UReq()
 }
 
+UScrollMove(y) {
+    global UScrollDrag, UScrollT, UScroll
+    d := UScrollDrag
+    f := Max(0, Min(1, (y - d.top - d.thumbH / 2) / Max(1, d.trackH - d.thumbH)))
+    UScrollT := f * d.max, UScroll := UScrollT
+    UReq()
+}
 
-;  SLIDER CALLBACKS
+; ---------- typing into a field (an input hook: the keys go to the field, not to the game) ----------
+UEditStart(id, init, kind, setter, *) {
+    global UEdit
+    UEditStop()
+    ih := InputHook("L40", "{Enter}{Esc}{Tab}")
+    ih.KeyOpt("{Backspace}", "N")
+    ih.OnChar := UEditChar
+    ih.OnKeyDown := UEditKey
+    ih.OnEnd := UEditEnd
+    UEdit := {id: id, buf: String(init), kind: kind, setter: setter, ih: ih}
+    ih.Start()
+    UReq()
+}
 
+UEditChar(ih, ch) {
+    global UEdit
+    e := UEdit
+    if (!IsObject(e) || e.ih != ih || StrLen(e.buf) >= 24)
+        return
+    isDigit := RegExMatch(ch, "^[0-9]$")                 ; (no >= on "0"/"9": AHK would compare them as numbers and fail on ".")
+    if (e.kind = "int" && !isDigit)
+        return
+    if (e.kind = "float" && !(isDigit || (ch = "." && !InStr(e.buf, "."))))
+        return
+    if (e.kind = "text" && (Ord(ch) < 32 || InStr("\/:*?`"<>|", ch)))
+        return
+    e.buf .= ch
+    UReq()
+}
+
+UEditKey(ih, vk, sc) {
+    global UEdit
+    if (vk = 8 && IsObject(UEdit) && UEdit.ih = ih)
+        UEdit.buf := SubStr(UEdit.buf, 1, -1)
+    UReq()
+}
+
+UEditEnd(ih) {
+    global UEdit
+    e := UEdit
+    if (!IsObject(e) || e.ih != ih)
+        return
+    UEdit := 0
+    if (!(ih.EndReason = "EndKey" && ih.EndKey = "Escape") && e.buf != "")
+        SetTimer(URunHit.Bind(e.setter.Bind(e.buf)), -1)
+    UReq()
+}
+
+; ends the typing and keeps what was typed
+UEditStop() {
+    global UEdit
+    if (IsObject(UEdit))
+        try UEdit.ih.Stop()
+}
+
+; ---------- drop-down lists ----------
+UOpenDD(id, list, label := "", *) {
+    global UDD, UAnim
+    if (IsObject(UDD) && UDD.id = id && UDD.open) {
+        UDD.open := false
+        return
+    }
+    if (list = ProfileDDL)
+        RefreshProfileList()
+    UDD := {id: id, list: list, label: label, open: true, scroll: Max(0, (list.Value - 4) * 30), ax: 0, ay: 0, aw: 170}
+    UAnim["ddx"] := 0.0
+}
+
+UCloseDD(*) {
+    global UDD
+    if (IsObject(UDD))
+        UDD.open := false
+}
+
+UPickDD(i, *) {
+    global UDD
+    d := UDD
+    if (!IsObject(d))
+        return
+    d.open := false
+    d.list.Choose(i)
+    if (d.list != ProfileDDL && d.label != "")
+        UNotify(d.label, d.list.Text, true, "pick")
+}
+
+; ---------- a notification card for every change made in the menu ----------
+UNotify(label, value, on := true, cat := "system") {
+    ShowStatus(label ": " value, on ? "0x082A13" : "0x2A0808", 400, false, cat)
+}
+
+UToggleAct(fn, label, was, *) {
+    fn.Call()
+    UNotify(label, was ? "Disabled" : "Enabled", !was, "toggle")
+}
+
+; the bind functions wait for the key themselves: when they return the new key is set
+UKeyAct(starter, label, box, *) {
+    starter.Call()
+    k := box.Text
+    UNotify(label, k = "NONE" ? "Unbound" : "Bound to " k, k != "NONE", "key")
+}
+
+UDrawDD() {
+    global UDD, UW, UH, UAlpha, UHover, F_Sm, F_IconSm, UAnimating
+    if (!IsObject(UDD))
+        return
+    d := UDD
+    t := ULerp("ddx", d.open ? 1 : 0, 0.3)
+    if (!d.open && t <= 0.01) {
+        UDD := 0
+        return
+    }
+    UAnimating := true
+    items := d.list.items
+    n := items.Length, rowH := 30
+    vis := Max(1, Min(n, 7))
+    fullH := vis * rowH + 8
+    x := d.ax, w := d.aw, y := d.ay + 34
+    if (y + fullH > UH - 10)
+        y := d.ay - 6 - fullH
+    UAlpha := Min(1.0, t * 1.4)
+    yo := (1 - t) * -6
+    UClip(x - 8, y - 4 + yo, w + 16, fullH * t + 12)
+    URR(x - 2, y + 4 + yo, w + 4, fullH, 12, UC(0, 0, 0, 70))
+    URR(x, y + yo, w, fullH, 11, UCol("Card"))
+    URR(x, y + yo, w, fullH, 11, UCol("Hover", 120))
+    URRLine(x, y + yo, w, fullH, 11, UCol("Border"))
+    maxS := Max(0, (n - vis) * rowH)
+    d.scroll := Max(0, Min(maxS, d.scroll))
+    UClip(x, y + 3 + yo, w, Max(0, fullH * t - 6))
+    if (n = 0)
+        UText("nothing here yet", x + 14, y + 4 + yo, UCol("Muted"), F_Sm, w - 28, rowH, 0, 1)
+    Loop n {
+        i := A_Index
+        iy := y + 4 + (i - 1) * rowH - d.scroll + yo
+        if (iy + rowH < y || iy > y + fullH)
+            continue
+        sel := (d.list.Value = i)
+        hv := ULerp("ddh" i, (UHover = "ddi" i) ? 1 : 0, 0.25)
+        URR(x + 4, iy, w - 8, rowH - 2, 8, UCol("Hover", Round(255 * Max(sel ? 0.8 : 0, hv))))
+        tx := x + 14
+        if (d.list = AccentDDL) {
+            p := AccentPresets[i]
+            a1 := UHexArr(p.a), a2 := UHexArr(p.b)
+            UGradFill(x + 14, iy + 8, 26, 12, 6, [a1, a2])
+            tx := x + 50
+        } else if (d.list = LogoGradDDL || d.list = HudGradDDL) {
+            UGradFill(x + 14, iy + 8, 26, 12, 6, GradStops(i))
+            tx := x + 50
+        }
+        UText(items[i], tx, iy, sel ? UAccMix("Text", 0.85) : UCol("Text"), F_Sm, w - (tx - x) - 26, rowH - 2, 0, 1)
+        if (sel)
+            UText(Chr(0xE73E), x + w - 28, iy, UAcc(), F_IconSm, 16, rowH - 2, 1, 1)
+    }
+    UClipReset()
+    UAlpha := 1.0
+    if (d.open && t > 0.9) {
+        UHit("ddbg", 0, 0, UW, UH, UCloseDD)
+        Loop n {
+            iy := y + 4 + (A_Index - 1) * rowH - d.scroll
+            if (iy < y + 2 || iy + rowH > y + fullH)
+                continue
+            UHit("ddi" A_Index, x + 4, iy, w - 8, rowH - 2, UPickDD.Bind(A_Index))
+        }
+    }
+}
+
+; ==============================================================================
+;  RENDER
+; ==============================================================================
+
+URender() {
+    pc := A_IsCritical
+    Critical
+    try URenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+URenderInner() {
+    global UG, US, UW, UH, USide, UTop, UAnimating, UHits, UHitsB, UAlpha, UFrameK, UFrameAt
+    global UWinT, UWinTarget, UWinHide, UPageT, UScroll, UScrollT, UContentH, UHwnd, UHover, UScrollDrag
+    global CurrentTab, CurrentSubTab, F_H, F_Sm, F_Icon, F_IconSm, UBgBmp
+    now := A_TickCount
+    dt := now - UFrameAt
+    UFrameK := (dt > 120 || dt <= 0) ? 1.0 : Max(0.5, Min(3.0, dt / 16.67))
+    UFrameAt := now
+    UCacheTrim()
+    UAnimating := false
+    UHitsB := []
+    UAlpha := 1.0
+
+    ; open / close: fade and a small zoom
+    UWinT := ULerp("win", UWinTarget, UWinTarget ? 0.2 : 0.28)
+    if (UWinHide && UWinT <= 0.02) {
+        UHideNow()
+        return
+    }
+    UPageT := ULerp("page", 1, 0.14)
+    UScroll += (UScrollT - UScroll) * (1 - (1 - 0.25) ** UFrameK)
+    if (Abs(UScrollT - UScroll) < 0.5)
+        UScroll := UScrollT
+    else
+        UAnimating := true
+
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", UG, "UInt", 0)
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
+    k := 0.955 + 0.045 * UEase(UWinT)
+    if (k < 0.999) {
+        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", UW / 2, "Float", UH / 2 + (1 - UWinT) * 10, "Int", 0)
+        DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", UG, "Float", k, "Float", k, "Int", 0)
+        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", -UW / 2, "Float", -UH / 2, "Int", 0)
+    }
+
+    UBuildBg()
+    DllCall("gdiplus\GdipDrawImageRectI", "Ptr", UG, "Ptr", UBgBmp, "Int", 0, "Int", 0, "Int", UW, "Int", UH)
+
+    UDrawSidebar()
+    UDrawTopBar()
+
+    ; page content (scrolls; slides up a little and fades in when the page changes)
+    viewTop := UTop - 6, viewBot := UH - 14
+    UClip(USide + 1, viewTop, UW - USide - 2, viewBot - viewTop)
+    UAlpha := UPageT
+    yOff := UTop - UScroll + 14 * (1 - UEase(UPageT))
+    bottom := UDrawPage(yOff)
+    UContentH := bottom - yOff + 6
+    UAlpha := 1.0
+    UClipReset()
+
+    ; scrollbar
+    viewH := viewBot - UTop
+    if (UContentH > viewH) {
+        maxS := UContentH - viewH
+        if (UScrollT > maxS)
+            UScrollT := maxS
+        th := Max(34, viewH * viewH / UContentH)
+        ty := UTop + (viewH - th) * (UScroll / maxS)
+        hot := (UHover = "vs" || IsObject(UScrollDrag))
+        URR(UW - 12, UTop, 4, viewH, 2, UCol("Track", 120))
+        UGradFill(UW - (hot ? 13 : 12), ty, hot ? 6 : 4, th, 3, GradStops(1), 0, hot ? 1 : 0.75)
+        UHit("vs", UW - 20, UTop, 18, viewH, "vscroll", {top: UTop, trackH: viewH, thumbH: th, max: maxS})
+    } else if (UScrollT > 0) {
+        UScrollT := 0
+    }
+
+    UDrawDD()
+    UHits := UHitsB
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
+    ULayered(UHwnd, US.dc, UW, UH, Round(255 * UEase(UWinT)))
+}
+
+; window background with the colour grading: drawn once into a picture, again only when the colours change
+UBuildBg() {
+    global UBgBmp, UBgG, UBgKey, UG, UW, UH, USide, GradeAmt, AccentColor, AccentColor2, UAlpha
+    key := AccentColor "|" AccentColor2 "|" GradeAmt
+    if (UBgBmp && key = UBgKey)
+        return
+    if (!UBgBmp) {
+        bmp := 0, g := 0
+        DllCall("gdiplus\GdipCreateBitmapFromScan0", "Int", UW, "Int", UH, "Int", 0, "Int", 0xE200B, "Ptr", 0, "Ptr*", &bmp)
+        DllCall("gdiplus\GdipGetImageGraphicsContext", "Ptr", bmp, "Ptr*", &g)
+        DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", g, "Int", 4)
+        UBgBmp := bmp, UBgG := g
+    }
+    UBgKey := key
+    prevG := UG, prevA := UAlpha
+    UG := UBgG, UAlpha := 1.0
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", UBgG, "UInt", 0)
+    k := GradeAmt / 100
+    a1 := UHexArr(AccentColor), a2 := UHexArr(AccentColor2)
+    rgb1 := (a1[1] << 16) | (a1[2] << 8) | a1[3], rgb2 := (a2[1] << 16) | (a2[2] << 8) | a2[3]
+
+    URR(0, 0, UW, UH, 18, UCol("Win"))
+    DllCall("gdiplus\GdipSetClipPath", "Ptr", UBgG, "Ptr", UPath(0, 0, UW, UH, 18), "Int", 0)
+    URR(0, 0, USide, UH, 0, UCol("Side"))
+    ; diagonal grade: accent from the top left, second accent from the bottom right
+    cols := Buffer(16), pos := Buffer(16)
+    NumPut("UInt", (Round(46 * k) << 24) | rgb1, cols, 0), NumPut("UInt", rgb1, cols, 4)
+    NumPut("UInt", rgb2, cols, 8), NumPut("UInt", (Round(34 * k) << 24) | rgb2, cols, 12)
+    NumPut("Float", 0, pos, 0), NumPut("Float", 0.46, pos, 4), NumPut("Float", 0.58, pos, 8), NumPut("Float", 1, pos, 12)
+    p1 := Buffer(8), p2 := Buffer(8)
+    NumPut("Float", 0, p1, 0), NumPut("Float", 0, p1, 4), NumPut("Float", UW, p2, 0), NumPut("Float", UH, p2, 4)
+    br := 0
+    DllCall("gdiplus\GdipCreateLineBrush", "Ptr", p1, "Ptr", p2, "UInt", 0, "UInt", 0, "Int", 0, "Ptr*", &br)
+    DllCall("gdiplus\GdipSetLinePresetBlend", "Ptr", br, "Ptr", cols, "Ptr", pos, "Int", 4)
+    DllCall("gdiplus\GdipFillRectangle", "Ptr", UBgG, "Ptr", br, "Float", 0, "Float", 0, "Float", UW, "Float", UH)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", br)
+    ; soft light pools
+    UGlow(USide + 150, -30, 380, 230, rgb1, Round(52 * k))
+    UGlow(UW + 10, UH + 30, 330, 230, rgb2, Round(40 * k))
+    UGlow(70, 40, 190, 130, rgb1, Round(44 * k))
+    DllCall("gdiplus\GdipResetClip", "Ptr", UBgG)
+    ; edges
+    ULine(USide + 0.5, 22, USide + 0.5, UH - 22, UCol("Border"))
+    URRLine(0, 0, UW, UH, 18, UCol("Border"))
+    UGradFill(60, 0.6, UW - 120, 1.3, 0, GradStops(1), 0, 0.25 + 0.6 * k)
+    UG := prevG, UAlpha := prevA
+}
+
+; ---------- sidebar ----------
+UDrawSidebar() {
+    global USide, UH, CurrentTab, CurrentSubTab, UHover, F_Tiny, F_Sm, F_B, F_UI, F_IconSm, IsMacrosLocked
+    UDrawLogo(24, 22)
+    ; small edition pill
+    URR(26, 60, 96, 20, 10, UCol("Pill", 220))
+    URRLine(26, 60, 96, 20, 10, UCol("Border"))
+    UDisc(37, 70, 3, UAcc())
+    UText("TSB EDITION", 45, 60, UCol("Text2"), F_Tiny, 80, 20, 0, 1)
+
+    y := 104
+    UText("MAIN", 28, y, UCol("Muted"), F_Tiny, 120, 18, 0, 1)
+    y += 22
+    y := UNavItem(1, Chr(0xE945), "Macros", y)
+    ; the macro sub pages open under "Macros"
+    mo := ULerp("macx", CurrentTab = 1 ? 1 : 0, 0.18)
+    if (mo > 0.01) {
+        subs := ["Extenders", "Backdash", "Movement"]
+        UClip(0, y - 2, USide, (subs.Length * 30 + 6) * mo + 2)
+        UAlpha := mo
+        ULine(38, y, 38, y + (subs.Length * 30 - 4) * mo, UCol("Border"))
+        for i, nm in subs {
+            iy := y + (i - 1) * 30 * mo
+            sel := (CurrentSubTab = i)
+            st := ULerp("sub" i, sel ? 1 : 0, 0.2)
+            hv := ULerp("subh" i, UHover = "sub" i ? 1 : 0, 0.25)
+            URR(50, iy, USide - 64, 26, 8, UCol("Hover", Round(200 * Max(st * 0.9, hv * 0.6))))
+            if (st > 0.02)
+                UDisc(38, iy + 13, 3.5 * st, UAcc())
+            UText(nm, 62, iy, sel ? UCol("Text") : UMix("Muted", "Text2", hv), F_Sm, 120, 26, 0, 1)
+            if (mo > 0.9)
+                UHit("sub" i, 50, iy, USide - 64, 26, UGoSub.Bind(i))
+        }
+        UAlpha := 1.0
+        UClipReset()
+        y += (subs.Length * 30 + 6) * mo
+    }
+    y := UNavItem(2, Chr(0xEA86), "Misc", y)
+    y += 10
+    UText("SETUP", 28, y, UCol("Muted"), F_Tiny, 120, 18, 0, 1)
+    y += 22
+    y := UNavItem(3, Chr(0xE765), "Keybinds", y)
+    y := UNavItem(4, Chr(0xE790), "Visuals", y)
+    y := UNavItem(5, Chr(0xE713), "Settings", y)
+    y := UNavItem(6, Chr(0xE946), "Info", y)
+
+    ; profile card
+    fy := UH - 66
+    URR(14, fy, USide - 28, 52, 14, UCol("Card", 200))
+    URRLine(14, fy, USide - 28, 52, 14, UCol("Border"))
+    UGradFill(26, fy + 10, 32, 32, 16, GradStops(LogoGrad), A_TickCount / 1000 * 0.2, 1.0, 64)
+    UDisc(42, fy + 26, 13.5, UCol("Card"))
+    UText(StrUpper(SubStr(A_UserName, 1, 1)), 26, fy + 10, UCol("Text"), F_B, 32, 32, 1, 1)
+    UText(A_UserName, 68, fy + 8, UCol("Text"), F_B, USide - 96, 20, 0, 1)
+    armed := UArmedCount()
+    if (IsMacrosLocked) {
+        UDisc(72, fy + 35, 3, UCol("Red"))
+        UText("macros locked", 80, fy + 26, UCol("Red"), F_Sm, 120, 18, 0, 1)
+    } else {
+        UDisc(72, fy + 35, 3, armed ? UCol("Green") : UCol("Muted"))
+        UText(armed " macro" (armed = 1 ? "" : "s") " armed", 80, fy + 26, UCol("Text2"), F_Sm, 120, 18, 0, 1)
+    }
+}
+
+UArmedCount() {
+    n := 0
+    for v in [IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsJumpBugChecked, IsLagSwitchChecked]
+        n += v ? 1 : 0
+    return n
+}
+
+UNavItem(n, icon, label, y) {
+    global CurrentTab, UHover, USide, F_UI, F_B, F_Icon
+    id := "tab" n
+    t := ULerp(id, CurrentTab = n ? 1 : 0, 0.2)
+    hv := ULerp(id "h", UHover = id ? 1 : 0, 0.25)
+    w := USide - 28
+    URR(14, y, w, 36, 11, UCol("Hover", Round(170 * hv * (1 - t))))
+    if (t > 0.01) {
+        URR(14, y, w, 36, 11, UCol("Hover", Round(255 * t)))
+        UGradFill(14, y, w * (0.35 + 0.65 * t), 36, 11, [UHexArr(AccentColor), UPal("Hover")], 0, 0.30 * t, w * 2)
+        UGradFill(14, y + 9, 3, 18, 1.5, GradStops(1), 0, t)
+    }
+    UText(icon, 26, y, UMix("Muted", "Text", Max(t, hv * 0.6)), F_Icon, 22, 36, 1, 1)
+    if (t > 0.02)
+        UText(icon, 26, y, UAcc(Round(255 * t)), F_Icon, 22, 36, 1, 1)
+    UText(label, 58, y, UMix("Text2", "Text", Max(t, hv)), t > 0.5 ? F_B : F_UI, 130, 36, 0, 1)
+    UHit(id, 14, y, w, 36, UGoTab.Bind(n))
+    return y + 40
+}
+
+UGoTab(n, *) {
+    global CurrentTab, UPageT, UScroll, UScrollT
+    if (CurrentTab = n)
+        return
+    CurrentTab := n
+    UPageT := 0.0, UScroll := 0, UScrollT := 0
+    UAnimSet("page", 0)
+    UCloseDD()
+}
+
+UGoSub(i, *) {
+    global CurrentSubTab, UScroll, UScrollT
+    if (CurrentSubTab = i)
+        return
+    CurrentSubTab := i
+    UScroll := 0, UScrollT := 0
+    UAnimSet("page", 0)
+}
+
+UAnimSet(id, v) {
+    global UAnim
+    UAnim[id] := v
+}
+
+; the brand: the letters of DESTINY filled from the chosen (moving) gradient
+UDrawLogo(x, y) {
+    global F_Logo, LogoGrad, LogoAnimated
+    txt := "DESTINY", n := StrLen(txt)
+    st := GradStops(LogoGrad)
+    sh := LogoAnimated ? A_TickCount / 1000 * 0.22 : 0
+    cx := x
+    Loop n {
+        ch := SubStr(txt, A_Index, 1)
+        c := GradSample(st, (A_Index - 1) / n * 0.85 - sh)
+        UText(ch, cx, y + 2, UC(c[1], c[2], c[3], 55), F_Logo, 40, 34, 0, 1)
+        UText(ch, cx, y, UC(c[1], c[2], c[3]), F_Logo, 40, 34, 0, 1)
+        cx += UTextW(ch ch, F_Logo) - UTextW(ch, F_Logo) + 1.2
+    }
+    return cx
+}
+
+; ---------- top bar ----------
+UDrawTopBar() {
+    global CurrentTab, CurrentSubTab, USide, UW, UHover, F_H, F_Sm, F_IconSm, IsMacrosLocked
+    titles := ["Macros", "Misc", "Keybinds", "Visuals", "Settings", "Info"]
+    subs := ["Combat tech for The Strongest Battlegrounds", "Lagswitch and freeze options", "Bind your macros and the system keys"
+        , "HUD, notifications and colour grading", "Configs and camera sensitivity", "About Destiny"]
+    x := USide + 28
+    UText(titles[CurrentTab], x, 22, UCol("Text"), F_H, 300, 32, 0, 1)
+    tw := UTextW(titles[CurrentTab], F_H)
+    if (CurrentTab = 1) {
+        nm := ["Extenders", "Backdash", "Movement"][CurrentSubTab]
+        cw := UTextW(nm, F_Sm) + 22
+        URR(x + tw + 4, 28, cw, 22, 11, UAcc(34))
+        URRLine(x + tw + 4, 28, cw, 22, 11, UAcc(90))
+        UText(nm, x + tw + 4, 28, UAccMix("Text", 0.75), F_Sm, cw, 22, 1, 1)
+    }
+    UText(subs[CurrentTab], x, 54, UCol("Muted"), F_Sm, 420, 18, 0, 1)
+
+    ; lock chip, minimise, close
+    if (IsMacrosLocked) {
+        URR(UW - 192, 28, 92, 24, 12, UC(240, 88, 96, 36))
+        UText("LOCKED", UW - 192, 28, UCol("Red"), F_Sm, 92, 24, 1, 1)
+    }
+    for b in [["min", Chr(0xE921), UW - 88], ["close", Chr(0xE8BB), UW - 52]] {
+        hv := ULerp(b[1], UHover = b[1] ? 1 : 0, 0.25)
+        red := (b[1] = "close")
+        URR(b[3], 24, 32, 32, 10, red ? UC(240, 88, 96, Round(200 * hv)) : UCol("Hover", Round(255 * hv)))
+        UText(b[2], b[3], 24, red ? UMix("Text2", "Text", hv) : UMix("Muted", "Text", hv), F_IconSm, 32, 32, 1, 1)
+        UHit(b[1], b[3], 24, 32, 32, red ? CloseApp : MinimizeApp)
+    }
+}
+
+; ==============================================================================
+;  CARDS & ROWS
+; ==============================================================================
+
+; A card grows / shrinks smoothly to the height its rows needed in the last frame.
+UCardBegin(id, title, icon := "") {
+    global UCX, UCY, UCW, UCardTop, UCardId, UCardH, F_B, F_IconSm
+    UCardId := id, UCardTop := UCY
+    h := ULerp("ch" id, UCardH.Get(id, 120), 0.25)
+    URR(UCX, UCY + 3, UCW, h, 16, UC(0, 0, 0, 40))
+    URR(UCX, UCY, UCW, h, 16, UCol("Card", 235))
+    UGradFill(UCX, UCY, UCW, 46, 16, [UHexArr(AccentColor), UPal("Card")], 0, 0.07, UCW * 2)
+    URRLine(UCX, UCY, UCW, h, 16, UCol("Border"))
+    tx := UCX + 18
+    if (icon != "") {
+        URR(UCX + 16, UCY + 14, 22, 22, 7, UAcc(38))
+        UText(icon, UCX + 16, UCY + 14, UAcc(), F_IconSm, 22, 22, 1, 1)
+        tx := UCX + 46
+    }
+    UText(title, tx, UCY + 14, UCol("Text"), F_B, UCW - 70, 22, 0, 1)
+    ULine(UCX + 16, UCY + 46, UCX + UCW - 16, UCY + 46, UCol("Border"))
+    UCY += 54
+}
+
+UCardEnd() {
+    global UCY, UCardTop, UCardId, UCardH, UAnimating
+    UCY += 8
+    h := UCY - UCardTop
+    if (!UCardH.Has(UCardId))
+        UAnimSet("ch" UCardId, h)                           ; (first time: no growing out of a guess)
+    if (UCardH.Get(UCardId, 0) != h) {
+        UCardH[UCardId] := h
+        UAnimating := true
+    }
+    UCY := UCardTop + h + 16
+}
+
+URowHover(id, h) {
+    global UCX, UCY, UCW, UHover
+    hv := ULerp("h" id, UHover = id ? 1 : 0, 0.22)
+    if (hv > 0.01)
+        URR(UCX + 6, UCY, UCW - 12, h, 11, UCol("Hover", Round(255 * hv)))
+    return hv
+}
+
+UToggleRow(id, label, desc, on, fn) {
+    global UCX, UCY, UCW, F_UI, F_Sm
+    two := (desc != "" && UTextW(desc, F_Sm) > UCW - 96)       ; (a long description gets a second line)
+    h := (desc = "") ? 40 : two ? 68 : 52
+    URowHover(id, h)
+    t := ULerp(id, on ? 1 : 0, 0.2)
+    if (desc = "") {
+        UText(label, UCX + 18, UCY, UCol("Text"), F_UI, UCW - 90, h, 0, 1)
+    } else {
+        UText(label, UCX + 18, UCY + 7, UCol("Text"), F_UI, UCW - 90, 20, 0, 1)
+        UText(desc, UCX + 18, UCY + 27, UCol("Muted"), F_Sm, UCW - 96, two ? 36 : 18, 0, 0, two)
+    }
+    sx := UCX + UCW - 18 - 42, sy := UCY + h / 2 - 11.5
+    URR(sx, sy, 42, 23, 11.5, UCol("Off"))
+    if (t > 0.01) {
+        UGradFill(sx, sy, 42, 23, 11.5, GradStops(1), 0, t, 84)
+        URR(sx - 3, sy - 3, 48, 29, 14.5, UAcc(Round(26 * t)))
+    }
+    UDisc(sx + 11.5 + 19 * t, sy + 11.5, 8.5, UC(255, 255, 255))
+    UHitP(id, UCX + 6, UCY, UCW - 12, h, UToggleAct.Bind(fn, label, on))
+    UCY += h + 2
+}
+
+USliderRow(id, label, minv, maxv, val, setter, fmt := "{}") {
+    global UCX, UCY, UCW, USlider, UHover, F_UI, F_Sm
+    h := 56
+    drag := IsObject(USlider) && USlider.id = id
+    URowHover(id, h)
+    t := ULerp(id, (Max(minv, Min(maxv, val)) - minv) / (maxv - minv), drag ? 0.6 : 0.2)
+    UText(label, UCX + 18, UCY + 6, UCol("Text"), F_UI, UCW - 110, 22, 0, 1)
+    txt := Format(fmt, val)
+    cw := UTextW(txt, F_Sm) + 18
+    URR(UCX + UCW - 18 - cw, UCY + 7, cw, 20, 10, drag ? UAcc(50) : UCol("Pill"))
+    UText(txt, UCX + UCW - 18 - cw, UCY + 7, drag ? UCol("Text") : UCol("Text2"), F_Sm, cw, 20, 1, 1)
+    tx := UCX + 20, tw := UCW - 40, ty := UCY + 38
+    URR(tx, ty, tw, 5, 2.5, UCol("Track"))
+    UGradFill(tx, ty, Max(5, tw * t), 5, 2.5, GradStops(1), 0, 1.0, tw)
+    hot := drag || UHover = id
+    gl := ULerp(id "g", hot ? 1 : 0, 0.25)
+    if (gl > 0.01)
+        UDisc(tx + tw * t, ty + 2.5, 12, UAcc(Round(55 * gl)))
+    UDisc(tx + tw * t, ty + 2.5, 7, UC(255, 255, 255))
+    UHitP(id, tx - 10, UCY + 26, tw + 20, 26, "slider", {id: id, min: minv, max: maxv, tx: tx, tw: tw, setter: setter, last: val, label: label, fmt: fmt})
+    UCY += h + 2
+}
+
+UKeyRow(id, label, box, starter) {
+    global UCX, UCY, UCW, F_UI, F_Sm
+    h := 42
+    URowHover(id, h)
+    UText(label, UCX + 18, UCY, UCol("Text"), F_UI, UCW - 160, h, 0, 1)
+    listening := InStr(box.Text, "Press") ? true : false
+    txt := listening ? "press a key..." : box.Text
+    none := (txt = "NONE")
+    cw := Max(70, UTextW(txt, F_Sm) + 24)
+    bx := UCX + UCW - 18 - cw, by := UCY + 8
+    URR(bx, by, cw, 26, 9, UCol("Pill"))
+    if (listening) {
+        p := 0.5 + 0.5 * Sin(A_TickCount / 160)
+        URR(bx, by, cw, 26, 9, UAcc(Round(30 + 30 * p)))
+        URRLine(bx, by, cw, 26, 9, UAcc(Round(150 + 105 * p)))
+    } else
+        URRLine(bx, by, cw, 26, 9, UCol("Border"))
+    UText(txt, bx, by, listening ? UCol("Text") : (none ? UCol("Muted") : UCol("Text2")), F_Sm, cw, 26, 1, 1)
+    UHitP(id, UCX + 6, UCY, UCW - 12, h, UKeyAct.Bind(starter, label, box))
+    UCY += h + 2
+}
+
+UDropRow(id, label, list) {
+    global UCX, UCY, UCW, UDD, UHover, F_UI, F_Sm, F_IconSm
+    h := 42
+    URowHover(id, h)
+    UText(label, UCX + 18, UCY, UCol("Text"), F_UI, UCW - 190, h, 0, 1)
+    pw := Min(160, UCW - 120)
+    bx := UCX + UCW - 18 - pw, by := UCY + 8
+    isOpen := IsObject(UDD) && UDD.id = id && UDD.open
+    URR(bx, by, pw, 26, 9, UCol("Pill"))
+    URRLine(bx, by, pw, 26, 9, isOpen ? UAcc(200) : UCol("Border"))
+    txt := list.Text
+    tx := bx + 12
+    if (list = AccentDDL && list.Value) {
+        p := AccentPresets[list.Value]
+        UGradFill(bx + 10, by + 8, 18, 10, 5, [UHexArr(p.a), UHexArr(p.b)])
+        tx := bx + 36
+    } else if ((list = LogoGradDDL || list = HudGradDDL) && list.Value) {
+        UGradFill(bx + 10, by + 8, 18, 10, 5, GradStops(list.Value), A_TickCount / 1000 * 0.2, 1.0, 36)
+        tx := bx + 36
+    }
+    UText(txt = "" ? "none yet" : txt, tx, by, txt = "" ? UCol("Muted") : UCol("Text"), F_Sm, pw - (tx - bx) - 24, 26, 0, 1)
+    UText(isOpen ? Chr(0xE70E) : Chr(0xE70D), bx + pw - 24, by, UCol("Muted"), F_IconSm, 18, 26, 1, 1)
+    if (IsObject(UDD) && UDD.id = id)
+        UDD.ax := bx, UDD.ay := by, UDD.aw := pw
+    UHitP(id, UCX + 6, UCY, UCW - 12, h, UOpenDD.Bind(id, list, label))
+    UCY += h + 2
+}
+
+UEditRow(id, label, value, kind, setter, suffix := "") {
+    global UCX, UCY, UCW, UEdit, F_UI, F_Sm
+    h := 42
+    URowHover(id, h)
+    UText(label, UCX + 18, UCY, UCol("Text"), F_UI, UCW - 170, h, 0, 1)
+    editing := IsObject(UEdit) && UEdit.id = id
+    fw := (kind = "text") ? 150 : 100
+    bx := UCX + UCW - 18 - fw, by := UCY + 8
+    URR(bx, by, fw, 26, 9, UCol("Pill"))
+    URRLine(bx, by, fw, 26, 9, editing ? UAcc(220) : UCol("Border"))
+    if (editing) {
+        caret := Mod(A_TickCount // 500, 2) ? "" : "|"
+        UText(UEdit.buf caret, bx + 10, by, UCol("Text"), F_Sm, fw - 20, 26, 0, 1)
+    } else {
+        UText(value, bx + 10, by, UCol("Text2"), F_Sm, fw - 20 - (suffix != "" ? 22 : 0), 26, 0, 1)
+        if (suffix != "")
+            UText(suffix, bx, by, UCol("Muted"), F_Sm, fw - 10, 26, 2, 1)
+    }
+    UHitP(id, UCX + 6, UCY, UCW - 12, h, UEditStart.Bind(id, value, kind, setter))
+    UCY += h + 2
+}
+
+; a row of buttons; each item: [id, text, fn, primary]
+UButtonRow(btns) {
+    global UCX, UCY, UCW, UHover, UActive, UDown, F_B
+    h := 36, gap := 8
+    n := btns.Length
+    bw := (UCW - 36 - gap * (n - 1)) / n
+    x := UCX + 18
+    for b in btns {
+        hv := ULerp("b" b[1], UHover = b[1] ? 1 : 0, 0.25)
+        pr := (UDown && IsObject(UActive) && UActive.id = b[1]) ? 1 : 0
+        pk := ULerp("bp" b[1], pr, 0.35)
+        ins := 1.5 * pk
+        if (b.Length >= 4 && b[4]) {
+            UGradFill(x + ins, UCY + 4 + ins, bw - ins * 2, h - ins * 2, 10, GradStops(1), A_TickCount / 1000 * 0.15 * hv, 0.85 + 0.15 * hv, bw * 2)
+            if (hv > 0.01)
+                URR(x - 2, UCY + 2, bw + 4, h + 4, 12, UAcc(Round(30 * hv)))
+            UText(b[2], x, UCY + 4, UC(255, 255, 255), F_B, bw, h, 1, 1)
+        } else {
+            URR(x + ins, UCY + 4 + ins, bw - ins * 2, h - ins * 2, 10, UMix("Pill", "Hover", hv))
+            URRLine(x + ins, UCY + 4 + ins, bw - ins * 2, h - ins * 2, 10, UMix("Border", "Muted", hv * 0.5))
+            UText(b[2], x, UCY + 4, UMix("Text2", "Text", hv), F_B, bw, h, 1, 1)
+        }
+        UHitP(b[1], x, UCY + 4, bw, h, b[3])
+        x += bw + gap
+    }
+    UCY += h + 12
+}
+
+; small selectable chips; each item: [id, text, fn, selected]
+UChipRow(chips) {
+    global UCX, UCY, UCW, UHover, F_Sm
+    h := 28, gap := 6
+    n := chips.Length
+    cw := (UCW - 36 - gap * (n - 1)) / n
+    x := UCX + 18
+    for c in chips {
+        hv := ULerp("c" c[1], UHover = c[1] ? 1 : 0, 0.25)
+        st := ULerp("cs" c[1], c[4] ? 1 : 0, 0.2)
+        URR(x, UCY + 2, cw, h, 9, UMix("Pill", "Hover", hv))
+        if (st > 0.01) {
+            URR(x, UCY + 2, cw, h, 9, UAcc(Round(40 * st)))
+            URRLine(x, UCY + 2, cw, h, 9, UAcc(Round(200 * st)))
+        } else
+            URRLine(x, UCY + 2, cw, h, 9, UCol("Border"))
+        UText(c[2], x, UCY + 2, st > 0.5 ? UCol("Text") : UMix("Text2", "Text", hv), F_Sm, cw, h, 1, 1)
+        UHitP(c[1], x, UCY + 2, cw, h, c[3])
+        x += cw + gap
+    }
+    UCY += h + 12
+}
+
+; a label on the left, a value on the right (optionally clickable)
+UInfoRow(id, label, value, valCol := "", fn := "") {
+    global UCX, UCY, UCW, F_UI, F_Sm
+    h := 36
+    if (fn)
+        URowHover(id, h)
+    UText(label, UCX + 18, UCY, UCol("Text2"), F_UI, UCW - 150, h, 0, 1)
+    cw := Max(56, UTextW(value, F_Sm) + 22)
+    URR(UCX + UCW - 18 - cw, UCY + 7, cw, 22, 11, UCol("Pill"))
+    UText(value, UCX + UCW - 18 - cw, UCY + 7, valCol = "" ? UCol("Text") : valCol, F_Sm, cw, 22, 1, 1)
+    if (fn)
+        UHitP(id, UCX + 6, UCY, UCW - 12, h, fn)
+    UCY += h
+}
+
+UTextRow(text, col := "", lines := 2, font := 0) {
+    global UCX, UCY, UCW, F_Sm
+    h := lines * 17 + 8
+    UText(text, UCX + 18, UCY + 4, col = "" ? UCol("Muted") : col, font ? font : F_Sm, UCW - 36, h, 0, 0, true)
+    UCY += h + 4
+}
+
+UStatusRow(text, col) {
+    global UCX, UCY, UCW, F_Sm
+    URR(UCX + 16, UCY + 4, UCW - 32, 30, 10, UCol("Pill"))
+    p := 0.6 + 0.4 * Sin(A_TickCount / 300)
+    UDisc(UCX + 32, UCY + 19, 3.5, col)
+    UText(text, UCX + 44, UCY + 4, UCol("Text2"), F_Sm, UCW - 70, 30, 0, 1)
+    UCY += 42
+}
+
+; ==============================================================================
+;  PAGES
+; ==============================================================================
+
+UColumn(n, top) {
+    global UCX, UCY, UCW, USide, UW
+    full := UW - USide - 28 - 24
+    w := (full - 16) / 2
+    UCW := (n = 0) ? full : w
+    UCX := USide + 28 + (n = 2 ? w + 16 : 0)
+    UCY := top
+}
+
+; draws the current page at the given top; returns where it ends
+UDrawPage(top) {
+    global CurrentTab, CurrentSubTab, UCY
+    switch CurrentTab {
+        case 1: return UPageMacros(top, CurrentSubTab)
+        case 2: return UPageMisc(top)
+        case 3: return UPageKeys(top)
+        case 4: return UPageVisuals(top)
+        case 5: return UPageSettings(top)
+        default: return UPageInfo(top)
+    }
+}
+
+UPageMacros(top, sub) {
+    global UCY, RobloxSensitivity
+    if (sub = 1) {
+        UColumn(0, top)
+        UCardBegin("c_ext", "Extender Tech", Chr(0xE945))
+        UToggleRow("t_ext1", "Instant Lethal", "instant lethal extender", IsExtender1Checked, ToggleExt1Box)
+        UToggleRow("t_ext2", "Instant Twisted", "instant twisted extender.", IsExtender2Checked, ToggleExt2Box)
+        UToggleRow("t_ext3", "Solitude Dash", "the solitude dash, still in work.", IsExtender3Checked, ToggleExt3Box)
+        UToggleRow("t_ext4", "Dripz Tech", "the usual dripz dash, right timing is needed", IsExtender4Checked, ToggleExt4Box)
+        UCardEnd()
+        return UCY
+    }
+    if (sub = 2) {
+        UColumn(1, top)
+        UCardBegin("c_bd", "Backdash Tech", Chr(0xE72B))
+        UToggleRow("t_bd1", "Backdash 1", "not done yet....", IsBD1Checked, ToggleBD1Box)
+        UToggleRow("t_bd2", "Side Backdash", "not done yet....", IsBD2Checked, ToggleBD2Box)
+        UToggleRow("t_bd3", "Instant Backdash", "not done yet....", IsBD3Checked, ToggleBD3Box)
+        UCardEnd()
+        b1 := UCY
+        UColumn(2, top)
+        UCardBegin("c_bdn", "Note", Chr(0xE946))
+        UTextRow("not done yet....", "", 1)
+        UCardEnd()
+        return Max(b1, UCY)
+    }
+    UColumn(0, top)
+    UCardBegin("c_mv", "Movement Tech", Chr(0xE7C1))
+    UToggleRow("t_jb", "Jump Bug", "you fly around trashcans/fences .", IsJumpBugChecked, ToggleJumpBugBox)
+    UCardEnd()
+    return UCY
+}
+
+UPageMisc(top) {
+    global UCY, FreezeDuration, IsLagPrecision, IsLagBurst, IsLagHold, LagBurstCount, LagKey
+    UColumn(1, top)
+    UCardBegin("c_lag", "Lagswitch", Chr(0xE916))
+    UToggleRow("t_lag", "Enable Lagswitch", "Freeze key: " FormatKeyName(LagKey), IsLagSwitchChecked, ToggleLagBox)
+    UEditRow("e_lag", "Freeze duration", FreezeDuration, "int", (v) => (EditLagDur.Value := v, ApplyLagSettings(), UNotify("Freeze duration", FreezeDuration " ms", true, "system")), "ms")
+    UButtonRow([["b_test", "Test Freeze", TestFreeze, true]])
+    st := LagStatusText.Text
+    UStatusRow(st, InStr(st, "Ready") ? UCol("Green") : (InStr(st, "not") ? UCol("Red") : UAcc()))
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_lagm", "Modes", Chr(0xE9E9))
+    UToggleRow("t_prec", "High-precision timing", "1 ms timer while freezing", IsLagPrecision, ToggleLagPrecisionBox)
+    UToggleRow("t_brst", "Burst mode", "splits the freeze into short bursts", IsLagBurst, ToggleLagBurstBox)
+    USliderRow("s_brst", "Burst count", 1, 20, LagBurstCount, UpdateLagBurstCount)
+    UToggleRow("t_hold", "Hold key to freeze", "frozen while the key is held", IsLagHold, ToggleLagHoldBox)
+    UCardEnd()
+    return Max(b1, UCY)
+}
+
+UPageKeys(top) {
+    global UCY
+    UColumn(1, top)
+    UCardBegin("c_keys", "Macro Keys", Chr(0xE945))
+    UKeyRow("k_ext1", "Instant Lethal", BtnK_Ext1, StartBindExt1)
+    UKeyRow("k_ext2", "Instant Twisted", BtnK_Ext2, StartBindExt2)
+    UKeyRow("k_ext3", "Solitude Dash", BtnK_Ext3, StartBindExt3)
+    UKeyRow("k_ext4", "Dripz Tech", BtnK_Ext4, StartBindExt4)
+    UKeyRow("k_jb", "Jump Bug", BtnK_JumpBug, StartBindJumpBug)
+    UKeyRow("k_lag", "Lagswitch", BtnK_Lag, StartBindLag)
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_sys", "System Keys", Chr(0xE713))
+    UKeyRow("k_lock", "Panic lock", BtnK_Lock, StartBindLock)
+    UKeyRow("k_min", "Menu toggle", BtnK_Min, StartBindMin)
+    UKeyRow("k_rel", "Reload script", BtnK_Rel, StartBindRel)
+    UKeyRow("k_exit", "Emergency exit", BtnK_Exit, StartBindExit)
+    UCardEnd()
+    UCardBegin("c_howto", "How to bind", Chr(0xE946))
+    UTextRow("Click a key box, then press a key or mouse button (Mouse 4/5, middle and right click work). Escape clears the bind.", "", 3)
+    UCardEnd()
+    return Max(b1, UCY)
+}
+
+UPageVisuals(top) {
+    global UCY, ShowSidebarIndicators, ShowStatusNotifs, HudCompact, HudShowKeys, HudOpacity, HudScale, GradeAmt, LogoAnimated, IsLagVignette, VignetteThickness
+    UColumn(1, top)
+    UCardBegin("c_hud", "Macro HUD", Chr(0xE7F4))
+    UToggleRow("t_hud", "Show HUD", "drag it while the menu is open", ShowSidebarIndicators, ToggleSidebarIndicators)
+    UToggleRow("t_hudc", "Compact", "only lists armed macros", HudCompact, UToggleHudCompact)
+    UToggleRow("t_hudk", "Show keys", "", HudShowKeys, UToggleHudKeys)
+    UDropRow("d_hudpos", "Position", HudPosDDL)
+    UDropRow("d_hudb", "Border", HudBorderDDL)
+    UDropRow("d_hudg", "Gradient", HudGradDDL)
+    USliderRow("s_hudsz", "Size", 50, 150, HudScale, SetHudScale, "{}%")
+    USliderRow("s_hudop", "Opacity", 10, 100, Round(HudOpacity / 2.55), SetHudOpacity, "{}%")
+    UCardEnd()
+    UCardBegin("c_notif", "Notifications", Chr(0xEA8F))
+    UToggleRow("t_notif", "Status popups", "cards in the bottom right corner", ShowStatusNotifs, ToggleStatusNotifs)
+    if (ShowStatusNotifs) {
+        UTextRow("Show a card for:", UCol("Text2"), 1)
+        UToggleRow("n_toggle", "Menu switches", "turning macros and options on / off", NotifCats["toggle"], UToggleNotif.Bind("toggle"))
+        UToggleRow("n_fire", "Macros fired by key", "every time a macro runs in game", NotifCats["fire"], UToggleNotif.Bind("fire"))
+        UToggleRow("n_slider", "Sliders", "", NotifCats["slider"], UToggleNotif.Bind("slider"))
+        UToggleRow("n_pick", "Dropdowns", "", NotifCats["pick"], UToggleNotif.Bind("pick"))
+        UToggleRow("n_key", "Keybinds", "", NotifCats["key"], UToggleNotif.Bind("key"))
+        UToggleRow("n_system", "Configs & sensitivity", "saving, loading, applying values", NotifCats["system"], UToggleNotif.Bind("system"))
+    }
+    UButtonRow([["b_prev", "Preview", (*) => ShowStatus("PREVIEW: Looks good", "0x082A13", 0, true)]])
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_grade", "Colour Grading", Chr(0xE790))
+    UDropRow("d_acc", "Accent", AccentDDL)
+    UDropRow("d_logo", "Logo gradient", LogoGradDDL)
+    UToggleRow("t_logoa", "Animated logo", "", LogoAnimated, UToggleLogoAnim)
+    USliderRow("s_grade", "Grading strength", 0, 100, GradeAmt, USetGrade, "{}%")
+    UCardEnd()
+    UCardBegin("c_vig", "Lagswitch Vignette", Chr(0xE7B3))
+    UToggleRow("t_vig", "Red border while frozen", "", IsLagVignette, ToggleLagVignetteBox)
+    USliderRow("s_vig", "Border thickness", 2, 30, VignetteThickness, SetVignetteThickness, "{} px")
+    UCardEnd()
+    return Max(b1, UCY)
+}
+
+UPageSettings(top) {
+    global UCY, RobloxSensitivity, ConfigDir
+    UColumn(1, top)
+    UCardBegin("c_cfg", "Configs", Chr(0xE74E))
+    UEditRow("e_cfg", "Config name", EditProfileName.Value, "text", (v) => EditProfileName.Value := v)
+    UButtonRow([["b_save", "Save", SaveCustomProfile, true], ["b_load", "Load", LoadCustomProfile]])
+    UDropRow("d_cfg", "Saved configs", ProfileDDL)
+    UButtonRow([["b_del", "Delete", DeleteCustomProfile], ["b_reset", "Reset defaults", ResetDefaults]])
+    UTextRow("Stored in " ConfigDir, "", 3)
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_sens", "Roblox Sensitivity", Chr(0xE7C9))
+    UTextRow("Set this to your in-game camera sensitivity. Macro camera flicks scale to it.", "", 2)
+    UEditRow("e_sens", "Sensitivity", USens(RobloxSensitivity), "float", (v) => (EditSens.Value := v, ApplySensitivity()))
+    chips := []
+    for v in [0.25, 0.36, 0.50, 0.80, 1.00]
+        chips.Push(["p" A_Index, Format("{:.2f}", v), SetSensPreset.Bind(v), Abs(RobloxSensitivity - v) < 0.0001])
+    UChipRow(chips)
+    UStatusRow("Active sens: " USens(RobloxSensitivity), UAcc())
+    UCardEnd()
+    return Max(b1, UCY)
+}
+
+UPageInfo(top) {
+    global UCY, MacroLockKey, MinimizeKey, ReloadKey, ExitKey, F_Mono
+    UColumn(1, top)
+    UCardBegin("c_about", "Destiny // TSB Edition", Chr(0xE946))
+    UTextRow("Macro for Roblox: The Strongest Battlegrounds.", UCol("Text2"), 1)
+    UTextRow("Macros only fire while the Roblox window (RobloxPlayerBeta.exe) is focused.", "", 2)
+    UCardEnd()
+    UCardBegin("c_short", "Shortcuts", Chr(0xE765))
+    UInfoRow("i_lock", "Panic lock", FormatKeyName(MacroLockKey), "", UGoTab.Bind(3))
+    UInfoRow("i_min", "Show / hide menu", FormatKeyName(MinimizeKey), "", UGoTab.Bind(3))
+    UInfoRow("i_rel", "Reload script", FormatKeyName(ReloadKey), "", UGoTab.Bind(3))
+    UInfoRow("i_exit", "Exit", FormatKeyName(ExitKey), "", UGoTab.Bind(3))
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_stat", "Status", Chr(0xE9D9))
+    run := ProcessExist(TargetProcess)
+    UInfoRow("", "Roblox", run ? "running" : "not running", run ? UCol("Green") : UCol("Red"))
+    UInfoRow("", "Macros armed", UArmedCount() " of 6", UAcc())
+    UInfoRow("", "Panic lock", IsMacrosLocked ? "locked" : "off", IsMacrosLocked ? UCol("Red") : UCol("Text2"))
+    UInfoRow("", "AutoHotkey", A_AhkVersion)
+    UCardEnd()
+    return Max(b1, UCY)
+}
+
+; ==============================================================================
+;  SETTINGS CALLBACKS
+; ==============================================================================
 
 SetVignetteThickness(val) {
     global VignetteThickness
@@ -810,9 +1762,17 @@ SetVignetteThickness(val) {
 }
 
 SetHudOpacity(val) {
-    global HudOpacity, IndicatorHud
+    global HudOpacity
     HudOpacity := Round(val * 2.55)
-    WinSetTransparent(HudOpacity, IndicatorHud)
+    USavePrefs()
+    HudRequest()
+}
+
+SetHudScale(val) {
+    global HudScale
+    HudScale := val
+    USavePrefs()
+    HudRequest()
 }
 
 UpdateLagBurstCount(val) {
@@ -820,9 +1780,610 @@ UpdateLagBurstCount(val) {
     LagBurstCount := val
 }
 
+USetGrade(val) {
+    global GradeAmt
+    GradeAmt := val
+    USavePrefs()
+}
+
+UToggleNotif(cat, *) {
+    global NotifCats
+    NotifCats[cat] := !NotifCats[cat]
+    USavePrefs()
+}
+
+UToggleLogoAnim(*) {
+    global LogoAnimated
+    LogoAnimated := !LogoAnimated
+    USavePrefs()
+}
+
+UToggleHudCompact(*) {
+    global HudCompact
+    HudCompact := !HudCompact
+    USavePrefs()
+    HudRequest()
+}
+
+UToggleHudKeys(*) {
+    global HudShowKeys
+    HudShowKeys := !HudShowKeys
+    USavePrefs()
+    HudRequest()
+}
+
+UPickAccent(i) {
+    global AccentIdx, AccentColor, AccentColor2, DestinyAccent, VignetteColor
+    AccentIdx := i
+    AccentColor := AccentPresets[i].a, AccentColor2 := AccentPresets[i].b
+    DestinyAccent := AccentColor
+    USavePrefs()
+    HudRequest()
+}
+
+UPickLogoGrad(i) {
+    global LogoGrad
+    LogoGrad := i
+    USavePrefs()
+}
+
+UPickHudGrad(i) {
+    global HudGrad
+    HudGrad := i
+    USavePrefs()
+    HudRequest()
+}
+
+UPickHudBorder(i) {
+    global HudBorder
+    HudBorder := i
+    USavePrefs()
+    HudRequest()
+}
+
+UPickHudPos(i) {
+    global HudPosition, HudCustom
+    HudPosition := HudPosDDL.items[i]
+    HudCustom := false
+    HudPlace()
+    USavePrefs()
+}
+
+; look settings that belong to this PC, not to a config
+USavePrefs() {
+    SetTimer(USavePrefsNow, -400)
+}
+
+USavePrefsNow() {
+    global
+    try {
+        f := UPrefsFile
+        IniWrite(AccentIdx, f, "look", "accent")
+        IniWrite(LogoGrad, f, "look", "logo_grad")
+        IniWrite(LogoAnimated ? 1 : 0, f, "look", "logo_anim")
+        IniWrite(GradeAmt, f, "look", "grade")
+        IniWrite(ShowSidebarIndicators ? 1 : 0, f, "hud", "show")
+        IniWrite(ShowStatusNotifs ? 1 : 0, f, "hud", "notifs")
+        for c, on in NotifCats
+            IniWrite(on ? 1 : 0, f, "notify", c)
+        IniWrite(HudPosition, f, "hud", "pos")
+        IniWrite(HudOpacity, f, "hud", "opacity")
+        IniWrite(HudScale, f, "hud", "scale")
+        IniWrite(HudGrad, f, "hud", "grad")
+        IniWrite(HudBorder, f, "hud", "border")
+        IniWrite(HudCompact ? 1 : 0, f, "hud", "compact")
+        IniWrite(HudShowKeys ? 1 : 0, f, "hud", "keys")
+        IniWrite(HudCustom ? 1 : 0, f, "hud", "custom")
+        IniWrite(HudCX, f, "hud", "x")
+        IniWrite(HudCY, f, "hud", "y")
+        IniWrite(UX, f, "menu", "x")
+        IniWrite(UY, f, "menu", "y")
+    }
+}
+
+ULoadPrefs() {
+    global
+    f := UPrefsFile
+    if (!FileExist(f))
+        return
+    try {
+        AccentIdx := Max(1, Min(AccentPresets.Length, Integer(IniRead(f, "look", "accent", 1))))
+        AccentColor := AccentPresets[AccentIdx].a, AccentColor2 := AccentPresets[AccentIdx].b, DestinyAccent := AccentColor
+        LogoGrad := Max(1, Min(GradNames.Length, Integer(IniRead(f, "look", "logo_grad", 1))))
+        LogoAnimated := IniRead(f, "look", "logo_anim", 1) = "1"
+        GradeAmt := Max(0, Min(100, Integer(IniRead(f, "look", "grade", 60))))
+        ShowSidebarIndicators := IniRead(f, "hud", "show", 1) = "1"
+        ShowStatusNotifs := IniRead(f, "hud", "notifs", 1) = "1"
+        for c, on in NotifCats.Clone()
+            NotifCats[c] := IniRead(f, "notify", c, on ? 1 : 0) = "1"
+        HudPosition := IniRead(f, "hud", "pos", "Top-Left")
+        HudOpacity := Max(26, Min(255, Integer(IniRead(f, "hud", "opacity", 220))))
+        HudScale := Max(50, Min(150, Integer(IniRead(f, "hud", "scale", 80))))
+        HudGrad := Max(1, Min(GradNames.Length, Integer(IniRead(f, "hud", "grad", 1))))
+        HudBorder := Max(1, Min(4, Integer(IniRead(f, "hud", "border", 3))))
+        HudCompact := IniRead(f, "hud", "compact", 0) = "1"
+        HudShowKeys := IniRead(f, "hud", "keys", 1) = "1"
+        HudCustom := IniRead(f, "hud", "custom", 0) = "1"
+        HudCX := Integer(IniRead(f, "hud", "x", 10))
+        HudCY := Integer(IniRead(f, "hud", "y", 80))
+        UX := Integer(IniRead(f, "menu", "x", UX))
+        UY := Integer(IniRead(f, "menu", "y", UY))
+    }
+    AccentDDL.idx := AccentIdx, LogoGradDDL.idx := LogoGrad, HudGradDDL.idx := HudGrad, HudBorderDDL.idx := HudBorder
+    HudPosDDL.Text := HudPosition
+}
+
+; ==============================================================================
+;  MACRO HUD  (click-through card; can be dragged while the menu is open)
+; ==============================================================================
+
+Global HudGui := "", HudS := 0, HudVisible := false, HudW := 200, HudMaxH := 300, HudH := 120, HudScale := 80
+
+; HUD size on screen (the card is drawn at 100 % and scaled, so it stays sharp)
+HudPx(v) => Round(v * HudScale / 100)
+Global HudRowT := Map(), HudFlashAt := Map(), HudTimerOn := false, HudBusy := false
+Global HudShowAt := 0, HudLeaveAt := 0, HudMoving := false, HudDragOff := 0, HudClickThru := true
+
+HudEnsure() {
+    global HudGui, HudS, HudW, HudMaxH
+    if (IsObject(HudGui))
+        return
+    UGdipInit()
+    HudGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny HUD")
+    HudS := UMakeSurface(Ceil(HudW * 1.5), Ceil(HudMaxH * 1.5))
+}
+
+HudXY(h) {
+    global HudPosition, HudCustom, HudCX, HudCY, HudW
+    h := HudPx(h)
+    w := HudPx(HudW)
+    if (HudCustom)
+        return {x: HudCX, y: HudCY}
+    switch HudPosition {
+        case "Top-Right":    return {x: A_ScreenWidth - w - 10, y: 80}
+        case "Bottom-Left":  return {x: 10, y: A_ScreenHeight - h - 60}
+        case "Bottom-Right": return {x: A_ScreenWidth - w - 10, y: A_ScreenHeight - h - 60}
+        default:             return {x: 10, y: 80}
+    }
+}
+
+HudPlace() {
+    global HudGui, HudVisible, HudH, HudW
+    if (!HudVisible || !IsObject(HudGui))
+        return
+    p := HudXY(HudH)
+    HudGui.Move(p.x, p.y, HudPx(HudW), HudPx(HudH))
+}
+
+HudOn() {
+    global HudGui, HudVisible, HudShowAt, HudLeaveAt, HudH, HudW
+    HudEnsure()
+    HudVisible := true, HudShowAt := A_TickCount, HudLeaveAt := 0
+    p := HudXY(HudH)
+    HudGui.Show("x" p.x " y" p.y " w" HudPx(HudW) " h" HudPx(HudH) " NA")
+    HudKick()
+    SetTimer(HudDragTick, 20)
+}
+
+HudOff() {
+    global HudVisible, HudLeaveAt
+    if (HudVisible && !HudLeaveAt) {
+        HudLeaveAt := A_TickCount
+        HudKick()
+    }
+}
+
+; called whenever something the HUD shows changes
+HudRequest() {
+    global HudVisible
+    if (HudVisible)
+        HudKick()
+}
+
+HudFlash(i) {
+    global HudFlashAt
+    HudFlashAt[i] := A_TickCount
+    HudRequest()
+}
+
+; the HUD flashes a row when its macro fires
+BlinkIndicator(i) => HudFlash(i)
+
+HudKick() {
+    global HudTimerOn
+    if (!HudTimerOn) {
+        HudTimerOn := true
+        SetTimer(HudTick, 33)
+    }
+}
+
+HudTick() {
+    global HudVisible, HudBusy, HudTimerOn
+    if (!HudVisible) {
+        SetTimer(HudTick, 0)
+        HudTimerOn := false
+        return
+    }
+    HudRender()
+    if (!HudBusy) {
+        SetTimer(HudTick, 0)
+        HudTimerOn := false
+    }
+}
+
+HudRender() {
+    pc := A_IsCritical
+    Critical
+    try HudRenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+HudRenderInner() {
+    global HudGui, HudS, HudVisible, HudW, HudMaxH, HudH, HudRowT, HudFlashAt, HudBusy, HudShowAt, HudLeaveAt, HudMoving
+    global HudOpacity, HudCompact, HudShowKeys, HudBorder, HudGrad, UG, UAlpha, F_B, F_Sm, F_UI, F_Tiny, IsMacrosLocked
+    global Extender1Key, Extender2Key, Extender3Key, Extender4Key, JumpBugKey, LagKey, MacroLockKey
+    if (!HudVisible || !IsObject(HudGui))
+        return
+    now := A_TickCount
+    busy := false
+    ; appear / leave
+    ap := 1.0
+    if (HudLeaveAt) {
+        t := (now - HudLeaveAt) / 240
+        if (t >= 1) {
+            HudVisible := false, HudLeaveAt := 0
+            SetTimer(HudDragTick, 0)
+            HudGui.Hide()
+            return
+        }
+        ap := (1 - t) ** 2, busy := true
+    } else if (now - HudShowAt < 420) {
+        ap := UEase((now - HudShowAt) / 420), busy := true
+    }
+    labels := ["Lethal", "Twisted", "Solitude", "Dripz", "Jump Bug", "Lagswitch", "Panic Lock"]
+    states := [IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsJumpBugChecked, IsLagSwitchChecked, IsMacrosLocked]
+    keys := [Extender1Key, Extender2Key, Extender3Key, Extender4Key, JumpBugKey, LagKey, MacroLockKey]
+    ; row animations and the card height
+    cy := 46, any := false, ev := []
+    for i, st in states {
+        on := st ? 1 : 0
+        any := any || (on && i < 7)
+        t := HudRowT.Get(i, on)
+        t += (on - t) * 0.3
+        if (Abs(on - t) < 0.02)
+            t := on
+        else
+            busy := true
+        HudRowT[i] := t
+        vis := HudCompact ? Max(on, 0) : 1
+        e := HudRowT.Get("v" i, vis)
+        e += (vis - e) * 0.3
+        if (Abs(vis - e) < 0.02)
+            e := vis
+        else
+            busy := true
+        HudRowT["v" i] := e
+        ev.Push(e)
+        cy += 28 * e
+    }
+    idle := HudCompact && !any && !IsMacrosLocked
+    ia := HudRowT.Get("idle", idle ? 1 : 0)
+    ia += ((idle ? 1 : 0) - ia) * 0.3
+    if (Abs((idle ? 1 : 0) - ia) < 0.02)
+        ia := idle ? 1 : 0
+    else
+        busy := true
+    HudRowT["idle"] := ia
+    cy += 28 * ia
+    H := Max(56, Min(HudMaxH, Round(cy + 10)))
+    static lastScale := 0
+    if (H != HudH || HudScale != lastScale) {
+        HudH := H, lastScale := HudScale
+        if (!HudMoving) {
+            p := HudXY(H)
+            HudGui.Move(p.x, p.y, HudPx(HudW), HudPx(H))
+        } else
+            HudGui.Move(, , HudPx(HudW), HudPx(H))
+    }
+
+    prevG := UG, prevA := UAlpha
+    UG := HudS.g
+    base := Max(0.15, HudOpacity / 255)
+    UAlpha := base * ap
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", UG, "UInt", 0)
+    sc := HudScale / 100
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", UG, "Float", sc, "Float", sc, "Int", 0)
+    if (ap < 1) {                                            ; grows from 88 % while it fades in
+        k := 0.88 + 0.12 * ap
+        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", HudW / 2, "Float", H / 2, "Int", 0)
+        DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", UG, "Float", k, "Float", k, "Int", 0)
+        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", -HudW / 2, "Float", -H / 2, "Int", 0)
+    }
+    gst := GradStops(HudGrad)
+    URR(2, 5, HudW - 4, H - 6, 16, UC(0, 0, 0, 60))
+    URR(3, 3, HudW - 6, H - 7, 15, UCol("Card"))
+    URR(3, 3, HudW - 6, H - 7, 15, UCol("Win", 120))
+    UGradFill(3, 3, HudW - 6, 40, 15, [UHexArr(AccentColor), UPal("Card")], 0, 0.12, (HudW - 6) * 2)
+    bs := HudMoving ? 4 : HudBorder
+    if (bs = 1)
+        URRLine(3, 3, HudW - 6, H - 7, 15, UCol("Border"))
+    else if (bs = 2)
+        URRLine(3, 3, HudW - 6, H - 7, 15, UAcc(200))
+    else {
+        URRLine(3, 3, HudW - 6, H - 7, 15, UCol("Border", 120))
+        UGradBorder(3, 3, HudW - 6, H - 7, 15, bs = 4 ? GradStops(6) : gst, now / 1000 * 0.3, 1.8)
+    }
+    ; header: brand + armed count
+    st := gst, sh := now / 1000 * 0.22
+    cx := 16
+    Loop 7 {
+        ch := SubStr("DESTINY", A_Index, 1)
+        c := GradSample(st, (A_Index - 1) / 7 * 0.85 - sh)
+        UText(ch, cx, 12, UC(c[1], c[2], c[3]), F_B, 30, 22, 0, 1)
+        cx += UTextW(ch ch, F_B) - UTextW(ch, F_B) + 1.5
+    }
+    armed := UArmedCount()
+    cnt := armed "/6"
+    cw := UTextW(cnt, F_Sm) + 16
+    URR(HudW - 14 - cw, 13, cw, 20, 10, UCol("Pill"))
+    UText(cnt, HudW - 14 - cw, 13, armed ? UAcc() : UCol("Muted"), F_Sm, cw, 20, 1, 1)
+    ULine(14, 41, HudW - 14, 41, UCol("Border"))
+    live := !isAppMinimized                                  ; (name flow, pulse and moving border only while the menu is open;
+    busy := busy || live                                     ;  in game the HUD only redraws when something changes)
+
+    ry := 46
+    for i, lab in labels {
+        e := ev[i]
+        if (e < 0.03)
+            continue
+        UAlpha := base * ap * e
+        t := HudRowT[i]
+        red := (i = 7)
+        rc := red ? UPal("Red") : GradSample(gst, now / 1000 * 0.12 + i * 0.11)
+        col := UC(rc[1], rc[2], rc[3])
+        if (t > 0.01)
+            URR(10, ry, HudW - 20, 24, 9, UC(rc[1], rc[2], rc[3], Round(34 * t)))
+        fa := now - HudFlashAt.Get(i, -99999)
+        if (fa < 600) {                                      ; fired: a white flash and a ring from the dot
+            f := fa / 600
+            URR(10, ry, HudW - 20, 24, 9, UC(255, 255, 255, Round(110 * (1 - f))))
+            URing(24, ry + 12, 4 + 14 * UEase(f), UC(rc[1], rc[2], rc[3], Round(220 * (1 - f))), 1.6)
+            busy := true
+        }
+        if (t > 0.5) {
+            pulse := 0.5 + 0.5 * Sin(now / 300 + i)
+            UDisc(24, ry + 12, 4 + 3 * pulse, UC(rc[1], rc[2], rc[3], 50))
+        }
+        UDisc(24, ry + 12, 3.6, UCol("Off"))
+        if (t > 0.01)
+            UDisc(24, ry + 12, 3.6, UC(rc[1], rc[2], rc[3], Round(255 * t)))
+        UText(lab, 38, ry, t > 0.5 ? UCol("Text") : UCol("Text2", 170), F_UI, 100, 24, 0, 1)
+        if (HudShowKeys) {
+            k := keys[i] = "" ? "-" : StrUpper(RegExReplace(FormatKeyName(keys[i]), " \(.*\)"))
+            UText(k, HudW - 92, ry, t > 0.5 ? UC(rc[1], rc[2], rc[3]) : UCol("Muted"), F_Sm, 78, 24, 2, 1)
+        } else if (t > 0.05)
+            UText(red ? "LOCKED" : "ON", HudW - 74, ry, UC(rc[1], rc[2], rc[3], Round(255 * t)), F_Sm, 60, 24, 2, 1)
+        ry += 28 * e
+    }
+    if (ia > 0.03) {
+        UAlpha := base * ap * ia
+        UText("nothing armed", 14, ry, UCol("Muted"), F_Sm, HudW - 28, 24, 1, 1)
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
+    UG := prevG, UAlpha := prevA
+    HudBusy := busy
+    ULayered(HudGui.Hwnd, HudS.dc, HudPx(HudW), HudPx(H))
+}
+
+; the HUD can be picked up with the mouse while the menu is open; otherwise it is click-through
+HudDragTick() {
+    global HudGui, HudVisible, HudMoving, HudClickThru, HudDragOff, HudCX, HudCY, HudCustom, HudW, HudH, isAppMinimized
+    static wasDown := false
+    if (!HudVisible || !IsObject(HudGui))
+        return
+    menuOpen := !isAppMinimized
+    if (menuOpen = HudClickThru) {
+        HudClickThru := !menuOpen
+        try WinSetExStyle(menuOpen ? "-0x20" : "+0x20", "ahk_id " HudGui.Hwnd)
+    }
+    if (!menuOpen) {
+        HudMoving := false, wasDown := false
+        return
+    }
+    pt := Buffer(8, 0)
+    DllCall("GetCursorPos", "Ptr", pt)
+    mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
+    down := (DllCall("GetAsyncKeyState", "Int", 1, "Short") & 0x8000) != 0
+    if (HudMoving) {
+        if (down) {
+            HudGui.Move(Max(0, Min(A_ScreenWidth - HudPx(HudW), mx - HudDragOff.x)), Max(0, Min(A_ScreenHeight - HudPx(HudH), my - HudDragOff.y)))
+        } else {
+            HudMoving := false
+            HudGui.GetPos(&gx, &gy)
+            HudCX := gx, HudCY := gy, HudCustom := true
+            USavePrefs()
+        }
+        HudRequest()
+    } else if (down && !wasDown) {
+        HudGui.GetPos(&gx, &gy, &gw, &gh)
+        if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh && DllCall("WindowFromPoint", "Int64", (mx & 0xFFFFFFFF) | (my << 32), "Ptr") = HudGui.Hwnd) {
+            HudMoving := true
+            HudDragOff := {x: mx - gx, y: my - gy}
+            HudRequest()
+        }
+    }
+    wasDown := down
+}
+
+ToggleSidebarIndicators(*) {
+    global ShowSidebarIndicators
+    ShowSidebarIndicators := !ShowSidebarIndicators
+    if (ShowSidebarIndicators)
+        HudOn()
+    else
+        HudOff()
+    USavePrefs()
+    UReq()
+}
+
+ToggleStatusNotifs(*) {
+    global ShowStatusNotifs
+    ShowStatusNotifs := !ShowStatusNotifs
+    USavePrefs()
+    UReq()
+}
+
+UpdateHudPosition(*) => UPickHudPos(HudPosDDL.Value)
+
+KeepHudOnTop() {
+    global HudGui, HudVisible
+    if (HudVisible && IsObject(HudGui))
+        try WinSetAlwaysOnTop(1, "ahk_id " HudGui.Hwnd)
+}
+
+; ==============================================================================
+;  NOTIFICATION CARDS  (slide in at the bottom right)
+; ==============================================================================
+
+Global TGui := "", TS := 0, TW := 380, TH := 330, TList := [], TTimerOn := false
+
+; ShowStatus(text, colour, x, force): the old popup call; the colour picks the look (green = on, red = off)
+; cat: which switch on Visuals > Notifications allows the card ("" = worked out here: a macro firing or "system")
+ShowStatus(text, colorHex, xPos := 0, force := false, cat := "") {
+    global ShowStatusNotifs, TList, TH, NotifCats
+    if (!ShowStatusNotifs && !force)
+        return
+    kind := (colorHex = "0x2A0808") ? "off" : (colorHex = "0x082A13") ? "on" : "info"
+    t := Trim(StrReplace(StrReplace(text, "`r"), "`n", " "))
+    title := t, sub := ""
+    if (RegExMatch(t, "^(.*?):\s*(.+)$", &m))
+        title := m[1], sub := Trim(m[2])
+    else if (kind = "on" && xPos <= 300 && !force)
+        sub := "fired", kind := "fire"
+    if (cat = "")
+        cat := (kind = "fire") ? "fire" : "system"
+    if (!force && !NotifCats.Get(cat, true))
+        return
+    if (title == StrUpper(title))                         ; ("CONFIG SAVED" -> "Config Saved"; "Show HUD" stays as it is)
+        title := StrTitle(StrLower(title))
+    for it in TList {
+        if (it.title = title) {                              ; the same card again: it stays and restarts its timer
+            it.sub := sub, it.kind := kind, it.t0 := A_TickCount - 300
+            TStart()
+            return
+        }
+    }
+    TList.InsertAt(1, {title: title, sub: sub, kind: kind, t0: A_TickCount, dur: 2200, y: TH - 70})
+    while (TList.Length > 4)
+        TList.Pop()
+    TStart()
+}
+
+TStart() {
+    global TGui, TS, TW, TH, TTimerOn
+    if (!IsObject(TGui)) {
+        UGdipInit()
+        TGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny notifications")
+        TS := UMakeSurface(TW, TH)
+    }
+    TGui.Show("x" (A_ScreenWidth - TW) " y" (A_ScreenHeight - TH - 48) " w" TW " h" TH " NA")
+    if (!TTimerOn) {
+        TTimerOn := true
+        SetTimer(TTick, 16)
+    }
+}
+
+TTick() {
+    global TList, TGui, TTimerOn
+    now := A_TickCount
+    i := TList.Length
+    while (i >= 1) {
+        if (now - TList[i].t0 > TList[i].dur + 420)
+            TList.RemoveAt(i)
+        i--
+    }
+    if (TList.Length = 0) {
+        SetTimer(TTick, 0)
+        TTimerOn := false
+        TGui.Hide()
+        return
+    }
+    pc := A_IsCritical
+    Critical
+    try TRender()
+    finally Critical(pc ? "On" : "Off")
+}
+
+TRender() {
+    global TList, TS, TW, TH, TGui, UG, UAlpha, F_B, F_Sm, F_Icon
+    prevG := UG, prevA := UAlpha
+    UG := TS.g
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", UG, "UInt", 0)
+    now := A_TickCount
+    cw := 330, ch := 60
+    for i, it in TList {
+        target := TH - 14 - ch - (i - 1) * (ch + 10)
+        it.y += (target - it.y) * 0.3
+        el := now - it.t0
+        tin := Max(0.0, Min(1.0, el / 460))
+        e := 1 + 2.70158 * (tin - 1) ** 3 + 1.70158 * (tin - 1) ** 2      ; (overshoots a little, then settles)
+        tout := (el > it.dur) ? Min(1.0, (el - it.dur) / 400) ** 2 : 0.0
+        x := TW - cw - 16 + (1 - e) * (cw + 30) + tout * (cw + 30)
+        y := it.y
+        UAlpha := Min(1.0, tin * 2.5) * (1 - tout)
+        rc := (it.kind = "off") ? UPal("Red") : GradSample(GradStops(1), now / 1000 * 0.1 + i * 0.15)
+        col := UC(rc[1], rc[2], rc[3])
+        URR(x - 1, y + 4, cw + 2, ch, 15, UC(0, 0, 0, 60))
+        URR(x, y, cw, ch, 14, UCol("Card"))
+        UGradFill(x, y, cw, ch, 14, [rc, UPal("Card")], 0, 0.10, cw * 2)
+        URRLine(x, y, cw, ch, 14, UCol("Border"))
+        URR(x + 14, y + 14, 32, 32, 10, UC(rc[1], rc[2], rc[3], 40))
+        icon := (it.kind = "off") ? Chr(0xE711) : (it.kind = "on") ? Chr(0xE73E) : (it.kind = "fire") ? Chr(0xE945) : Chr(0xE946)
+        UText(icon, x + 14, y + 14, col, F_Icon, 32, 32, 1, 1)
+        if (it.sub = "")
+            UText(it.title, x + 58, y, UCol("Text"), F_B, cw - 72, ch, 0, 1)
+        else {
+            UText(it.title, x + 58, y + 10, UCol("Text"), F_B, cw - 72, 20, 0, 1)
+            UText(it.sub, x + 58, y + 30, UCol("Text2"), F_Sm, cw - 72, 18, 0, 1)
+        }
+        rem := Max(0.0, 1 - el / it.dur)
+        if (it.kind = "off")
+            URR(x + 16, y + ch - 6, (cw - 32) * rem, 2.5, 1.25, UC(rc[1], rc[2], rc[3], 170))
+        else
+            UGradFill(x + 16, y + ch - 6, (cw - 32) * rem, 2.5, 1.25, GradStops(1), now / 1000 * 0.3, 0.8, cw - 32)
+    }
+    UG := prevG, UAlpha := prevA
+    ULayered(TGui.Hwnd, TS.dc, TW, TH)
+}
+
+; ==============================================================================
+;  MENU VISIBILITY & TRAY
+; ==============================================================================
+
+CloseApp(*) => ExitApp()
+
+MinimizeApp(*) {
+    global isAppMinimized
+    isAppMinimized := true
+    UHide()
+}
+
+ToggleMainGui(*) {
+    global isAppMinimized
+    if (isAppMinimized) {
+        isAppMinimized := false
+        UShow()
+    } else
+        MinimizeApp()
+}
+
+
 ApplySensitivity(*) {
     global RobloxSensitivity, EditSens, SensStatusText
-    val := Float(EditSens.Value)
+    try val := Float(EditSens.Value)
+    catch
+        val := 0
     if (val <= 0 || val > 10.0) {
         ShowStatus("INVALID SENS (0.01 - 10)", "0x2A0808", 400)
         return
@@ -830,7 +2391,7 @@ ApplySensitivity(*) {
     RobloxSensitivity := val
     EditSens.Value := String(val)
     SensStatusText.Text := "Active sens: " RobloxSensitivity
-    ShowStatus("SENS APPLIED: " RobloxSensitivity, "0x082A13", 400)
+    ShowStatus("SENS APPLIED: " USens(RobloxSensitivity), "0x082A13", 400)
 }
 
 SetSensPreset(presetVal, *) {
@@ -838,7 +2399,7 @@ SetSensPreset(presetVal, *) {
     RobloxSensitivity := presetVal
     EditSens.Value := String(presetVal)
     SensStatusText.Text := "Active sens: " RobloxSensitivity
-    ShowStatus("SENS APPLIED: " presetVal, "0x082A13", 400)
+    ShowStatus("SENS APPLIED: " USens(presetVal), "0x082A13", 400)
 }
 
 
@@ -1067,7 +2628,6 @@ ExecuteExtender4(*) {
     
     a2 := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
     b2 := (BaseSensitivity > 0) ? BaseSensitivity : 0.8
-    preQDelay := 291
     postQDelay := 160
     flick := 1260
     flickSteps := 12
@@ -1075,27 +2635,15 @@ ExecuteExtender4(*) {
     correction := 120
     correctionDelay := 4
     
-    ; === 1. TSB UPPERCUT SEQUENCE ===
-    SendInput("{Space down}")
-    DllCall("Sleep", "UInt", 20)
-    SendInput("{LButton down}")
-    DllCall("Sleep", "UInt", 20)
-    SendInput("{Space up}")
-    DllCall("Sleep", "UInt", 50)
-    SendInput("{LButton up}")
-    
-    ; === 2. Wait before Q dash ===
-    DllCall("Sleep", "UInt", preQDelay)
-    
-    ; === 3. Tap Q — dash fires FORWARD ===
+    ; === 1. Tap Q right away - dash fires FORWARD (no uppercut / M1 / jump first) ===
     SendInput("{q down}")
     DllCall("Sleep", "UInt", 5)
     SendInput("{q up}")
     
-    ; === 4. Fly short distance (dripz tight timing) ===
+    ; === 2. Fly short distance (dripz tight timing) ===
     DllCall("Sleep", "UInt", postQDelay)
     
-    ; === 5. Continuous Smooth Orbital Curve ===
+    ; === 3. Continuous Smooth Orbital Curve ===
     scaledFlick := Round(flick * (b2 / a2))
     perStep := Round(scaledFlick / flickSteps)
     
@@ -1104,7 +2652,7 @@ ExecuteExtender4(*) {
         DllCall("Sleep", "UInt", flickStepDelay)
     }
     
-    ; === 6. Micro Landing Alignment ===
+    ; === 4. Micro Landing Alignment ===
     if (correction != 0) {
         DllCall("Sleep", "UInt", correctionDelay)
         scaledCorr := Round(correction * (b2 / a2))
@@ -1121,6 +2669,7 @@ ExecuteJumpBug(*) {
         return
     isJumpBugRunning := true
     ShowStatus("JUMP BUG", "0x082A13", 150)
+    BlinkIndicator(5)
     
     SendInput("{d down}{Space down}{q down}")
     Sleep(100)
@@ -1167,7 +2716,7 @@ ExecuteLagswitch(*) {
         
     hProcess := DllCall("OpenProcess", "UInt", 0x1F0FFF, "Int", 0, "UInt", RobloxPID)
     if (hProcess) {
-        BlinkIndicator(4)
+        BlinkIndicator(6)
         if (IsLagHold && LagKey != "") {
             LagStatusText.Text := "Status: Freezing (Hold)..."
             DllCall("ntdll\NtSuspendProcess", "Ptr", hProcess)
@@ -1248,46 +2797,34 @@ DestroyVignette() {
 ;  DYNAMIC HOTKEY BINDING ENGINE (KEYBOARD & MOUSE)
 
 
+; Macro keys are only active while Roblox is the active window. HotIfWinActive is checked by the keyboard / mouse
+; hook itself; the old function conditions (HotIf(Ext1Cond) ...) made every press of a bound key or button wait for the
+; script's main thread, which is busy while a macro runs (DllCall Sleep) or the HUD draws: that was the input delay.
+; A macro that is switched off has its key turned off, so the key reaches the game untouched.
 RegisterHotkeys() {
     global curExtender1Key, curExtender2Key, curExtender3Key, curExtender4Key, curJumpBugKey, curLagKey
-    
-    if (curExtender1Key != "") {
-        HotIf(Ext1Cond)
-        try Hotkey("*" curExtender1Key, ExecuteExtender1, "On")
-        HotIf()
-    }
-    if (curExtender2Key != "") {
-        HotIf(Ext2Cond)
-        try Hotkey("*" curExtender2Key, ExecuteExtender2, "On")
-        HotIf()
-    }
-    if (curExtender3Key != "") {
-        HotIf(Ext3Cond)
-        try Hotkey("*" curExtender3Key, ExecuteExtender3, "On")
-        HotIf()
-    }
-    if (curExtender4Key != "") {
-        HotIf(Ext4Cond)
-        try Hotkey("*" curExtender4Key, ExecuteExtender4, "On")
-        HotIf()
-    }
-    if (curJumpBugKey != "") {
-        HotIf(JumpBugCond)
-        try Hotkey("*" curJumpBugKey, ExecuteJumpBug, "On")
-        HotIf()
-    }
-    if (curLagKey != "") {
-        HotIf(LagCond)
-        try Hotkey("~*" curLagKey, ExecuteLagswitch, "On")
-        HotIf()
-    }
+    global IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsJumpBugChecked, IsLagSwitchChecked
+    MacroKey(curExtender1Key, ExecuteExtender1, IsExtender1Checked)
+    MacroKey(curExtender2Key, ExecuteExtender2, IsExtender2Checked)
+    MacroKey(curExtender3Key, ExecuteExtender3, IsExtender3Checked)
+    MacroKey(curExtender4Key, ExecuteExtender4, IsExtender4Checked)
+    MacroKey(curJumpBugKey, ExecuteJumpBug, IsJumpBugChecked)
+    MacroKey(curLagKey, ExecuteLagswitch, IsLagSwitchChecked, "~")
+}
+
+MacroKey(key, fn, on, prefix := "") {
+    if (key = "" || key = "LButton")                         ; (left click is never a macro key: it is your M1)
+        return
+    HotIfWinActive(GAME_EXE)
+    try Hotkey(prefix "*" key, fn, on ? "On" : "Off")
+    HotIf()
 }
 
 
 
 InputKeyOrMouse() {
     ; Complete list of keys including mouse buttons
-    MouseList := ["XButton1", "XButton2", "MButton", "RButton", "LButton"]
+    MouseList := ["XButton1", "XButton2", "MButton", "RButton"]     ; (no LButton: left click is your M1, never a macro key)
     KeyList   := ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z",
                   "1","2","3","4","5","6","7","8","9","0","Space","Tab","Enter","Shift","Ctrl","Alt","CapsLock",
                   "F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12",
@@ -1307,6 +2844,8 @@ InputKeyOrMouse() {
         for m in MouseList {
             if GetKeyState(m, "P") {
                 KeyWait(m)
+                if (m = "LButton" && UMouseOverMenu())       ; a click on the menu itself is not a bind: keep listening
+                    continue
                 return m
             }
         }
@@ -1492,42 +3031,42 @@ StartBindLag(*) {
 UnregisterExt1Key(key) {
     if (key == "")
         return
-    HotIf(Ext1Cond)
+    HotIfWinActive(GAME_EXE)
     try Hotkey("*" key, "Off")
     HotIf()
 }
 UnregisterExt2Key(key) {
     if (key == "")
         return
-    HotIf(Ext2Cond)
+    HotIfWinActive(GAME_EXE)
     try Hotkey("*" key, "Off")
     HotIf()
 }
 UnregisterExt3Key(key) {
     if (key == "")
         return
-    HotIf(Ext3Cond)
+    HotIfWinActive(GAME_EXE)
     try Hotkey("*" key, "Off")
     HotIf()
 }
 UnregisterExt4Key(key) {
     if (key == "")
         return
-    HotIf(Ext4Cond)
+    HotIfWinActive(GAME_EXE)
     try Hotkey("*" key, "Off")
     HotIf()
 }
 UnregisterJumpBugKey(key) {
     if (key == "")
         return
-    HotIf(JumpBugCond)
+    HotIfWinActive(GAME_EXE)
     try Hotkey("*" key, "Off")
     HotIf()
 }
 UnregisterLagKey(key) {
     if (key == "")
         return
-    HotIf(LagCond)
+    HotIfWinActive(GAME_EXE)
     try Hotkey("~*" key, "Off")
     HotIf()
 }
@@ -1554,21 +3093,22 @@ TsbReload(*) {
 
 RegisterSystemHotkeys() {
     global curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey
+    ; no "*": the system keys only fire on their own, so Shift+F5 (Roblox FPS) etc. still reach the game
     if (curReloadKey != "")
-        try Hotkey("*" curReloadKey, TsbReload, "On")
+        try Hotkey(curReloadKey, TsbReload, "On")
     if (curMinimizeKey != "")
-        try Hotkey("*" curMinimizeKey, (*) => ToggleMainGui(), "On")
+        try Hotkey(curMinimizeKey, (*) => ToggleMainGui(), "On")
     if (curMacroLockKey != "")
-        try Hotkey("*" curMacroLockKey, MacroLockToggle, "On")
+        try Hotkey(curMacroLockKey, MacroLockToggle, "On")
     if (curExitKey != "")
-        try Hotkey("*" curExitKey, (*) => ExitApp(), "On")
+        try Hotkey(curExitKey, (*) => ExitApp(), "On")
 }
 
 UnregisterSystemHotkeys() {
     global curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey
     for k in [curReloadKey, curMinimizeKey, curMacroLockKey, curExitKey] {
         if (k != "")
-            try Hotkey("*" k, "Off")
+            try Hotkey(k, "Off")
     }
 }
 
@@ -1703,8 +3243,6 @@ MacroLockToggle(*) {
         
         IsMacrosLocked := false
         
-        HudDots[6].Opt("Background" C_ChildBg " c" C_TextDim)
-        HudDots[6].Redraw()
         UpdateSidebarIndicators()
         ShowStatus("MACROS RESTORED", "0x082A13", 380, true)
     } else {
@@ -1740,161 +3278,11 @@ MacroLockToggle(*) {
         
         IsMacrosLocked := true
         
-        HudDots[6].Opt("Background" DestinyAccent " c0xFFFFFF")
-        HudDots[6].Redraw()
         UpdateSidebarIndicators()
         ShowStatus("ALL MACROS LOCKED", "0x2A0808", 380, true)
     }
 }
 
-
-;  HUD OVERLAY & NOTIFICATIONS
-
-
-UpdateSidebarIndicators() {
-    global HudDots, ShowSidebarIndicators, AccentColor, BlinkTimers
-    global isExtender1Running, isExtender2Running, isExtender3Running, isExtender4Running, isLagRunning
-    if (!ShowSidebarIndicators)
-        return
-    states := [isExtender1Running, isExtender2Running, isExtender3Running, isExtender4Running, isLagRunning]
-    Loop 5 {
-        i := A_Index
-        dot := HudDots[i]
-        if (states[i]) {
-            dot.Opt("Background" AccentColor " cFFFFFF")
-        } else {
-            if BlinkTimers.Has(i) {
-                SetTimer(BlinkTimers[i], 0)
-                BlinkTimers.Delete(i)
-            }
-            dot.Opt("Background" C_ChildBg " c" C_TextDim)
-        }
-        dot.Redraw()
-    }
-}
-
-ToggleSidebarIndicators(*) {
-    global ShowSidebarIndicators, ChkHudShow, IndicatorHud, HudOpacity
-    ShowSidebarIndicators := !ShowSidebarIndicators
-    SetCheck(ChkHudShow, ShowSidebarIndicators)
-    if (ShowSidebarIndicators) {
-        pos := GetHudShowStr()
-        IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
-        WinSetTransparent(HudOpacity, IndicatorHud)
-        UpdateSidebarIndicators()
-    } else {
-        IndicatorHud.Hide()
-    }
-}
-
-ToggleStatusNotifs(*) {
-    global ShowStatusNotifs, ChkNotifShow
-    ShowStatusNotifs := !ShowStatusNotifs
-    SetCheck(ChkNotifShow, ShowStatusNotifs)
-}
-
-BlinkIndicator(dotIndex) {
-    global HudDots, ShowSidebarIndicators, AccentColor, BlinkTimers
-    if (!ShowSidebarIndicators || dotIndex < 1 || dotIndex > 5)
-        return
-    if BlinkTimers.Has(dotIndex)
-        SetTimer(BlinkTimers[dotIndex], 0)
-    dot := HudDots[dotIndex]
-    state := {count: 0}
-    bf := BlinkStep.Bind(dotIndex, state, dot)
-    BlinkTimers[dotIndex] := bf
-    SetTimer(bf, 80)
-}
-
-BlinkStep(dotIndex, state, dot) {
-    global AccentColor, BlinkTimers
-    state.count++
-    if (state.count > 5) {
-        if BlinkTimers.Has(dotIndex)
-            SetTimer(BlinkTimers[dotIndex], 0)
-        BlinkTimers.Delete(dotIndex)
-        dot.Opt("Background" C_ChildBg " c" C_TextDim)
-        dot.Redraw()
-        return
-    }
-    dot.Opt(Mod(state.count, 2) = 1 ? "BackgroundFFFFFF c000000" : "Background" AccentColor " cFFFFFF")
-    dot.Redraw()
-}
-
-GetHudShowStr() {
-    global HudPosition
-    hudW := 80
-    hudH := 6 * 28 + 8
-    sw := A_ScreenWidth
-    sh := A_ScreenHeight
-    switch HudPosition {
-        case "Top-Left":     return {x: 10, y: 80}
-        case "Top-Right":    return {x: sw - hudW - 10, y: 80}
-        case "Bottom-Left":  return {x: 10, y: sh - hudH - 20}
-        case "Bottom-Right": return {x: sw - hudW - 10, y: sh - hudH - 20}
-        default:             return {x: 10, y: 80}
-    }
-}
-
-KeepHudOnTop() {
-    global IndicatorHud, ShowSidebarIndicators
-    if (!ShowSidebarIndicators)
-        return
-    try {
-        WinSetAlwaysOnTop(1, "ahk_id " IndicatorHud.Hwnd)
-        if (!WinExist("ahk_id " IndicatorHud.Hwnd) || !DllCall("IsWindowVisible", "Ptr", IndicatorHud.Hwnd)) {
-            pos := GetHudShowStr()
-            IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
-        }
-    }
-}
-
-UpdateHudPosition(*) {
-    global HudPosition, HudPosDDL, IndicatorHud, ShowSidebarIndicators
-    HudPosition := HudPosDDL.Text
-    if (ShowSidebarIndicators) {
-        pos := GetHudShowStr()
-        IndicatorHud.Show("x" pos.x " y" pos.y " NoActivate")
-    }
-}
-
-ShowStatus(text, colorHex, xPos, force := false) {
-    global AccentColor, ShowStatusNotifs
-    if (!ShowStatusNotifs && !force)
-        return
-    static activeGuis := Map()
-    if (activeGuis.Has(xPos) && activeGuis[xPos]) {
-        activeGuis[xPos].Destroy()
-    }
-    
-    statusGui := Gui("+AlwaysOnTop -Caption +ToolWindow")
-    statusGui.BackColor := colorHex
-    statusGui.SetFont("s9 Bold", "Consolas")
-    statusGui.Add("Text", "c0xFFFFFF w140 Center", text)
-    
-    screenHeight := A_ScreenHeight
-    statusGui.Show("x" xPos " y" (screenHeight - 80) " NoActivate")
-    activeGuis[xPos] := statusGui
-    SetTimer(() => (statusGui ? statusGui.Destroy() : ""), -1200)
-}
-
-
-;  RAW MOUSE INPUT REGISTRATION
-
-
-RegisterRawMouseInput() {
-    global RawInputRegistered, MainGui
-    if (RawInputRegistered)
-        return
-    ridSize := 8 + A_PtrSize
-    rid := Buffer(ridSize, 0)
-    NumPut("UShort", 0x01, rid, 0)
-    NumPut("UShort", 0x02, rid, 2)
-    NumPut("UInt", 0x00000100, rid, 4) ; RIDEV_INPUTSINK
-    NumPut("Ptr", MainGui.Hwnd, rid, 8)
-    if DllCall("RegisterRawInputDevices", "Ptr", rid, "UInt", 1, "UInt", ridSize)
-        RawInputRegistered := true
-}
 
 
 ;  PROFILE & CONFIGURATION PERSISTENCE
@@ -2375,28 +3763,20 @@ SkipWhitespace(jsonStr, &pos) {
 }
 
 
-;  APP WINDOW VISIBILITY & TRAY
+; ==============================================================================
+;  START
+; ==============================================================================
 
-
-isAppMinimized := false
-
-MinimizeApp(*) {
-    global MainGui, isAppMinimized
-    MainGui.Hide()
-    isAppMinimized := true
-}
-
-ToggleMainGui(*) {
-    global MainGui, isAppMinimized
-    if (isAppMinimized) {
-        MainGui.Show()
-        isAppMinimized := false
-    } else {
-        MainGui.Hide()
-        isAppMinimized := true
-    }
-}
-
+ULoadPrefs()
+RefreshProfileList()
+OnMessage(0x020A, UOnWheel)
+RegisterHotkeys()
+RegisterSystemHotkeys()
+UShow()
+if (ShowSidebarIndicators)
+    HudOn()
+SetTimer(ULogoTick, 66)
+SetTimer(KeepHudOnTop, 2000)
 A_TrayMenu.Add("Show / Hide Destiny", ToggleMainGui)
 A_TrayMenu.Default := "Show / Hide Destiny"
 A_TrayMenu.ClickCount := 1
