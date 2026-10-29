@@ -10,7 +10,7 @@ CoordMode("Mouse", "Screen")
 CoordMode("Menu", "Screen")
 
 
-;  Destiny // TSB  
+;  Destiny // TSB  (AutoHotkey v2)
 
 
 ; --- Game Process Target ---
@@ -2497,7 +2497,13 @@ Global RecMsg := "", RecMenuWasOpen := false, URecLive := false
 Global SolRecs := []
 Global RecKeysOn := []                     ; keys the recordings are registered on (to switch them off again)
 Global RecDirty := Map()                   ; recordings whose settings still have to be written
-Global UPatternDir := RegExReplace(ConfigDir, "\\configs$") "\patterns"
+Global UPatternDir := RegExReplace(ConfigDir, "\\configs$") "\recordings"
+if (!DirExist(UPatternDir)) {                                  ; (made right at the start; recordings in the old "patterns" folder move in)
+    old := RegExReplace(ConfigDir, "\\configs$") "\patterns"
+    if (DirExist(old))
+        try DirMove(old, UPatternDir)
+    try DirCreate(UPatternDir)
+}
 
 ; milliseconds from the performance counter (sub-millisecond)
 QMs() {
