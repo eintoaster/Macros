@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+#MaxThreads 255                    ; (the default of 10 can make a hotkey get ignored while many timers are running)
 ProcessSetPriority("High")
+A_MaxHotkeysPerInterval := 99000000 ; (no "too many hotkeys" warning box when a macro key is spammed)
 DllCall("Winmm.dll\timeBeginPeriod", "UInt", 1)
 SetKeyDelay(-1, -1)
 SetWinDelay(-1)
@@ -36,7 +38,8 @@ Global ConfigExt := ".json"
 ; --- Navigation State ---
 Global CurrentTab := 1
 Global CurrentSubTab := 1
-Global MiscSub := 1                       ; Misc: 1 = Visuals, 2 = Input Monitor
+Global MiscSub := 1                       ; Misc: 1 = Visuals, 2 = Input Monitor, 3 = Hit Effects
+Global LagSub := 1                        ; Lagswitch: 1 = Lagswitch, 2 = Freeze Effect, 3 = Shake & Sound
 
 ; --- HUD State ---
 Global ShowSidebarIndicators := true
@@ -126,7 +129,6 @@ Global RawMouseDeltaX        := 0
 Global RawInputRegistered    := false
 
 ; Vignette GUIs
-Global VignetteGuis := []
 
 ; ==============================================================================
 ;  DESTINY UI  -  custom drawn (GDI+) layered window, HUD and notification cards
@@ -675,11 +677,16 @@ UTick() {
     ; "UTimerOn := false". The bind waits in a loop, the tick could not finish, and every redraw request after
     ; that was thrown away (UTimerOn stayed true) - so "press a key" sometimes never showed.
     Critical
+    static lastDraw := 0
     if (!UShown) {
         SetTimer(UTick, 0)
         UTimerOn := false
         return
     }
+    ; a key box waiting for a key: only ~10 redraws a second (the pulse still shows), so the key is seen right away
+    if (UListening() && !UAnimating && !UDown && A_TickCount - lastDraw < 100)
+        return
+    lastDraw := A_TickCount
     URender()
     if (!UAnimating && !UDown && !IsObject(UEdit) && !UListening()) {
         SetTimer(UTick, 0)
@@ -705,6 +712,9 @@ UListening() {
             return true
     for b in BDBoxes
         if (InStr(b.Text, "Press"))
+            return true
+    for m in XMac
+        if (InStr(m.box.Text, "Press"))
             return true
     return false
 }
@@ -750,7 +760,12 @@ UHideNow() {
     UGui.GetPos(&x, &y)
     UX := x, UY := y
     UShown := false
+    hadFocus := DllCall("GetForegroundWindow", "Ptr") = UGui.Hwnd
     UGui.Hide()
+    ; hiding the menu would hand the focus to whatever window is behind it (e.g. the folder Destiny was started from):
+    ; Roblox gets it instead
+    if (hadFocus && WinExist(GAME_EXE))
+        try WinActivate(GAME_EXE)
     USavePrefs()
 }
 
@@ -960,8 +975,11 @@ UToggleAct(fn, label, was, *) {
 
 ; the bind functions wait for the key themselves: when they return the new key is set
 UKeyAct(starter, label, box, *) {
+    was := box.Text
     starter.Call()
     k := box.Text
+    if (k = was)                                              ; (cancelled with a click, or the same key again)
+        return
     UNotify(label, k = "NONE" ? "Unbound" : "Bound to " k, k != "NONE", "key")
 }
 
@@ -1167,7 +1185,7 @@ UBuildBg() {
 
 ; ---------- sidebar ----------
 UDrawSidebar() {
-    global USide, UH, CurrentTab, CurrentSubTab, MiscSub, UHover, F_Tiny, F_Sm, F_B, F_UI, F_IconSm, IsMacrosLocked
+    global USide, UH, CurrentTab, CurrentSubTab, MiscSub, LagSub, UHover, F_Tiny, F_Sm, F_B, F_UI, F_IconSm, IsMacrosLocked
     UDrawLogo(24, 22)
     ; small edition pill
     URR(26, 60, 88, 20, 10, UCol("Pill", 220))
@@ -1181,12 +1199,13 @@ UDrawSidebar() {
     y := UNavItem(1, Chr(0xE945), "Macros", y)
     y := USubList(1, ["Extenders", "Backdash", "Movement", "Recorder"], CurrentSubTab, "sub", "macx", UGoSub, y)
     y := UNavItem(2, Chr(0xE916), "Lagswitch", y)
+    y := USubList(2, ["Lagswitch", "Freeze Effect", "Shake & Sound"], LagSub, "lsub", "lagx", UGoLagSub, y)
     y += 10
     UText("SETUP", 28, y, UCol("Muted"), F_Tiny, 120, 18, 0, 1)
     y += 22
     y := UNavItem(3, Chr(0xE765), "Keybinds", y)
     y := UNavItem(4, Chr(0xEA86), "Misc", y)
-    y := USubList(4, ["Visuals", "Input Monitor"], MiscSub, "msub", "miscx", UGoMiscSub, y)
+    y := USubList(4, ["Visuals", "Input Monitor", "Hit Effects"], MiscSub, "msub", "miscx", UGoMiscSub, y)
     y := UNavItem(5, Chr(0xE713), "Settings", y)
     y := UNavItem(6, Chr(0xE946), "Info", y)
 
@@ -1233,6 +1252,16 @@ USubList(tab, subs, sel, prefix, animKey, goFn, y) {
     return y + (subs.Length * 30 + 6) * mo
 }
 
+UGoLagSub(i, *) {
+    global LagSub, UScroll, UScrollT
+    if (LagSub = i)
+        return
+    LagSub := i
+    UScroll := 0, UScrollT := 0
+    UAnimSet("page", 0)
+    UCloseDD()
+}
+
 UGoMiscSub(i, *) {
     global MiscSub, UScroll, UScrollT
     if (MiscSub = i)
@@ -1250,6 +1279,8 @@ UArmedCount() {
     for v in [IsExtender1Checked, IsExtender2Checked, IsExtender4Checked, IsJumpBugChecked, IsLagSwitchChecked
         , IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked]
         n += v ? 1 : 0
+    for m in XMac
+        n += m.on ? 1 : 0
     for rec in SolRecs
         n += rec.enabled ? 1 : 0
     return n
@@ -1258,7 +1289,7 @@ UArmedCount() {
 ; built-in macros + recorded dashes
 UMacroTotal() {
     global SolRecs
-    return 9 + SolRecs.Length
+    return 9 + XMac.Length + SolRecs.Length
 }
 
 UNavItem(n, icon, label, y) {
@@ -1326,16 +1357,18 @@ UDrawLogo(x, y) {
 
 ; ---------- top bar ----------
 UDrawTopBar() {
-    global CurrentTab, CurrentSubTab, MiscSub, USide, UW, UHover, F_H, F_Sm, F_IconSm, IsMacrosLocked
+    global CurrentTab, CurrentSubTab, MiscSub, LagSub, USide, UW, UHover, F_H, F_Sm, F_IconSm, IsMacrosLocked
     titles := ["Macros", "Lagswitch", "Keybinds", "Misc", "Settings", "Info"]
-    subs := ["Combat tech for The Strongest Battlegrounds", "Lagswitch, freeze options and vignette", "Bind your macros and the system keys"
-        , MiscSub = 2 ? "Live keys, mouse buttons and camera turn on screen" : "HUD, notifications and colour grading"
+    subs := ["Combat tech for The Strongest Battlegrounds", ["Lagswitch and freeze options", "How the freeze looks, and the countdown", "Screen shake and sound while frozen"][LagSub]
+        , "Bind your macros and the system keys"
+        , ["HUD, notifications and colour grading", "Live keys, mouse buttons and camera turn on screen", "Effects when a macro fires from its key"][MiscSub]
         , "Configs and camera sensitivity", "About Destiny"]
     x := USide + 28
     UText(titles[CurrentTab], x, 22, UCol("Text"), F_H, 300, 32, 0, 1)
     tw := UTextW(titles[CurrentTab], F_H)
-    if (CurrentTab = 1 || CurrentTab = 4) {
-        nm := (CurrentTab = 1) ? ["Extenders", "Backdash", "Movement", "Recorder"][CurrentSubTab] : ["Visuals", "Input Monitor"][MiscSub]
+    if (CurrentTab = 1 || CurrentTab = 2 || CurrentTab = 4) {
+        nm := (CurrentTab = 1) ? ["Extenders", "Backdash", "Movement", "Recorder"][CurrentSubTab]
+            : (CurrentTab = 2) ? ["Lagswitch", "Freeze Effect", "Shake & Sound"][LagSub] : ["Visuals", "Input Monitor", "Hit Effects"][MiscSub]
         cw := UTextW(nm, F_Sm) + 22
         URR(x + tw + 4, 28, cw, 22, 11, UAcc(34))
         URRLine(x + tw + 4, 28, cw, 22, 11, UAcc(90))
@@ -1617,12 +1650,12 @@ UColumn(n, top) {
 
 ; draws the current page at the given top; returns where it ends
 UDrawPage(top) {
-    global CurrentTab, CurrentSubTab, MiscSub, UCY
+    global CurrentTab, CurrentSubTab, MiscSub, LagSub, UCY
     switch CurrentTab {
         case 1: return UPageMacros(top, CurrentSubTab)
-        case 2: return UPageMisc(top)
+        case 2: return LagSub = 2 ? UPageFreezeFx(top) : LagSub = 3 ? UPageShakeSound(top) : UPageMisc(top)
         case 3: return UPageKeys(top)
-        case 4: return MiscSub = 2 ? UPageInput(top) : UPageVisuals(top)
+        case 4: return MiscSub = 2 ? UPageInput(top) : MiscSub = 3 ? UPageHitFx(top) : UPageVisuals(top)
         case 5: return UPageSettings(top)
         default: return UPageInfo(top)
     }
@@ -1638,6 +1671,8 @@ UPageMacros(top, sub) {
         UToggleRow("t_ext1", "Instant Lethal", "instant lethal extender", IsExtender1Checked, ToggleExt1Box)
         UToggleRow("t_ext2", "Instant Twisted", "instant twisted extender.", IsExtender2Checked, ToggleExt2Box)
         UToggleRow("t_ext4", "Dripz Tech", "the usual dripz dash, right timing is needed", IsExtender4Checked, ToggleExt4Box)
+        for i, m in XMac
+            UToggleRow("t_" m.id, m.name, m.desc, m.on, XToggle.Bind(i))
         UCardEnd()
         UCardEnd()
         return UCY
@@ -1675,10 +1710,6 @@ UPageMisc(top) {
     st := LagStatusText.Text
     UStatusRow(st, InStr(st, "Ready") ? UCol("Green") : (InStr(st, "not") ? UCol("Red") : UAcc()))
     UCardEnd()
-    UCardBegin("c_vig", "Lagswitch Vignette", Chr(0xE7B3))
-    UToggleRow("t_vig", "Red border while frozen", "", IsLagVignette, ToggleLagVignetteBox)
-    USliderRow("s_vig", "Border thickness", 2, 30, VignetteThickness, SetVignetteThickness, "{} px")
-    UCardEnd()
     b1 := UCY
     UColumn(2, top)
     UCardBegin("c_lagm", "Modes", Chr(0xE9E9))
@@ -1697,6 +1728,8 @@ UPageKeys(top) {
     UKeyRow("k_ext1", "Instant Lethal", BtnK_Ext1, StartBindExt1)
     UKeyRow("k_ext2", "Instant Twisted", BtnK_Ext2, StartBindExt2)
     UKeyRow("k_ext4", "Dripz Tech", BtnK_Ext4, StartBindExt4)
+    for i, m in XMac
+        UKeyRow("k_" m.id, m.name, m.box, StartBindX.Bind(i))
     UKeyRow("k_jb", "Jump Bug", BtnK_JumpBug, StartBindJumpBug)
     UKeyRow("k_lag", "Lagswitch", BtnK_Lag, StartBindLag)
     UCardEnd()
@@ -1719,7 +1752,7 @@ UPageKeys(top) {
     UKeyRow("k_exit", "Emergency exit", BtnK_Exit, StartBindExit)
     UCardEnd()
     UCardBegin("c_howto", "How to bind", Chr(0xE946))
-    UTextRow("Click a key box, then press a key or mouse button (Mouse 4/5, middle and right click work). Escape clears the bind.", "", 3)
+    UTextRow("Click a key box, then press a key or mouse button (Mouse 4/5, middle and right click work). Escape or Backspace clears the bind, a left click cancels.", "", 3)
     UCardEnd()
     return Max(b1, UCY)
 }
@@ -1929,7 +1962,7 @@ USavePrefs() {
 }
 
 USavePrefsNow() {
-    global UPrefsFile, HudCustom, HudCX, HudCY, UX, UY, Widgets
+    global UPrefsFile, HudCustom, HudCX, HudCY, UX, UY, Widgets, VigPillCustom, VigPillX, VigPillY
     ; (ui.ini only keeps where the menu and the HUD sit on this screen; every look setting is saved with the configs)
     try {
         f := UPrefsFile
@@ -1938,6 +1971,9 @@ USavePrefsNow() {
         IniWrite(HudCY, f, "hud", "y")
         IniWrite(UX, f, "menu", "x")
         IniWrite(UY, f, "menu", "y")
+        IniWrite(VigPillCustom ? 1 : 0, f, "pill", "custom")
+        IniWrite(VigPillX, f, "pill", "x")
+        IniWrite(VigPillY, f, "pill", "y")
         for id, wd in Widgets {
             IniWrite(wd.custom ? 1 : 0, f, "widgets", id "custom")
             IniWrite(wd.x, f, "widgets", id "x")
@@ -1947,7 +1983,7 @@ USavePrefsNow() {
 }
 
 ULoadPrefs() {
-    global UPrefsFile, HudCustom, HudCX, HudCY, UX, UY, Widgets
+    global UPrefsFile, HudCustom, HudCX, HudCY, UX, UY, Widgets, VigPillCustom, VigPillX, VigPillY
     f := UPrefsFile
     if (FileExist(f)) {
         try {
@@ -1956,6 +1992,9 @@ ULoadPrefs() {
             HudCY := Integer(IniRead(f, "hud", "y", 80))
             UX := Integer(IniRead(f, "menu", "x", UX))
             UY := Integer(IniRead(f, "menu", "y", UY))
+            VigPillCustom := IniRead(f, "pill", "custom", 0) = "1"
+            VigPillX := Integer(IniRead(f, "pill", "x", 0))
+            VigPillY := Integer(IniRead(f, "pill", "y", 34))
             for id, wd in Widgets {
                 wd.custom := IniRead(f, "widgets", id "custom", 0) = "1"
                 wd.x := Integer(IniRead(f, "widgets", id "x", 0))
@@ -1976,7 +2015,7 @@ UVisualsTo() {
         , hud_pos: HudPosition, hud_border: HudBorder, hud_grad: HudGrad, hud_size: HudScale, hud_opacity: HudOpacity
         , notifs: ShowStatusNotifs ? 1 : 0, notify: nc, accent: AccentPresets[AccentIdx].name, logo_grad: LogoGrad, logo_anim: LogoAnimated ? 1 : 0
         , grade: GradeAmt, vignette: IsLagVignette ? 1 : 0, vignette_px: VignetteThickness, rec_len: RecLen
-        , widgets: WStyleTo()}
+        , widgets: WStyleTo(), freeze: FxTo()}
 }
 
 ; sets the Visuals from a config's "visuals" part (anything missing = the default)
@@ -2006,6 +2045,7 @@ UVisualsFrom(v) {
     VignetteThickness := Max(2, Min(30, Integer(g("vignette_px", 8))))
     RecLen := Max(400, Min(1500, Integer(g("rec_len", 900))))
     WStyleFrom(g("widgets", {}))
+    FxFrom(g("freeze", {}))
     AccentDDL.idx := AccentIdx, LogoGradDDL.idx := LogoGrad, HudGradDDL.idx := HudGrad, HudBorderDDL.idx := HudBorder
     HudPosDDL.Text := HudPosition
 }
@@ -2163,6 +2203,8 @@ HudRenderInner() {
     rows := [["ext1", "Lethal", IsExtender1Checked, Extender1Key], ["ext2", "Twisted", IsExtender2Checked, Extender2Key]
         , ["ext4", "Dripz", IsExtender4Checked, Extender4Key], ["jb", "Jump Bug", IsJumpBugChecked, JumpBugKey]
         , ["lag", "Lagswitch", IsLagSwitchChecked, LagKey]]
+    for m in XMac
+        rows.Push([m.id, m.name, m.on, m.key])
     Loop 4
         rows.Push(["bd" A_Index, "Backdash " A_Index, [IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked][A_Index], BDKeys[A_Index]])
     for rec in SolRecs
@@ -2515,6 +2557,19 @@ QMs() {
     return c * 1000 / f
 }
 
+; how long a wait really took in the old AutoHotkey v1 script of Instant Lethal: v1 waits on Windows' coarse clock (15.625 ms ticks),
+; so a Sleep rounds up to the next tick (Sleep 1 = 15.6 ms, Sleep 130 = 140.6 ms). Its Send also waits 10 ms after
+; every key (no SendMode / SetKeyDelay in that script), which rounds up to 15.6 ms too: V1Sleep(10).
+V1Sleep(n) => Ceil(n / 15.625) * 15.625
+
+; waits until t ms after base (sub-millisecond)
+QWaitUntil(base, t) {
+    while (QMs() - base < t) {
+        if (t - (QMs() - base) > 2)
+            DllCall("Sleep", "UInt", 1)
+    }
+}
+
 ; raw input (the real counts from the mouse, no pointer speed or acceleration), also while Roblox has the focus
 ; the recorder asks for raw input with RecRawOn; the camera turn widget sets WRawWant; RawSync registers what is needed
 RecRawOn(on) {
@@ -2668,7 +2723,7 @@ RecFinish() {
 RecNew(name) {
     global UPatternDir
     return {name: name, file: UPatternDir "\" name ".txt", sens: 0.36, qhold: 60, events: [], enabled: false, key: ""
-        , box: UVal("NONE"), land: false, fine: 0, speed: 100, amount: 100, running: false, hasSettings: false, owner: ""}
+        , box: UVal("NONE"), speed: 100, amount: 100, running: false, hasSettings: false, owner: ""}
 }
 
 RecOwnerId() => A_ComputerName "/" A_UserName
@@ -2677,7 +2732,7 @@ RecOwnerId() => A_ComputerName "/" A_UserName
 RecSave(rec) {
     ; (owner: the PC the switch and key belong to - a shared recording starts switched off and without a key elsewhere)
     txt := "sens=" USens(rec.sens) "`nqhold=" rec.qhold "`nowner=" RecOwnerId() "`nenabled=" (rec.enabled ? 1 : 0) "`nkey=" rec.key
-        . "`nland=" (rec.land ? 1 : 0) "`nfine=" rec.fine "`nspeed=" rec.speed "`namount=" rec.amount "`n"
+        . "`nspeed=" rec.speed "`namount=" rec.amount "`n"
     for e in rec.events
         txt .= Format("{:.1f}", e[1]) " " e[2] " " e[3] "`n"
     try {
@@ -2717,8 +2772,6 @@ RecLoadAll() {
             continue
         if (!rec.hasSettings) {                               ; (made with the old Solitude Dash options: it keeps the settings it was used with)
             try {
-                rec.land := IniRead(UPrefsFile, "solitude", "land", 1) = "1"
-                rec.fine := Max(-20, Min(20, Integer(IniRead(UPrefsFile, "solitude", "fine", 0))))
                 rec.speed := Max(50, Min(150, Integer(IniRead(UPrefsFile, "solitude", "speed", 100))))
                 rec.amount := Max(50, Min(150, Integer(IniRead(UPrefsFile, "solitude", "amount", 100))))
             }
@@ -2750,10 +2803,9 @@ RecLoad(path) {
                 case "enabled": rec.enabled := (v = "1")
                 case "key": rec.key := v
                 case "owner": rec.owner := v
-                case "land": rec.land := (v = "1"), rec.hasSettings := true
-                case "fine": rec.fine := Max(-20, Min(20, Integer(v)))
-                case "speed": rec.speed := Max(50, Min(150, Integer(v)))
-                case "amount": rec.amount := Max(50, Min(150, Integer(v)))
+                case "land": rec.hasSettings := true          ; (Land on start is gone: old files still count as new ones)
+                case "speed": rec.speed := Max(50, Min(150, Integer(v))), rec.hasSettings := true
+                case "amount": rec.amount := Max(50, Min(150, Integer(v))), rec.hasSettings := true
               }
             }
             continue
@@ -2842,24 +2894,18 @@ RecFire(rec, *) {
     rec.running := true
     try SolReplay(rec)
     rec.running := false
+    MacroFx()
     SetTimer(ShowStatus.Bind(rec.name, "0x082A13", 300), -1)
     SetTimer(HudFlash.Bind("rec:" rec.name), -1)
 }
 
 ; where a recording should end: the nearest whole number of full turns (0 = back where it started), plus the
 ; fine-tune (+ = more to the right, - = more to the left)
-SolLandDeg(rec) {
-    return Round(rec.totalDeg / 360) * 360 + rec.fine
-}
-
 ; replays a recording: Q at once, the side-to-side mouse moves at their recorded moments
 SolReplay(rec) {
     global RobloxSensitivity
     sens := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
-    k := (rec.sens / sens) * (rec.land ? 1 : rec.amount / 100)   ; same turn in degrees at any sensitivity
-    corr := 0                                                 ; Land on start: the recorded movement stays as it is; only the
-    if (rec.land && rec.sumabs > 0)                           ; difference to the landing is added, spread over the moves
-        corr := (SolLandDeg(rec) * 2.5 / sens - rec.sumdx * k) / rec.sumabs
+    k := (rec.sens / sens) * rec.amount / 100                 ; same turn in degrees at any sensitivity
     tk := 100 / rec.speed                                     ; Speed 120 % = everything 1.2 x faster
     ev := rec.events
     i := 1
@@ -2876,7 +2922,7 @@ SolReplay(rec) {
             qUp := true
         }
         while (i <= ev.Length && ev[i][1] * tk <= now) {
-            ax += ev[i][2] * k + Abs(ev[i][2]) * corr         ; (side to side only: up / down is not replayed)
+            ax += ev[i][2] * k                                ; (side to side only: up / down is not replayed)
             i++
         }
         mx := Round(ax)
@@ -2899,11 +2945,6 @@ RecToggle(rec, *) {
     HudRequest()
 }
 
-RecToggleLand(rec, *) {
-    rec.land := !rec.land
-    RecSaveSoon(rec)
-}
-
 RecSet(rec, field, v) {
     rec.%field% := v
     RecSaveSoon(rec)
@@ -2916,6 +2957,8 @@ RecBindKey(rec, *) {
     Hotkey("~*Escape", CancelBind, "On")
     key := InputKeyOrMouse()
     try Hotkey("~*Escape", CancelBind, "Off")
+    if (key = "Cancel")                                       ; (a left click: keep the key it had)
+        key := old
     MacroKeyOff(old)
     rec.key := (key = "Escape") ? "" : key
     rec.box.Text := FormatKeyName(rec.key)
@@ -2975,16 +3018,10 @@ URecGraph(rec) {
         ULine(x + 10, y + gh * A_Index / 4, x + w - 10, y + gh * A_Index / 4, UCol("Border", 70))
     URRLine(x, y, w, gh, 10, UCol("Border"))
     span := Max(1, rec.t1 - rec.t0), pk := Max(10, rec.peak)
-    if (rec.land)
-        pk := Max(pk, Abs(SolLandDeg(rec)))
     px(t) => x + 10 + (t - rec.t0) / span * (w - 20)
     py(d) => y + gh / 2 - d / pk * (gh / 2 - 12)
     zy := y + gh / 2
     ULine(x + 8, zy, x + w - 8, zy, UCol("Border"))
-    if (rec.land) {
-        ld := SolLandDeg(rec)
-        ULine(x + 10, py(ld), x + w - 10, py(ld), UCol("Green", 120))
-    }
     ; the curve draws itself in when the page opens
     key := "rg" rec.file
     if (!UAnim.Has(key))
@@ -3022,12 +3059,7 @@ URecGraph(rec) {
     UText("right", x + w - 46, y + 4, UCol("Muted"), F_Tiny, 40, 14, 2, 1)
     UText("left", x + w - 46, y + gh - 18, UCol("Muted"), F_Tiny, 40, 14, 2, 1)
     UCY += gh + 8
-    land := ""
-    if (rec.land) {
-        turns := Round(rec.totalDeg / 360)
-        land := "  ->  ends " (turns = 0 ? "back on start" : Abs(turns) " full turn" (Abs(turns) > 1 ? "s" : "")) (rec.fine ? " " (rec.fine > 0 ? "+" : "") rec.fine " deg" : "")
-    }
-    UText(rec.summary land, x, UCY, UCol("Text2"), F_Sm, w, 18, 0, 1)
+    UText(rec.summary, x, UCY, UCol("Text2"), F_Sm, w, 18, 0, 1)
     UCY += 26
 }
 
@@ -3115,11 +3147,7 @@ UPageRecorder(top) {
         UKeyRow(id "key", rec.name " key", rec.box, RecBindKey.Bind(rec))
         UEditRow(id "name", "Name", rec.name, "text", RecRename.Bind(rec))
         URecGraph(rec)
-        UToggleRow(id "land", "Land on start", "ends the turn exactly where Q was pressed (back on the torso)", rec.land, RecToggleLand.Bind(rec))
-        if (rec.land)
-            USliderRow(id "fine", "Landing fine-tune (+ right / - left)", -20, 20, rec.fine, RecSet.Bind(rec, "fine"), "{} deg")
-        else
-            USliderRow(id "amt", "Turn amount", 50, 150, rec.amount, RecSet.Bind(rec, "amount"), "{}%")
+        USliderRow(id "amt", "Turn amount", 50, 150, rec.amount, RecSet.Bind(rec, "amount"), "{}%")
         USliderRow(id "speed", "Speed", 50, 150, rec.speed, RecSet.Bind(rec, "speed"), "{}%")
         UButtonRow([[id "del", "Delete " rec.name, RecDelete.Bind(rec)]])
         UCardEnd()
@@ -4028,7 +4056,14 @@ DestinyOpen() {
 }
 
 ; ---------- changelog (Info tab): newest version first ----------
-Global ChangeLog := [["Destiny v1 Beta", [
+Global ChangeLog := [["Destiny v1.1 Beta", [
+    "New Extenders: Solitude, Twisted 2, Oreo",
+    "Improved Instant Lethal",
+    "Improved Instant Twisted",
+    "Freeze effects",
+    "Hit effects when a macro fires per key",
+    "Fixed: sens not loading from configs, key binding freeze, dropped macro presses"]]
+    , ["Destiny v1 Beta", [
     "New Destiny Menu",
     "Added New Macro HUD",
     "Added Notifications",
@@ -4222,61 +4257,68 @@ ExecuteExtender1(*) {
     ShowStatus("INSTANT LETHAL", "0x082A13", 100)
     BlinkIndicator(1)
     
-    ; Sensitivity scaling (OREO Instant Lethal)
+    ; Sensitivity scaling (OREO Instant Lethal): the flick is 1360 x 0.8 / your sens (3022 at 0.36)
     a2 := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
     b2 := (BaseSensitivity > 0) ? BaseSensitivity : 0.8
-    f1_2 := 0
-    g1_2 := 1360
-    
-    ; Straight dash
+    l1 := Round(1360 * (b2 / a2))
+
+    ; Straight dash, timed like the v1 script ran it (see V1Sleep): Space down, Sleep 1, Q down, Q up, Space up,
+    ; Sleep 16, Sleep 130, flick; each Send waits a key delay after it
+    kd := V1Sleep(10)
+    base := QMs()
     Send("{Space down}")
-    Sleep(10)
+    QWaitUntil(base, kd + V1Sleep(1))                         ; Q down    ~31 ms
     Send("{q down}")
-    Sleep(10)
+    QWaitUntil(base, 2 * kd + V1Sleep(1))                     ; Q up      ~47 ms
     Send("{q up}")
+    QWaitUntil(base, 3 * kd + V1Sleep(1))                     ; Space up  ~63 ms
     Send("{Space up}")
-    Sleep(15)
-    
-    j1 := Round(f1_2 * (b2 / a2))
-    if (j1 != 0)
-        DllCall("mouse_event", "UInt", 0x0001, "Int", j1, "Int", 0, "UInt", 0, "UPtr", 0)
-        
-    Sleep(150)
-    
-    l1 := Round(g1_2 * (b2 / a2))
+    QWaitUntil(base, 4 * kd + V1Sleep(1) + V1Sleep(16) + V1Sleep(130) - 20)   ; flick ~230 ms (20 ms sooner than v1)
     DllCall("mouse_event", "UInt", 0x0001, "Int", l1, "Int", 0, "UInt", 0, "UPtr", 0)
-    
+
     isExtender1Running := false
+    MacroFx()
 }
 
-; --- Macro 2: Instant Twisted ---
+; --- Macro 2: Instant Twisted (made on 0.2 sens): Q held 70 ms, then 5 moves left, 5 right, 5 back left, 10 ms apart
+;     with 30 ms between the groups; the three turns add up to 0, so the camera ends where it started ---
 ExecuteExtender2(*) {
     global isExtender2Running, RobloxSensitivity
     if (!IsExtender2Checked || isExtender2Running || !WinActive(GAME_EXE))
         return
     isExtender2Running := true
-    ShowStatus("INSTANT TWISTED", "0x082A13", 200)
-    BlinkIndicator(2)
-    
-    ; Universal sensitivity scaling (Twisted Macro)
-    V2 := 900
-    V3 := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
-    V4 := 90
-    V5 := 110
-    V6 := 10
-    
-    pxR :=  Round((V4 * V2) / (360 * V3))
-    pxL := -Round((V5 * V2) / (360 * V3))
-    
-    DllCall("mouse_event", "UInt", 0x0001, "Int", pxR, "Int", 0, "UInt", 0, "UPtr", 0)
-    Sleep(V6)
-    Send("{q down}")
-    Sleep(80)
-    Send("{q up}")
-    Sleep(V6)
-    DllCall("mouse_event", "UInt", 0x0001, "Int", pxL, "Int", 0, "UInt", 0, "UPtr", 0)
-    
+    k := 0.2 / ((RobloxSensitivity > 0) ? RobloxSensitivity : 0.36)    ; same turn in game at any sens
+    qu := 70
+    ev := []
+    for grp in [[70, -715], [150, 1605], [230, -890]]           ; [first move at ms, whole group in counts at 0.2]
+        Loop 5
+            ev.Push([grp[1] + (A_Index - 1) * 10, grp[2] / 5])
+    SendInput("{q down}")
+    base := QMs()
+    qUp := false, j := 1, ax := 0.0
+    Loop {
+        now := QMs() - base
+        if (!qUp && now >= qu) {
+            SendInput("{q up}")
+            qUp := true
+        }
+        while (j <= ev.Length && ev[j][1] <= now) {
+            ax += ev[j][2] * k
+            j++
+        }
+        mx := Round(ax)
+        if (mx) {
+            DllCall("mouse_event", "UInt", 0x01, "Int", mx, "Int", 0, "UInt", 0, "UPtr", 0)
+            ax -= mx
+        }
+        if (j > ev.Length && qUp)
+            break
+        DllCall("Sleep", "UInt", 1)
+    }
     isExtender2Running := false
+    MacroFx()
+    SetTimer(ShowStatus.Bind("INSTANT TWISTED", "0x082A13", 200), -1)
+    SetTimer(BlinkIndicator.Bind(2), -1)
 }
 
 ; --- Backdash 1-4: skill + S + Q down together, skill up right away, S + Q held ~100 ms, then up.
@@ -4304,6 +4346,7 @@ ExecuteBackdash(n, *) {
     BDRunning[n] := false
     SetTimer(ShowStatus.Bind("BACKDASH " n, "0x082A13", 300), -1)
     SetTimer(HudFlash.Bind("bd" n), -1)
+    MacroFx()
 }
 
 USetBDPing(v) {                                               ; (saved with the configs)
@@ -4334,6 +4377,8 @@ StartBindBD(n, *) {
     Hotkey("~*Escape", CancelBind, "On")
     key := InputKeyOrMouse()
     try Hotkey("~*Escape", CancelBind, "Off")
+    if (key = "Cancel")                                       ; (a left click: keep the key it had)
+        key := old
     MacroKeyOff(old, "~")
     BDKeys[n] := (key = "Escape") ? "" : key
     BDBoxes[n].Text := FormatKeyName(BDKeys[n])
@@ -4350,6 +4395,214 @@ BDSetKeysFrom(kb) {
         name := "bd" A_Index "_key"
         BDKeys[A_Index] := kb.HasOwnProp(name) ? kb.%name% : ""
         BDBoxes[A_Index].Text := FormatKeyName(BDKeys[A_Index])
+    }
+}
+
+; --- Solitude (ported from the TGM macro), Twisted 2 and Oreo (a recording, built in): tap Q, then camera turns on a fixed schedule ---
+Global XMac := [
+    {id: "sol", name: "Solitude", desc: "solitude extender", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
+    {id: "tw2", name: "Twisted 2", desc: "twisted 2 dash", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
+    {id: "oreo", name: "Oreo", desc: "oreo tech", on: false, key: "", box: UVal("NONE"), running: false, saved: false}
+]
+Global XKeysOn := []
+
+; the turns: [ms after the key press, mouse counts], the sens they were made on (scaled to yours, same turn in game)
+; and when Q goes down / up (qd / qu, ms; Q right away and a 10 ms tap when not given)
+XSchedule(i) {
+    global XMac
+    if (XMac[i].id = "tw2")                                   ; Twisted 2 (0.5): flick right 277, 31 ms, Q held 80 ms,
+        return {sens: 0.5, qd: 31, qu: 111, ev: [[0, 277], [141, -360]]}   ; 30 ms, flick left 360 (388 in the
+                                                              ; script: landed a bit too far left)
+    ev := []
+    ev.Push([190, -206])                                      ; Solitude (0.33): two left 206 at once, 6 more 12 ms apart,
+    Loop 7                                                    ; 30 ms, then back right 4 x 155
+        ev.Push([190 + (A_Index - 1) * 12, -206])
+    Loop 4
+        ev.Push([292 + (A_Index - 1) * 12, 155])
+    return {sens: 0.33, ev: ev}
+}
+
+; Oreo: recorded with the Recorder at 0.36 sens (speed 102 %) and replayed like a recording:
+; [ms after Q]:[side-to-side mouse counts]
+Global OreoData := "
+(
+1.4:1 3.8:1 4.1:1 5.3:1 6.2:1 7.2:1 9.8:2 10.2:2 11.5:2 12.4:2 13.5:3 14.2:3 15.2:2 16.2:3 17.5:3 18.1:3
+19.2:3 20.5:3 21.4:4 22.1:3 23.2:4 24.2:3 25.1:4 26.2:4 27.3:4 28.3:4 29.8:4 30.9:4 31.5:4 34.2:4 34.4:5 34.8:5
+35.6:4 36.7:4 37.6:5 38.6:4 39.8:4 40.7:5 41.6:5 42.5:5 43.4:4 44.4:5 46.1:4 47.3:5 48.2:5 49.2:5 50.3:5 51.2:5
+52.3:5 53.0:4 53.6:5 54.4:6 55.3:6 56.3:5 57.3:5 58.3:5 59.4:5 60.4:6 61.2:6 62.5:6 63.6:6 66.9:6 67.2:5 67.5:6
+67.7:7 68.2:6 69.2:6 70.2:5 71.2:5 72.2:6 73.2:5 74.2:6 75.3:6 76.3:5 77.2:5 78.3:5 87.8:5 92.6:4 93.6:4 94.5:4
+95.2:4 96.0:4 96.6:4 97.3:3 98.3:4 99.3:3 100.3:3 101.2:4 102.2:3 103.1:3 104.3:3 105.2:3 106.4:3 107.2:2 108.3:3 109.5:3
+111.5:2 111.9:2 112.7:2 113.5:2 114.2:3 115.3:2 116.4:2 117.2:2 118.3:1 119.2:1 120.3:2 121.4:1 122.9:1 123.6:1 124.1:1 126.6:1
+126.7:1 130.5:1 140.5:-1 141.2:-1 143.5:-1 144.5:-1 145.7:-1 147.3:-1 148.2:-1 149.2:-1 150.3:-1 151.2:-1 152.5:-1 153.5:-2 154.2:-1 155.3:-2
+158.8:-2 159.2:-2 159.5:-2 160.1:-2 160.7:-2 161.4:-2 162.2:-3 163.2:-2 164.2:-3 165.2:-2 166.4:-3 167.5:-2 168.4:-3 169.3:-3 170.2:-3 171.2:-3
+172.2:-2 173.2:-3 174.5:-3 175.6:-3 176.2:-3 177.2:-3 178.2:-3 179.4:-3 180.5:-3 181.6:-3 182.5:-3 183.4:-3 184.3:-3 185.3:-3 186.5:-3 187.3:-4
+188.3:-4 189.3:-4 190.3:-3 191.2:-4 192.2:-4 193.2:-3 194.2:-4 195.2:-4 196.4:-4 197.7:-4 198.7:-4 199.6:-4 200.4:-4 201.2:-4 203.9:-5 204.2:-5
+204.5:-4 205.5:-4 206.5:-4 207.4:-5 208.3:-4 209.8:-5 210.2:-5 211.9:-5 213.1:-4 214.0:-4 214.7:-5 215.3:-5 216.3:-5 219.6:-4 220.5:-4 220.9:-4
+221.5:-4 222.6:-5 223.3:-5 224.1:-4 224.7:-4 225.4:-4 226.5:-5 227.6:-4 228.5:-4 229.7:-5 230.4:-5 231.3:-4 232.4:-5 233.4:-4 234.2:-4 235.4:-5
+236.3:-5 237.1:-5 238.3:-4 239.3:-5 240.2:-4 241.4:-5 242.3:-5 243.4:-5 244.3:-5 245.4:-5 246.3:-5 247.3:-5 250.4:-6 250.6:-6 250.8:-5 251.4:-5
+252.2:-5 253.2:-5 254.2:-6 255.2:-6 256.1:-6 257.1:-6 258.2:-5 259.3:-6 260.2:-5 261.2:-5 262.4:-7 265.1:-6 265.4:-5 265.6:-6 266.1:-5 267.3:-5
+268.2:-5 269.3:-6 270.1:-6 271.2:-5 272.2:-5 273.2:-5 274.2:-4 275.2:-5 276.3:-5 277.2:-5 278.5:-5 279.7:-4 280.6:-5 281.2:-4 282.2:-5 283.1:-5
+284.3:-5 285.2:-4 286.1:-5 287.2:-4 288.2:-5 289.2:-5 290.2:-4 291.2:-5 292.2:-4 293.2:-4 294.5:-5 297.1:-5 297.2:-4 297.5:-4 298.3:-4 299.1:-4
+300.2:-4 301.1:-4 302.1:-5 303.2:-4 304.2:-4 305.5:-4 306.2:-4 307.1:-4 308.2:-4 309.5:-4 310.5:-4 311.8:-4 312.5:-3 313.1:-4 314.2:-3 315.2:-4
+316.1:-4 317.2:-4 318.1:-4 319.1:-4 320.3:-3 321.5:-4 322.3:-4 323.1:-4 324.2:-4 325.2:-4 327.1:-4 327.5:-4 328.2:-4 329.2:-4 330.2:-4 331.2:-4
+332.2:-4 333.1:-4 334.1:-4 335.2:-5 336.2:-4 337.2:-5 338.4:-4 339.3:-4 340.3:-5 341.4:-4 342.9:-5 343.3:-5 344.4:-4 345.4:-5 346.1:-4 347.3:-4
+348.3:-4 349.3:-5 350.2:-5 351.2:-4 352.2:-4 353.2:-4 354.1:-4 355.2:-4 356.2:-5 357.5:-4 358.1:-4 359.2:-3 360.2:-4 361.2:-3 362.3:-4 363.3:-4
+364.2:-3 365.2:-3 366.2:-4 367.2:-3 368.4:-3 369.2:-4 370.1:-3 371.1:-3 372.1:-3 373.7:-3 374.2:-3 375.2:-4 376.2:-3 377.3:-4 378.2:-3 379.5:-3
+380.3:-3 381.1:-3 382.4:-4 383.2:-3 384.1:-3 385.1:-3 386.2:-3 387.2:-3 388.2:-4 390.0:-4 390.3:-3 391.2:-4 392.1:-3 393.2:-3 394.3:-3 395.2:-3
+396.2:-4 397.2:-4 398.2:-3 399.2:-4 400.2:-3 401.1:-3 402.1:-4 403.2:-4 404.4:-3 405.5:-4 406.1:-3 407.2:-3 408.2:-4 409.2:-4 410.2:-3 411.1:-4
+412.2:-3 413.3:-4 414.1:-3 415.1:-3 416.1:-4 417.2:-4 418.2:-4 420.7:-4 420.7:-3 421.3:-4 422.2:-4 423.2:-4 424.3:-3 425.1:-4 426.2:-3 427.2:-4
+428.6:-3 429.3:-4 430.1:-4 431.2:-4 432.3:-3 433.2:-3 434.1:-3 435.1:-3 436.2:-4 437.3:-3 438.2:-3 439.2:-3 440.2:-3 441.1:-3 442.6:-3 443.3:-3
+444.5:-3 445.3:-3 446.3:-3 447.2:-3 448.3:-2 449.2:-3 450.2:-3 451.9:-3 452.1:-2 453.2:-3 454.2:-2 455.3:-2 456.2:-3 457.2:-2 458.2:-3 459.2:-2
+460.5:-2 461.3:-2 462.1:-2 463.9:-3 464.6:-2 465.4:-2 467.9:-2 468.0:-2 468.3:-2 469.3:-2 470.2:-2 471.2:-2 472.2:-2 473.2:-2 474.2:-2 475.6:-2
+476.4:-2 477.3:-2 478.2:-1 479.3:-2 480.2:-1 481.5:-2 482.2:-2 483.2:-2 484.2:-2 485.2:-1 486.3:-2 487.3:-2 488.2:-1 489.2:-2 490.2:-2 491.4:-2
+492.2:-2 493.1:-1 494.4:-2 495.2:-1 496.3:-2 498.3:-2 498.6:-1 499.1:-2 500.1:-1 501.1:-2 502.1:-1 503.2:-1 504.1:-1 505.2:-1 506.1:-1 507.2:-1
+508.4:-1 509.5:-1 510.2:-1 511.3:-1 513.8:-1 514.4:-1 520.4:-1 536.2:1 538.3:1 540.2:1 542.2:1 543.2:1 545.6:1 546.2:1 547.2:1 548.2:1
+550.3:1 551.1:1 552.1:1 553.3:1 554.1:1 556.2:1 557.2:1 558.2:1 560.3:1 562.4:1 563.5:1 565.2:1 568.2:1 572.3:1 578.4:1 586.1:1
+595.2:1 606.3:1 609.3:1 611.3:1 613.4:1 615.3:1 617.3:1 618.2:1 619.2:1 620.1:1 621.6:1 622.1:1 623.1:1 624.1:1 625.2:1 626.6:1
+627.5:1 628.2:2 629.5:1 630.3:2 631.2:2 632.2:2 633.1:1 634.1:2 635.1:2 637.6:1 638.1:2 638.8:2 639.3:2 640.1:2 641.1:2 642.1:1
+643.1:2 644.2:2 645.2:2 646.4:2 647.4:1 648.3:2 649.2:2 650.1:1 651.7:2 652.1:2 653.2:1 654.1:1 655.2:1 656.2:2 657.1:1 658.2:1
+659.2:1 660.3:1 662.2:1 663.3:1 667.2:1 690.3:-1 695.0:-1 696.7:-1 698.2:-1 700.7:-1 701.2:-1 705.3:-1 707.1:-1 709.2:-1 711.3:-1 713.1:-1
+718.3:-1 722.1:-1 724.1:-1 729.4:-1 732.1:-1 736.2:-1 738.2:-1 742.2:-1 761.2:1 764.2:1 769.1:1 770.2:1 773.1:1 775.1:1 776.2:1 778.2:1
+779.2:1 781.2:1 782.1:1 783.2:1 785.1:1 786.2:1 788.2:1 789.2:1 790.1:1 791.1:1 793.9:1 794.5:1 795.5:1 796.6:1 797.2:1 798.1:1
+799.2:1 800.2:1 801.2:2 802.1:1 803.1:1 804.3:2 805.2:1 806.1:1 807.1:2 808.1:2 809.1:1 810.4:2 811.3:1 812.2:2 813.2:1 814.2:2
+815.2:2 816.1:2 817.1:1 818.2:2 819.1:1 820.2:2 821.2:2 822.3:2 823.1:1 824.2:2 825.1:1 826.1:1 827.3:2 828.3:2 829.3:1 830.2:1
+831.2:2 832.1:1 833.3:2 834.1:1 835.2:1 836.2:1 837.2:2 838.3:1 839.2:1 840.2:1 841.2:2 842.2:1 843.2:1 844.3:1 845.2:1 846.2:1
+847.2:2 848.1:1 849.1:1 850.3:2 851.2:1 852.2:1 853.1:1 854.2:2 855.3:1 856.1:2 857.1:1 858.2:1 859.2:2 860.2:1 861.2:2 862.3:1
+863.4:2 864.1:1 865.1:2 866.1:1 867.3:2 868.1:1 869.1:2 870.2:2 871.4:1 872.5:2 873.1:1 874.1:2 875.1:1 876.2:2 877.3:1 878.2:2
+879.3:1 880.1:2 881.4:1 882.1:2 883.1:1 884.1:1 885.2:1 886.5:1 887.1:2 888.2:1 889.2:1 890.1:2 891.2:1 892.2:1 893.1:1 894.2:1
+895.2:1 896.4:1 897.2:1 898.1:1 899.4:1
+)"
+Global OreoRec := ""
+
+OreoRecording() {
+    global OreoRec, OreoData
+    if (!IsObject(OreoRec)) {
+        ev := []
+        for pair in StrSplit(RegExReplace(Trim(OreoData), "\s+", " "), " ") {
+            p := StrSplit(pair, ":")
+            ev.Push([Float(p[1]), Integer(p[2]), 0])
+        }
+        OreoRec := {sens: 0.36, qhold: 65, speed: 102, amount: 100, events: ev}
+    }
+    return OreoRec
+}
+
+XRun(i, *) {
+    global XMac, RobloxSensitivity
+    m := XMac[i]
+    if (!m.on || m.running || !WinActive(GAME_EXE))
+        return
+    m.running := true
+    if (m.id = "oreo") {                                      ; (replayed by the recorder's own engine)
+        SolReplay(OreoRecording())
+        m.running := false
+        SetTimer(ShowStatus.Bind("OREO", "0x082A13", 300), -1)
+        SetTimer(HudFlash.Bind(m.id), -1)
+        MacroFx()
+        return
+    }
+    s := XSchedule(i)
+    k := s.sens / ((RobloxSensitivity > 0) ? RobloxSensitivity : 0.36)
+    ev := s.ev, j := 1, ax := 0.0
+    qd := s.HasOwnProp("qd") ? s.qd : 0, qu := s.HasOwnProp("qu") ? s.qu : 10
+    base := QMs()
+    qDown := false, qUp := false
+    Loop {
+        now := QMs() - base
+        if (!qDown && now >= qd) {
+            SendInput("{q down}")
+            qDown := true
+        }
+        if (qDown && !qUp && now >= qu) {
+            SendInput("{q up}")
+            qUp := true
+        }
+        while (j <= ev.Length && ev[j][1] <= now) {
+            ax += ev[j][2] * k
+            j++
+        }
+        mx := Round(ax)
+        if (mx) {
+            DllCall("mouse_event", "UInt", 0x01, "Int", mx, "Int", 0, "UInt", 0, "UPtr", 0)
+            ax -= mx
+        }
+        if (j > ev.Length && qUp)
+            break
+        DllCall("Sleep", "UInt", 1)
+    }
+    m.running := false
+    SetTimer(ShowStatus.Bind(StrUpper(m.name), "0x082A13", 300), -1)
+    SetTimer(HudFlash.Bind(m.id), -1)
+    MacroFx()
+}
+
+XToggle(i, *) {
+    global XMac
+    XMac[i].on := !XMac[i].on
+    UpdateSidebarIndicators()
+}
+
+XRegisterAll() {
+    global XMac, XKeysOn
+    for key in XKeysOn
+        MacroKeyOff(key)
+    XKeysOn := []
+    for i, m in XMac {
+        if (m.key = "")
+            continue
+        MacroKey(m.key, XRun.Bind(i), m.on)
+        XKeysOn.Push(m.key)
+    }
+}
+
+StartBindX(i, *) {
+    global XMac
+    m := XMac[i]
+    KeyWait("LButton")
+    old := m.key
+    m.box.Text := "[ Press Key... ]"
+    Hotkey("~*Escape", CancelBind, "On")
+    key := InputKeyOrMouse()
+    try Hotkey("~*Escape", CancelBind, "Off")
+    if (key = "Cancel")                                       ; (a left click: keep the key it had)
+        key := old
+    MacroKeyOff(old)
+    m.key := (key = "Escape") ? "" : key
+    m.box.Text := FormatKeyName(m.key)
+    RegisterHotkeys()
+    HudRequest()
+}
+
+; macro lock: off while locked, back as they were after
+XLock(lock) {
+    global XMac
+    for m in XMac {
+        if (lock)
+            m.saved := m.on, m.on := false
+        else
+            m.on := m.saved
+    }
+}
+
+; configs: on / off and keys
+XSaveTo(cfg) {
+    global XMac
+    for m in XMac {
+        nm := m.id, kn := m.id "_key"
+        cfg.macros.%nm% := m.on ? 1 : 0
+        cfg.keybinds.%kn% := m.key
+    }
+}
+
+XLoadFrom(cfg) {
+    global XMac
+    mc := cfg.HasOwnProp("macros") ? cfg.macros : {}
+    kb := cfg.HasOwnProp("keybinds") ? cfg.keybinds : {}
+    for m in XMac {
+        nm := m.id, kn := m.id "_key"
+        m.on := mc.HasOwnProp(nm) ? (mc.%nm% ? true : false) : false
+        m.key := kb.HasOwnProp(kn) ? kb.%kn% : ""
+        m.box.Text := FormatKeyName(m.key)
     }
 }
 
@@ -4396,6 +4649,7 @@ ExecuteExtender4(*) {
     }
     
     isExtender4Running := false
+    MacroFx()
 }
 
 ; --- Macro: Jump Bug ---
@@ -4412,6 +4666,7 @@ ExecuteJumpBug(*) {
     SendInput("{d up}{Space up}{q up}")
     
     isJumpBugRunning := false
+    MacroFx()
 }
 
 
@@ -4429,104 +4684,1938 @@ ApplyLagSettings(*) {
 }
 
 TestFreeze(*) {
-    global LagStatusText
-    LagStatusText.Text := "Status: Testing Freeze..."
     ExecuteLagswitch()
-    LagStatusText.Text := "Status: Ready"
+}
+
+; ==============================================================================
+;  LAGSWITCH: FREEZE, FREEZE EFFECT, COUNTDOWN, SHAKE, SOUNDS, HIT EFFECTS (from M0MENT4M)
+; ==============================================================================
+
+; ---------- settings (saved in configs; only the countdown's position is in ui.ini) ----------
+Global VigStyle := 6, VigGrad := 1, VigAnim := false, VigAnimSpd := 5, VigIntensity := 80, VigTint := 0, VigMinShow := 500
+Global VigPillOn := true, PillAlways := false, BurstSyncPill := true, VigPillScale := 100
+Global VigPillX := 0, VigPillY := 34, VigPillCustom := false
+Global ShakeOn := false, ShakeStyle := 1, ShakeAmt := 40, ShakeWhere := 1, ShakeLen := 400, ShakeSyncLen := false
+Global VigSound := false, VigSoundIdx := 1, VigSoundFile := "", VigVol := 100, BurstSyncSound := false
+Global HitOn := false, HitVig := true, HitShake := true, HitSound := false, HitDur := 450, HitShakeAmt := 40, HitShakeStyle := 1
+Global HitSoundIdx := 1, HitSoundFile := "", HitVol := 70
+; the hit effect's own look (separate from the lagswitch's)
+Global HitFxStyle := 1, HitFxGrad := 2, HitFxAnim := false, HitFxInt := 80, HitFxTint := 0, HitFxSize := 8, FxHitOn := false
+
+Global VigStyleNames := ["Glow", "Pulse", "Scanlines", "Glitch", "Frost", "Hard border", "Shockwave", "Chromatic split"
+    , "Radar sweep", "Heartbeat", "Lightning", "Hourglass", "Closing in", "Embers"]
+Global VigGradNames := ["Solid red"]
+for _n in GradNames
+    VigGradNames.Push(_n)
+Global ShakeStyleNames := ["Jitter", "Impact", "Wobble", "Punch", "Heartbeat", "Earthquake", "Kick", "Drunk sway", "Roll"
+    , "Vertical roll", "Glitch slices", "RGB split", "Zoom blur"]
+Global ShakeWhereNames := ["The game picture", "The whole screen"]
+Global SoundNames := ["Beep", "Double beep", "Rising chirp", "Falling chirp", "Soft tick", "Custom file"]
+Global HitSoundNames := ["Hit marker", "Kill ding", "Headshot", "Beep", "Double beep", "Rising chirp", "Falling chirp", "Soft tick", "Custom file"]
+Global HitShakeNames := ["Jitter", "Punch", "Horizontal", "Vertical", "Earthquake", "Recoil"]
+
+Global VigStyleDDL := UList(VigStyleNames, VigStyle, FxSet.Bind("VigStyle"))
+Global VigGradDDL := UList(VigGradNames, VigGrad, FxSet.Bind("VigGrad"))
+Global ShakeStyleDDL := UList(ShakeStyleNames, ShakeStyle, FxSet.Bind("ShakeStyle"))
+Global ShakeWhereDDL := UList(ShakeWhereNames, ShakeWhere, FxSet.Bind("ShakeWhere"))
+Global SoundDDL := UList(SoundNames, VigSoundIdx, FxPickSound)
+Global HitSoundDDL := UList(HitSoundNames, HitSoundIdx, FxPickHitSound)
+Global HitShakeDDL := UList(HitShakeNames, HitShakeStyle, FxSet.Bind("HitShakeStyle"))
+Global HitFxStyleDDL := UList(VigStyleNames, HitFxStyle, FxSet.Bind("HitFxStyle"))
+Global HitFxGradDDL := UList(VigGradNames, HitFxGrad, FxSet.Bind("HitFxGrad"))
+
+; ---------- the freeze ----------
+; The game is paused first and the effects come after (the freeze never waits for drawing). A single freeze is ended by a
+; Windows timer that resumes the game itself, so it is exact even while Destiny is busy drawing; pressing again while frozen
+; makes it last longer. Hold mode polls the key instead of waiting on it, burst mode runs on timers.
+Global FreezeActive := false, FzH := 0, FzThreads := [], FzTimer := 0, FzEndTick := 0, FzMode := "", FzIdx := 0, FzCount := 0
+Global FzBase := 0, FzDur := 0, FzKey := "", FzPrecise := false, FzBurstResumed := false, FzLastFail := -99999, LagHeld := false
+
+FzReport(text) {
+    global FzLastFail, LagStatusText
+    LagStatusText.Text := "Status: " text
+    if (A_TickCount - FzLastFail > 2500) {                    ; (one card at a time)
+        FzLastFail := A_TickCount
+        ShowStatus("LAGSWITCH: " text, "0x2A0808", 500, true)
+    }
+}
+
+; the process to freeze: the game window you are in, or else the first Roblox process
+FzFindPid() {
+    global TargetProcess
+    try {
+        fg := WinExist("A")
+        if (fg) {
+            exe := WinGetProcessName("ahk_id " fg)
+            if (exe = TargetProcess || exe = "Windows10Universal.exe")
+                return WinGetPID("ahk_id " fg)
+        }
+    }
+    return ProcessExist(TargetProcess)
+}
+
+; pauses the game: "" when it worked, otherwise a readable reason
+FzSuspend(pid) {
+    global FzH, FzThreads
+    if (FzH) {                                                ; (burst mode comes back here for every tick)
+        DllCall("CloseHandle", "Ptr", FzH)
+        FzH := 0
+    }
+    for th in FzThreads
+        DllCall("CloseHandle", "Ptr", th)
+    FzThreads := []
+    for acc in [0x0800, 0x1F0FFF] {                           ; 1) the smallest right that is enough, then the broad one
+        h := DllCall("OpenProcess", "UInt", acc, "Int", 0, "UInt", pid, "Ptr")
+        if (h) {
+            if (DllCall("ntdll\NtSuspendProcess", "Ptr", h) = 0) {
+                FzH := h
+                return ""
+            }
+            DllCall("CloseHandle", "Ptr", h)
+        }
+    }
+    err1 := A_LastError
+    snap := DllCall("CreateToolhelp32Snapshot", "UInt", 0x4, "UInt", 0, "Ptr")   ; 2) thread by thread
+    if (snap = -1 || !snap)
+        return "Windows refused access to Roblox (error " err1 ")"
+    te := Buffer(28, 0)
+    NumPut("UInt", 28, te, 0)
+    ok := DllCall("Thread32First", "Ptr", snap, "Ptr", te)
+    while (ok) {
+        if (NumGet(te, 12, "UInt") = pid) {
+            th := DllCall("OpenThread", "UInt", 0x2, "Int", 0, "UInt", NumGet(te, 8, "UInt"), "Ptr")
+            if (th) {
+                if (DllCall("SuspendThread", "Ptr", th) != -1)
+                    FzThreads.Push(th)
+                else
+                    DllCall("CloseHandle", "Ptr", th)
+            }
+        }
+        ok := DllCall("Thread32Next", "Ptr", snap, "Ptr", te)
+    }
+    DllCall("CloseHandle", "Ptr", snap)
+    if (FzThreads.Length = 0)
+        return "Windows refused access to Roblox (error " err1 "). Try running Destiny as administrator"
+    return ""
+}
+
+FzResume() {
+    global FzH, FzThreads
+    if (FzH)
+        DllCall("ntdll\NtResumeProcess", "Ptr", FzH)
+    for th in FzThreads
+        DllCall("ResumeThread", "Ptr", th)
+}
+
+; the Windows timer that resumes the game after ms (exact even while Destiny draws)
+FzArmTimer(ms) {
+    global FzH, FzTimer
+    if (FzTimer) {
+        DllCall("DeleteTimerQueueTimer", "Ptr", 0, "Ptr", FzTimer, "Ptr", 0)
+        FzTimer := 0
+    }
+    if (!FzH)
+        return
+    ntres := DllCall("GetProcAddress", "Ptr", DllCall("GetModuleHandle", "Str", "ntdll", "Ptr"), "AStr", "NtResumeProcess", "Ptr")
+    t := 0
+    if (DllCall("CreateTimerQueueTimer", "Ptr*", &t, "Ptr", 0, "Ptr", ntres, "Ptr", FzH, "UInt", ms, "UInt", 0, "UInt", 0x20))
+        FzTimer := t
 }
 
 ExecuteLagswitch(*) {
-    global FreezeDuration, TargetProcess, LagKey, IsLagPrecision, IsLagBurst, LagBurstCount, IsLagHold, IsLagVignette, LagStatusText
-    
-    RobloxPID := ProcessExist(TargetProcess)
-    if (!RobloxPID) {
-        LagStatusText.Text := "Status: Roblox not running!"
+    global FreezeDuration, LagKey, IsLagPrecision, IsLagBurst, LagBurstCount, IsLagHold, IsLagVignette, LagStatusText
+    global FreezeActive, FzMode, FzIdx, FzCount, FzBase, FzDur, FzKey, FzPrecise, FzTimer, FzEndTick, FzBurstResumed, LagHeld
+    global VigSound
+    if (LagHeld)                                              ; (one freeze per press: a held key repeating does nothing)
+        return
+    if (A_ThisHotkey != "" && InStr(A_ThisHotkey, "*")) {
+        LagHeld := true
+        SetTimer(LagReleaseWatch, 10)
+    }
+    if (FreezeActive) {
+        if (FzMode != "single")
+            return
+        if (A_TickCount < FzEndTick) {                        ; pressed again while frozen: the freeze lasts longer
+            FzArmTimer(FreezeDuration)
+            FzEndTick := A_TickCount + FreezeDuration
+            SetTimer(FreezeSingleDone, -(FreezeDuration + (FzTimer ? 30 : 0)), 100)
+            return
+        }
+        SetTimer(FreezeSingleDone, 0)                         ; the game runs again, only the clean-up was left: finish it now
+        FreezeEnd(true)
+    }
+    pid := FzFindPid()
+    if (!pid) {
+        FzReport("Roblox not running!")
         return
     }
-    
-    if (IsLagVignette)
-        ShowVignette()
-    
-    if (IsLagPrecision)
+    FzPrecise := IsLagPrecision ? true : false
+    if (FzPrecise)
         DllCall("winmm\timeBeginPeriod", "UInt", 1)
-        
-    hProcess := DllCall("OpenProcess", "UInt", 0x1F0FFF, "Int", 0, "UInt", RobloxPID)
-    if (hProcess) {
-        BlinkIndicator(6)
-        if (IsLagHold && LagKey != "") {
-            LagStatusText.Text := "Status: Freezing (Hold)..."
-            DllCall("ntdll\NtSuspendProcess", "Ptr", hProcess)
-            cleanKey := RegExReplace(LagKey, "^[~*$&<>]", "")
-            try KeyWait(cleanKey)
-            DllCall("ntdll\NtResumeProcess", "Ptr", hProcess)
-            LagStatusText.Text := "Status: Resumed"
-        } else if (IsLagBurst) {
-            LagStatusText.Text := "Status: Freeze Burst..."
-            baseBurst := Max(10, Round(FreezeDuration / LagBurstCount))
-            Loop LagBurstCount {
-                DllCall("ntdll\NtSuspendProcess", "Ptr", hProcess)
-                Sleep(baseBurst)
-                DllCall("ntdll\NtResumeProcess", "Ptr", hProcess)
-                if (A_Index < LagBurstCount)
-                    Sleep(15)
-            }
-        } else {
-            LagStatusText.Text := "Status: Frozen " FreezeDuration "ms"
-            DllCall("ntdll\NtSuspendProcess", "Ptr", hProcess)
-            Sleep(FreezeDuration)
-            DllCall("ntdll\NtResumeProcess", "Ptr", hProcess)
-        }
-        DllCall("CloseHandle", "Ptr", hProcess)
+    FzDur := FreezeDuration
+    FzMode := (IsLagHold && LagKey != "") ? "hold" : (IsLagBurst ? "burst" : "single")
+    err := FzSuspend(pid)
+    if (err != "") {
+        FzReport(err)
+        FreezeEnd(false)
+        return
     }
-    
-    if (IsLagPrecision)
-        DllCall("winmm\timeEndPeriod", "UInt", 1)
-        
+    FreezeActive := true
+    if (FzMode = "burst") {                                   ; the end of the first tick is set before anything is drawn
+        FzCount := LagBurstCount
+        FzBase := Max(10, Round(FreezeDuration / LagBurstCount))
+        FzIdx := 1
+        FzBurstResumed := false
+        SetTimer(FreezeBurstStep, -FzBase, 100)
+    } else if (FzMode = "single") {
+        FzArmTimer(FzDur)
+        FzEndTick := A_TickCount + FzDur
+        SetTimer(FreezeSingleDone, -(FzDur + (FzTimer ? 30 : 0)), 100)
+    }
+    ShakeStart(false, FzMode = "burst" ? 0 : -1)
+    total := (FzMode = "burst") ? FzBase * FzCount + 15 * (FzCount - 1) : FzDur
     if (IsLagVignette)
-        HideVignette()
-        
-    SetTimer(() => LagStatusText.Text := "Status: Ready", -2000)
+        ShowFreezeVignette(FzMode = "hold" ? 0 : ((FzMode = "burst" && BurstSyncPill) ? FzBase : total))   ; (it plays the sound too)
+    else if (VigSound)
+        VigSoundPlay(true)
+    KFPlay("lag")
+    BlinkIndicator(6)
+    if (FzMode = "hold") {
+        FzKey := RegExReplace(LagKey, "^[~*$&<>]", "")
+        LagStatusText.Text := "Status: Freezing (Hold)..."
+        SetTimer(FreezeHoldPoll, 10)
+    } else
+        LagStatusText.Text := FzMode = "burst" ? "Status: Freeze Burst..." : "Status: Frozen " FzDur "ms"
 }
 
-ShowVignette() {
-    global VignetteGuis, VignetteColor, VignetteThickness
-    if (VignetteGuis.Length = 0) {
-        sw := A_ScreenWidth
-        sh := A_ScreenHeight
-        bw := VignetteThickness
-        
-        topG   := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
-        botG   := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
-        leftG  := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
-        rightG := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20 +E0x8000000")
-        
-        for g in [topG, botG, leftG, rightG]
-            g.BackColor := "0x" VignetteColor
-            
-        VignetteGuis := [
-            {gui: topG,   pos: "x0 y0 w" sw " h" bw},
-            {gui: botG,   pos: "x0 y" (sh - bw) " w" sw " h" bw},
-            {gui: leftG,  pos: "x0 y0 w" bw " h" sh},
-            {gui: rightG, pos: "x" (sw - bw) " y0 w" bw " h" sh}
-        ]
-        for item in VignetteGuis
-            WinSetTransparent(180, item.gui)
+LagReleaseWatch() {
+    global LagHeld, LagKey
+    k := RegExReplace(LagKey, "^[~*$&<>]", "")
+    if (k != "" && GetKeyState(k, "P"))
+        return
+    SetTimer(LagReleaseWatch, 0)
+    LagHeld := false
+}
+
+FreezeHoldPoll() {
+    global FzKey, LagStatusText
+    if (GetKeyState(FzKey, "P"))
+        return
+    SetTimer(FreezeHoldPoll, 0)
+    LagStatusText.Text := "Status: Resumed"
+    FreezeEnd(true)
+}
+
+FreezeSingleDone() {
+    FreezeEnd(true)
+}
+
+; resumes after each tick of the burst, lets the game run 15 ms, then freezes again
+FreezeBurstStep() {
+    global FzIdx, FzCount, FzBase, FzBurstResumed, BurstSyncSound, BurstSyncPill, VigSound, IsLagVignette, VigState
+    if (!FzBurstResumed) {
+        FzResume()
+        ShakeStop()
+        if (FzIdx < FzCount && BurstSyncSound && VigSound)
+            VigSoundPlay(false)
+        if (FzIdx >= FzCount) {
+            FzBurstResumed := false
+            FreezeEnd(true, true)
+            return
+        }
+        FzBurstResumed := true
+        SetTimer(FreezeBurstStep, -15, 100)
+    } else {
+        FzBurstResumed := false
+        FzIdx += 1
+        pid := FzFindPid()
+        err := pid ? FzSuspend(pid) : "Roblox not running!"
+        if (err != "") {
+            FzReport(err)
+            FreezeEnd(false, true)
+            return
+        }
+        SetTimer(FreezeBurstStep, -FzBase, 100)
+        ShakeStart(false, 0)
+        KFPlay("lag")
+        if (IsLagVignette && BurstSyncPill && IsObject(VigState))   ; (the countdown runs again for every tick)
+            VigState.t0 := A_TickCount, VigState.dur := FzBase
+        if (BurstSyncSound && VigSound)
+            VigSoundPlay(true)
     }
-    for item in VignetteGuis
-        item.gui.Show(item.pos " NoActivate")
 }
 
-HideVignette() {
-    global VignetteGuis
-    for item in VignetteGuis
-        item.gui.Hide()
+FreezeEnd(ran := true, alreadyResumed := false) {
+    global FzH, FzThreads, FzTimer, FzPrecise, FreezeActive, IsLagVignette, VigSound, LagStatusText
+    if (!alreadyResumed)
+        FzResume()
+    if (FzTimer) {
+        DllCall("DeleteTimerQueueTimer", "Ptr", 0, "Ptr", FzTimer, "Ptr", 0)
+        FzTimer := 0
+    }
+    if (FzH) {
+        DllCall("CloseHandle", "Ptr", FzH)
+        FzH := 0
+    }
+    for th in FzThreads
+        DllCall("CloseHandle", "Ptr", th)
+    FzThreads := []
+    FreezeActive := false
+    if (FzPrecise) {
+        DllCall("winmm\timeEndPeriod", "UInt", 1)
+        FzPrecise := false
+    }
+    ShakeStop()
+    if (ran && IsLagVignette)
+        HideFreezeVignette()
+    else if (ran && VigSound)
+        VigSoundPlay(false)
+    SetTimer(() => LagStatusText.Text := "Status: Ready", -3000)
 }
 
-DestroyVignette() {
-    global VignetteGuis
-    for item in VignetteGuis
-        item.gui.Destroy()
-    VignetteGuis := []
+; Destiny closing (or reloading) in the middle of a freeze: the game is never left frozen, the game window is put back
+FzExitSafety(*) {
+    global FreezeActive
+    if (FreezeActive)
+        FzResume()
+    HitShakeRestore()
+}
+OnExit(FzExitSafety)
+
+; ---------- freeze effect: a full-screen glow in 14 styles, plus the countdown ----------
+Global VigState := 0, VigStops := "", VigPhase := 0.0, VigSig := "", VigDirty := true, VigLastA := -1, VigTimerOn := false
+Global VigGui := "", VigS := 0, VigPGui := "", VigPS := 0, VigPillPrev := false, VigPillThru := true, VigPillDrag := 0
+PillW() => Round(250 * VigPillScale / 100)
+PillH() => Round(64 * VigPillScale / 100)
+
+DestroyVignette() {                                           ; (a setting changed: the effect is drawn again next time)
+    global VigSig
+    VigSig := ""
+}
+
+VigEnsure() {
+    global VigGui, VigS, VigPGui, VigPS
+    if (IsObject(VigGui))
+        return
+    UGdipInit()
+    VigGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny freeze")
+    VigS := UMakeSurface(A_ScreenWidth, A_ScreenHeight)
+    VigPGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny countdown")
+    VigPS := UMakeSurface(400, 103)
+}
+
+VigARGB(a, c) => ((a & 255) << 24) | (c[1] << 16) | (c[2] << 8) | c[3]
+
+VigGradRect(G, x, y, w, h, c1, c2, mode) {
+    if (w < 1 || h < 1)
+        return
+    rc := Buffer(16, 0)
+    NumPut("Int", x, rc, 0), NumPut("Int", y, rc, 4), NumPut("Int", w, rc, 8), NumPut("Int", h, rc, 12)
+    brush := 0
+    DllCall("gdiplus\GdipCreateLineBrushFromRectI", "Ptr", rc, "UInt", c1, "UInt", c2, "Int", mode, "Int", 0, "Ptr*", &brush)
+    DllCall("gdiplus\GdipFillRectangleI", "Ptr", G, "Ptr", brush, "Int", x, "Int", y, "Int", w, "Int", h)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+VigSolid(G, x, y, w, h, argb) {
+    brush := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+    DllCall("gdiplus\GdipFillRectangleI", "Ptr", G, "Ptr", brush, "Int", x, "Int", y, "Int", w, "Int", h)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+}
+
+; colour at position pos (0..1 around the screen edge)
+VigColAt(pos) {
+    global VignetteColor, VigStops, VigAnim, VigPhase
+    if (!IsObject(VigStops))
+        return UHexArr(VignetteColor)
+    return GradSample(VigStops, VigAnim ? pos - VigPhase : pos)
+}
+
+; the colours of the effect: a gradient, or the solid colour (shimmering to a lighter shade when animated)
+VigUpdateStops() {
+    global VigStops, VigGrad, VigAnim, VignetteColor
+    if (VigGrad > 1) {
+        VigStops := GradStops(VigGrad - 1)
+    } else if (VigAnim) {
+        c := UHexArr(VignetteColor)
+        VigStops := [c, [Round(c[1] + (255 - c[1]) * 0.6), Round(c[2] + (255 - c[2]) * 0.6), Round(c[3] + (255 - c[3]) * 0.6)]]
+    } else
+        VigStops := ""
+}
+
+; soft glow around all four edges: two layered fades give a natural fall-off
+VigEdges(G, depth, peak) {
+    w := A_ScreenWidth, h := A_ScreenHeight
+    n := 28
+    for pass in [[1.0, 0.55], [0.42, 0.55]] {
+        d := Round(depth * pass[1])
+        a := Round(peak * pass[2])
+        Loop n {
+            i := A_Index
+            x0 := Floor((i - 1) * w / n), x1 := Floor(i * w / n)
+            ct := VigColAt((i - 0.5) / n * 0.25)
+            cb := VigColAt(0.75 - (i - 0.5) / n * 0.25)
+            VigGradRect(G, x0, 0, x1 - x0 + 1, d, VigARGB(a, ct), VigARGB(0, ct), 1)
+            VigGradRect(G, x0, h - d, x1 - x0 + 1, d, VigARGB(0, cb), VigARGB(a, cb), 1)
+            y0 := Floor((i - 1) * h / n), y1 := Floor(i * h / n)
+            cr := VigColAt(0.25 + (i - 0.5) / n * 0.25)
+            cl := VigColAt(1.0 - (i - 0.5) / n * 0.25)
+            VigGradRect(G, 0, y0, d, y1 - y0 + 1, VigARGB(a, cl), VigARGB(0, cl), 0)
+            VigGradRect(G, w - d, y0, d, y1 - y0 + 1, VigARGB(0, cr), VigARGB(a, cr), 0)
+        }
+    }
+}
+
+; the pause (ms) between two pictures of a style that changes while the freeze runs (0 = one picture is enough)
+VigRedrawGap(style) {
+    switch style {
+        case 7, 9: return 45
+        case 11: return 80
+        case 12: return 60
+        case 13: return 50
+        case 14: return 55
+    }
+    return 0
+}
+
+VigPen(argb, wd) {
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", wd, "Int", 2, "Ptr*", &pen)
+    return pen
+}
+
+VigRing(G, cx, cy, r, wd, argb) {
+    if (r < 2)
+        return
+    pen := VigPen(argb, wd)
+    DllCall("gdiplus\GdipDrawEllipse", "Ptr", G, "Ptr", pen, "Float", cx - r, "Float", cy - r, "Float", r * 2, "Float", r * 2)
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+}
+
+; rings leave the middle of the screen one after another, thinning and fading as they widen
+VigFxShockwave(G, w, h, depth, T) {
+    VigEdges(G, depth * 0.8, 170)
+    diag := Sqrt(w * w + h * h) / 2
+    Loop 4 {
+        k := A_Index
+        ph := T / 850 - (k - 1) * 0.24
+        if (ph < 0)
+            continue
+        ph := ph - Floor(ph)
+        e := 1 - (1 - ph) ** 3
+        col := VigColAt(k * 0.19 + ph * 0.3)
+        a := Round(215 * (1 - ph) ** 1.4)
+        r := e * diag * 1.08
+        VigRing(G, w / 2, h / 2, r, 5 + 22 * (1 - ph), VigARGB(Round(a * 0.18), col))
+        VigRing(G, w / 2, h / 2, r, 2 + 9 * (1 - ph), VigARGB(Round(a * 0.45), col))
+        VigRing(G, w / 2, h / 2, r, 1.5 + 3 * (1 - ph), VigARGB(a, [Min(255, col[1] + 35), Min(255, col[2] + 35), Min(255, col[3] + 35)]))
+    }
+}
+
+; red on the left and the top, cyan on the right and the bottom, with a faint copy of each a little further in
+VigFxChromatic(G, w, h, depth) {
+    d := Round(depth * 0.7)
+    red := [255, 40, 70], cy := [0, 225, 255]
+    VigGradRect(G, 0, 0, d, h, VigARGB(215, red), VigARGB(0, red), 0)
+    VigGradRect(G, 0, 0, w, d, VigARGB(215, red), VigARGB(0, red), 1)
+    VigGradRect(G, w - d, 0, d, h, VigARGB(0, cy), VigARGB(215, cy), 0)
+    VigGradRect(G, 0, h - d, w, d, VigARGB(0, cy), VigARGB(215, cy), 1)
+    VigSolid(G, 5, 0, 3, h, VigARGB(190, cy))
+    VigSolid(G, 0, 5, w, 3, VigARGB(190, cy))
+    VigSolid(G, w - 8, 0, 3, h, VigARGB(190, red))
+    VigSolid(G, 0, h - 8, w, 3, VigARGB(190, red))
+}
+
+; a line turns around the middle of the screen and leaves a fading trail
+VigFxRadar(G, w, h, depth, T) {
+    VigEdges(G, depth * 0.6, 150)
+    cx := w / 2, cy := h / 2
+    diag := Sqrt(w * w + h * h) / 2
+    for f in [0.33, 0.66, 1.0]
+        VigRing(G, cx, cy, diag * f * 0.95, 1.5, VigARGB(46, VigColAt(f * 0.6)))
+    ang := Mod(T / 1000 * 330, 360)
+    Loop 14 {
+        i := A_Index
+        a := Round(120 * (1 - (i - 1) / 14) ** 1.6)
+        brush := 0
+        DllCall("gdiplus\GdipCreateSolidFill", "UInt", VigARGB(a, VigColAt(0.1 + i * 0.02)), "Ptr*", &brush)
+        DllCall("gdiplus\GdipFillPie", "Ptr", G, "Ptr", brush, "Float", cx - diag * 1.1, "Float", cy - diag * 1.1, "Float", diag * 2.2, "Float", diag * 2.2, "Float", ang - i * 3.2, "Float", 3.4)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+    }
+    r := diag * 1.1
+    pen := VigPen(VigARGB(230, VigColAt(0.05)), 2.4)
+    rad := ang * 0.01745329
+    DllCall("gdiplus\GdipDrawLine", "Ptr", G, "Ptr", pen, "Float", cx, "Float", cy, "Float", cx + r * Cos(rad), "Float", cy + r * Sin(rad))
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+}
+
+; the edge glow beats twice and rests (the opacity is driven by this in the timer)
+VigBeat(T) {
+    p := Mod(T, 950) / 950
+    a := Exp(-((p - 0.07) / 0.045) ** 2)
+    b := 0.78 * Exp(-((p - 0.25) / 0.055) ** 2)
+    return 0.3 + 0.7 * Max(a, b)
+}
+
+; jagged electric lines along the four edges, new ones every few frames
+VigFxLightning(G, w, h, depth) {
+    VigEdges(G, depth * 0.7, 150)
+    for e in [0, 1, 2, 3] {
+        len := (e < 2) ? w : h
+        steps := 34
+        pts := Buffer(steps * 8 + 8, 0)
+        inset := 7 + Random(0, 6)
+        Loop steps + 1 {
+            i := A_Index - 1
+            along := i / steps * len
+            off := inset + (Mod(i, 2) ? Random(-3, 22) : Random(0, 10))
+            switch e {
+                case 0: x := along, y := off
+                case 1: x := along, y := h - off
+                case 2: x := off, y := along
+                default: x := w - off, y := along
+            }
+            NumPut("Float", x, pts, i * 8)
+            NumPut("Float", y, pts, i * 8 + 4)
+        }
+        col := VigColAt(e * 0.25)
+        bright := [Min(255, col[1] + 110), Min(255, col[2] + 110), Min(255, col[3] + 110)]
+        for lay in [[9, 44, col], [4, 110, col], [1.8, 235, bright]] {
+            pen := VigPen(VigARGB(lay[2], lay[3]), lay[1])
+            DllCall("gdiplus\GdipDrawLines", "Ptr", G, "Ptr", pen, "Ptr", pts, "Int", steps + 1)
+            DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        }
+        Loop 3 {                                              ; short branches reaching into the screen
+            i := Random(2, steps - 2)
+            bx := NumGet(pts, i * 8, "Float"), by := NumGet(pts, i * 8 + 4, "Float")
+            dx := (e < 2) ? Random(-25, 25) : ((e = 2) ? Random(20, 70) : -Random(20, 70))
+            dy := (e >= 2) ? Random(-25, 25) : ((e = 0) ? Random(20, 70) : -Random(20, 70))
+            pen := VigPen(VigARGB(190, bright), 1.3)
+            DllCall("gdiplus\GdipDrawLine", "Ptr", G, "Ptr", pen, "Float", bx, "Float", by, "Float", bx + dx * 0.5 + Random(-8, 8), "Float", by + dy * 0.5 + Random(-8, 8))
+            DllCall("gdiplus\GdipDrawLine", "Ptr", G, "Ptr", pen, "Float", bx + dx * 0.5, "Float", by + dy * 0.5, "Float", bx + dx, "Float", by + dy)
+            DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        }
+    }
+}
+
+; two bars (top and bottom) that run empty towards the middle as the freeze runs out
+VigFxHourglass(G, w, h, depth, T, dur) {
+    VigEdges(G, depth * 0.45, 120)
+    f := (dur > 0) ? Max(0.0, Min(1.0, 1 - T / VigSpan(dur))) : 0.55 + 0.45 * Sin(T / 260)
+    bh := 9, pad := 14
+    for y in [pad, h - pad - bh] {
+        VigSolid(G, 0, y, w, bh, VigARGB(40, VigColAt(0.0)))
+        fw := Round(w * f)
+        x0 := Round((w - fw) / 2)
+        n := 40
+        Loop n {
+            i := A_Index
+            sx := x0 + Floor((i - 1) * fw / n), ex := x0 + Floor(i * fw / n)
+            VigSolid(G, sx, y, ex - sx + 1, bh, VigARGB(235, VigColAt((i - 0.5) / n * 0.5)))
+        }
+        if (fw > 4)
+            VigSolid(G, x0, y, 3, bh, VigARGB(255, [255, 255, 255]))
+    }
+}
+
+; the screen darkens from the corners towards the middle, like tunnel vision
+VigFxClosing(G, w, h, depth, T) {
+    p := Min(1.0, T / 480)
+    e := 1 - (1 - p) ** 3
+    base := VigColAt(0.0)
+    dark := [Round(base[1] * 0.15), Round(base[2] * 0.15), Round(base[3] * 0.15)]
+    rx := w * (0.80 - 0.34 * e)
+    ry := h * (0.80 - 0.30 * e)
+    cx := w / 2, cy := h / 2
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    DllCall("gdiplus\GdipAddPathEllipse", "Ptr", path, "Float", cx - rx, "Float", cy - ry, "Float", rx * 2, "Float", ry * 2)
+    DllCall("gdiplus\GdipSetClipPath", "Ptr", G, "Ptr", path, "Int", 4)        ; 4 = leave the inside of the ellipse out
+    VigSolid(G, 0, 0, w, h, VigARGB(238, dark))
+    DllCall("gdiplus\GdipResetClip", "Ptr", G)
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+    Loop 12 {                                                 ; a soft edge: darker rings fading inwards
+        k := A_Index
+        a := Round(238 * ((13 - k) / 13) ** 2.2)
+        pen := VigPen(VigARGB(a, dark), 11)
+        DllCall("gdiplus\GdipDrawEllipse", "Ptr", G, "Ptr", pen, "Float", cx - rx + k * 9, "Float", cy - ry + k * 9 * ry / rx, "Float", (rx - k * 9) * 2, "Float", (ry - k * 9 * ry / rx) * 2)
+        DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    }
+    pen := VigPen(VigARGB(210, VigColAt(0.2)), 3)
+    DllCall("gdiplus\GdipDrawEllipse", "Ptr", G, "Ptr", pen, "Float", cx - rx, "Float", cy - ry, "Float", rx * 2, "Float", ry * 2)
+    DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+}
+
+; sparks drift up along the edges of the screen
+VigFxEmbers(G, w, h, depth, T) {
+    static px := [], py := [], pv := [], ps := [], pk := [], pw := []
+    n := 80
+    if (px.Length != n) {
+        Loop n {
+            i := A_Index
+            if (i <= 44)
+                px.Push(Random(0, w))
+            else if (Mod(i, 2))
+                px.Push(Random(0, 160))
+            else
+                px.Push(w - Random(0, 160))
+            py.Push(Random(0, h)), pv.Push(Random(45, 170)), ps.Push(Random(3, 7))
+            pk.Push(Random(0, 1000) / 1000), pw.Push(Random(8, 40))
+        }
+    }
+    VigEdges(G, depth * 0.7, 140)
+    Loop n {
+        i := A_Index
+        y := Mod(py[i] - pv[i] * T / 1000 + h * 4, h + 40) - 20
+        x := px[i] + pw[i] * Sin(T / 700 + pk[i] * 6.28)
+        fl := 0.65 + 0.35 * Sin(T / 90 + pk[i] * 20)
+        col := VigColAt(pk[i] * 0.6)
+        warm := [Min(255, col[1] + 90), Min(255, col[2] + 60), Min(255, col[3] + 30)]
+        sz := ps[i]
+        for lay in [[sz * 3.4, 38], [sz * 1.8, 110], [sz, 255]] {
+            brush := 0
+            DllCall("gdiplus\GdipCreateSolidFill", "UInt", VigARGB(Round(lay[2] * fl), warm), "Ptr*", &brush)
+            DllCall("gdiplus\GdipFillEllipse", "Ptr", G, "Ptr", brush, "Float", x - lay[1] / 2, "Float", y - lay[1] / 2, "Float", lay[1], "Float", lay[1])
+            DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+        }
+    }
+}
+
+; puts the hit effect's look in place of the lagswitch's (and back): only ever inside Critical, so nothing else sees it
+FxHitLook(on) {
+    global
+    local t
+    if (on = FxHitOn)
+        return
+    FxHitOn := on
+    t := VigStyle, VigStyle := HitFxStyle, HitFxStyle := t
+    t := VigGrad, VigGrad := HitFxGrad, HitFxGrad := t
+    t := VigAnim, VigAnim := HitFxAnim, HitFxAnim := t
+    t := VigIntensity, VigIntensity := HitFxInt, HitFxInt := t
+    t := VigTint, VigTint := HitFxTint, HitFxTint := t
+    t := VignetteThickness, VignetteThickness := HitFxSize, HitFxSize := t
+}
+
+FxIsHit() => IsObject(VigState) && VigState.hit
+
+VigRender() {
+    pc := A_IsCritical
+    Critical
+    sw := FxIsHit() && !FxHitOn
+    if (sw)
+        FxHitLook(true)
+    try VigRenderInner()
+    finally {
+        if (sw)
+            FxHitLook(false)
+        Critical(pc ? "On" : "Off")
+    }
+}
+
+VigRenderInner() {
+    global VigS, VigStyle, VigTint, VignetteThickness, VigSig, VigGrad, VigAnimSpd, VigPhase, VigDirty, VigState
+    G := VigS.g
+    T := IsObject(VigState) ? A_TickCount - VigState.t0 : 0
+    fdur := IsObject(VigState) ? VigState.dur : 0
+    w := A_ScreenWidth, h := A_ScreenHeight
+    VigPhase := A_TickCount / 1000 * VigAnimSpd * 0.06
+    VigUpdateStops()
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", G, "UInt", 0)
+    base := VigColAt(0.0)
+    if (VigTint > 0)
+        VigSolid(G, 0, 0, w, h, VigARGB(Round(VigTint * 2.2), base))
+    depth := Max(40, VignetteThickness * 9)
+    switch VigStyle {
+        case 6:                                               ; hard border
+            t := Max(2, VignetteThickness)
+            n := 28
+            Loop n {
+                i := A_Index
+                x0 := Floor((i - 1) * w / n), x1 := Floor(i * w / n)
+                ct := VigColAt((i - 0.5) / n * 0.25)
+                cb := VigColAt(0.75 - (i - 0.5) / n * 0.25)
+                VigSolid(G, x0, 0, x1 - x0 + 1, t, VigARGB(235, ct))
+                VigSolid(G, x0, h - t, x1 - x0 + 1, t, VigARGB(235, cb))
+                y0 := Floor((i - 1) * h / n), y1 := Floor(i * h / n)
+                cr := VigColAt(0.25 + (i - 0.5) / n * 0.25)
+                cl := VigColAt(1.0 - (i - 0.5) / n * 0.25)
+                VigSolid(G, 0, y0, t, y1 - y0 + 1, VigARGB(235, cl))
+                VigSolid(G, w - t, y0, t, y1 - y0 + 1, VigARGB(235, cr))
+            }
+        case 7: VigFxShockwave(G, w, h, depth, T)
+        case 8: VigFxChromatic(G, w, h, depth)
+        case 9: VigFxRadar(G, w, h, depth, T)
+        case 11: VigFxLightning(G, w, h, depth)
+        case 12: VigFxHourglass(G, w, h, depth, T, fdur)
+        case 13: VigFxClosing(G, w, h, depth, T)
+        case 14: VigFxEmbers(G, w, h, depth, T)
+        default: VigEdges(G, depth, 235)
+    }
+    if (VigStyle = 3) {                                       ; scanlines
+        y := 0
+        while (y < h) {
+            VigSolid(G, 0, y, w, 1, VigARGB(26, base))
+            y += 4
+        }
+    } else if (VigStyle = 4) {                                ; glitch bars
+        Loop 7 {
+            bh := Random(3, 16), by := Random(0, h - bh), bw := Random(Round(w * 0.04), Round(w * 0.22))
+            bx := Random(0, 1) ? w - bw : 0
+            VigSolid(G, bx, by, bw, bh, VigARGB(Random(70, 150), Random(0, 1) ? [0, 255, 255] : [255, 0, 170]))
+        }
+    } else if (VigStyle = 5) {                                ; frost speckles
+        Loop 520 {
+            e := Random(0, 3), d := Random(2, depth)
+            px := (e < 2) ? Random(0, w - 3) : ((e = 2) ? Random(0, d) : Random(w - d, w - 3))
+            py := (e = 0) ? Random(0, d) : ((e = 1) ? Random(h - d, h - 3) : Random(0, h - 3))
+            sz := Random(1, 3)
+            VigSolid(G, px, py, sz, sz, VigARGB(Random(80, 170), [235, 245, 255]))
+        }
+    }
+    VigSig := (FxHitOn ? "hit|" : "") VigSignature()
+    VigDirty := true
+}
+
+VigSignature() => VigStyle "|" VigGrad "|" VignetteThickness "|" VigTint "|" VigAnim "|" VignetteColor "|" AccentColor "|" A_ScreenWidth
+
+; the full-screen picture is only handed to Windows when it changed; fading only changes its opacity (costs nothing)
+VigSetAlpha(a) {
+    global VigGui, VigS, VigDirty, VigLastA
+    a := Max(0, Min(255, Round(a)))
+    if (a = VigLastA && !VigDirty)
+        return
+    bf := Buffer(4, 0)
+    NumPut("UChar", a, bf, 2), NumPut("UChar", 1, bf, 3)
+    if (VigDirty) {
+        sz := Buffer(8, 0), src := Buffer(8, 0)
+        NumPut("Int", A_ScreenWidth, sz, 0), NumPut("Int", A_ScreenHeight, sz, 4)
+        DllCall("UpdateLayeredWindow", "Ptr", VigGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", VigS.dc, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+        VigDirty := false
+    } else
+        DllCall("UpdateLayeredWindow", "Ptr", VigGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", 0, "Ptr", 0, "Ptr", 0, "UInt", 0, "Ptr", bf, "UInt", 2)
+    VigLastA := a
+}
+
+VigPillRender(T, dur, a, idle := false, ap := 1.0) {
+    pc := A_IsCritical
+    Critical
+    try VigPillRenderInner(T, dur, a, idle, ap)
+    finally Critical(pc ? "On" : "Off")
+}
+
+; the countdown card: idle = nothing frozen (the full freeze time, a full bar); while freezing it counts down to 0
+; ap = how far it has appeared (0 .. 1): it fades and grows a little
+VigPillRenderInner(T, dur, a, idle := false, ap := 1.0) {
+    global VigPGui, VigPS, UG, UAlpha, F_B, F_Sm, LogoGrad, VigPillScale
+    if (!IsObject(VigPGui))
+        return
+    prevG := UG, prevA := UAlpha
+    UG := VigPS.g, UAlpha := Max(0.0, Min(1.0, a * ap))
+    sc := VigPillScale / 100
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", UG, "UInt", 0)
+    k := 0.86 + 0.14 * ap
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", 125 * sc, "Float", 32 * sc, "Int", 0)
+    DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", UG, "Float", sc * k, "Float", sc * k, "Int", 0)
+    DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", -125, "Float", -32, "Int", 0)
+    try {
+        st := GradStops(LogoGrad), sh := A_TickCount / 1000 * 0.3
+        col := VigColAt(0.5)
+        URR(3, 6, 244, 52, 18, UC(0, 0, 0, 60))
+        URR(3, 3, 244, 52, 17, UCol("Card"))
+        URRLine(3, 3, 244, 52, 17, UCol("Border", 120))
+        UGradBorder(4, 4, 242, 50, 16, st, sh, 2)
+        pulse := idle ? 0.0 : 0.5 + 0.5 * Sin(T / 140)
+        UDisc(26, 22, 7 + 2 * pulse, UC(col[1], col[2], col[3], idle ? 40 : 70))
+        UDisc(26, 22, 4.5, UC(col[1], col[2], col[3]))
+        ptc := GradSample(st, A_TickCount / 1000 * 0.12 + 0.1)
+        ptn := GradSample(st, A_TickCount / 1000 * 0.12 + 0.45)
+        UText("FREEZE", 42, 10, UC(ptc[1], ptc[2], ptc[3]), F_B, 100, 24, 0, 1)
+        if (dur > 0) {                                        ; (a short freeze counts down more slowly, so it can be read)
+            frac := idle ? 1.0 : Max(0.0, Min(1.0, 1 - T / VigSpan(dur)))
+            UText(Round(dur * frac) " ms", 140, 10, UC(ptn[1], ptn[2], ptn[3]), F_Sm, 94, 24, 2, 1)
+        } else {
+            UText(Round(T / 100) / 10 " s", 140, 10, UC(ptn[1], ptn[2], ptn[3]), F_Sm, 94, 24, 2, 1)
+            frac := 0.5 + 0.5 * Sin(T / 300)
+        }
+        URR(16, 40, 218, 6, 3, UCol("Track"))
+        if (frac > 0.01)
+            UGradFill(16, 40, Max(6, 218 * frac), 6, 3, st, sh, 1.0, 218)
+    }
+    DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
+    UG := prevG, UAlpha := prevA
+    ULayered(VigPGui.Hwnd, VigPS.dc, PillW(), PillH())
+}
+
+; where the countdown sits: top centre unless you dragged it somewhere
+VigPillPos() {
+    global VigPillCustom, VigPillX, VigPillY
+    if (VigPillCustom)
+        return {x: Max(0, Min(A_ScreenWidth - 60, VigPillX)), y: Max(0, Min(A_ScreenHeight - 40, VigPillY))}
+    return {x: (A_ScreenWidth - PillW()) // 2, y: 34}
+}
+
+; draws the effect ahead of time (when nothing is frozen), so a freeze finds it ready
+VigPrewarm() {
+    global VigState, VigSig, IsLagVignette, IsLagSwitchChecked
+    if (IsObject(VigState) || !IsLagVignette || !IsLagSwitchChecked)
+        return
+    if (VigSignature() != VigSig) {
+        VigEnsure()
+        VigRender()
+    }
+}
+
+; the countdown when nothing is frozen: shown (and draggable) while the menu is open on the Lagswitch tab, or all the time
+; with "keep on screen"; a real freeze counts it down and it goes back to the full time afterwards
+VigPillPreviewTick() {
+    global VigPillOn, PillAlways, VigPGui, VigState, UShown, CurrentTab, VigPillDrag, VigPillPrev, VigPillThru, VigPillX, VigPillY
+    global VigPillCustom, FreezeDuration, IsLagVignette, IsLagSwitchChecked
+    static wasDown := false, n := 0, lastSig := "", bootTick := A_TickCount, appearAt := 0, leaveAt := 0, lastPre := 0
+    menu := UShown && CurrentTab = 2
+    if (!UShown && A_TickCount - bootTick > 4000 && A_TickCount - lastPre > 1000) {
+        lastPre := A_TickCount
+        VigPrewarm()
+    }
+    want := VigPillOn && IsLagVignette && A_TickCount - bootTick > 2500 && (PillAlways ? IsLagSwitchChecked : menu) && !IsObject(VigState)
+    if (!want) {
+        if (VigPillPrev) {
+            if (!IsObject(VigState) && IsObject(VigPGui)) {
+                if (!leaveAt)
+                    leaveAt := A_TickCount
+                t := (A_TickCount - leaveAt) / 220
+                if (t < 1) {                                  ; a short fade out
+                    VigUpdateStops()
+                    VigPillRender(0, FreezeDuration, 1.0, true, (1 - t) ** 2)
+                    return
+                }
+                try VigPGui.Hide()
+            }
+            VigPillPrev := false
+            VigPillDrag := 0
+        }
+        leaveAt := 0
+        return
+    }
+    leaveAt := 0
+    VigEnsure()
+    if (!VigPillPrev) {
+        VigPillPrev := true
+        appearAt := A_TickCount
+        lastSig := ""
+        VigUpdateStops()
+        VigPillRender(0, FreezeDuration, 1.0, true, 0.0)
+        pp := VigPillPos()
+        VigPGui.Show("x" pp.x " y" pp.y " w" PillW() " h" PillH() " NA")
+    }
+    if (menu && VigPillThru) {                                ; clickable (draggable) only while the menu is open
+        VigPillThru := false
+        try WinSetExStyle("-0x20", "ahk_id " VigPGui.Hwnd)
+    } else if (!menu && !VigPillThru) {
+        VigPillThru := true
+        VigPillDrag := 0
+        try WinSetExStyle("+0x20", "ahk_id " VigPGui.Hwnd)
+    }
+    if (menu) {
+        pt := Buffer(8, 0)
+        DllCall("GetCursorPos", "Ptr", pt)
+        mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
+        down := (DllCall("GetAsyncKeyState", "Int", 0x01, "Short") & 0x8000) ? true : false
+        if (IsObject(VigPillDrag)) {
+            if (down) {
+                VigPGui.Move(Max(0, Min(A_ScreenWidth - 60, mx - VigPillDrag.ox)), Max(0, Min(A_ScreenHeight - 40, my - VigPillDrag.oy)))
+            } else {
+                VigPGui.GetPos(&gx, &gy)
+                VigPillX := gx, VigPillY := gy, VigPillCustom := true
+                VigPillDrag := 0
+                USavePrefs()
+            }
+        } else if (down && !wasDown) {
+            VigPGui.GetPos(&gx, &gy, &gw, &gh)
+            if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh)
+                VigPillDrag := {ox: mx - gx, oy: my - gy}
+        }
+        wasDown := down
+    } else
+        wasDown := false
+    n += 1
+    if (menu && Mod(n, 15) = 1)                               ; keep it above the menu
+        try WinSetAlwaysOnTop(1, "ahk_id " VigPGui.Hwnd)
+    VigUpdateStops()
+    ap := 1 - (1 - Min(1.0, (A_TickCount - appearAt) / 380)) ** 3
+    sig := FreezeDuration "|" VigPillScale "|" A_ScreenWidth
+    if (menu || ap < 1 || sig != lastSig) {
+        if (sig != lastSig && IsObject(VigPGui)) {
+            VigPGui.GetPos(&gx, &gy)
+            VigPGui.Move(gx, gy, PillW(), PillH())
+        }
+        lastSig := sig
+        VigPillRender(0, FreezeDuration, 1.0, true, ap)
+    }
+}
+SetTimer(VigPillPreviewTick, 50)
+
+; how long the number takes to run down: real time for freezes of 0.5 s or more, slowed down for very short ones
+VigSpan(dur) => (dur < 500) ? 1400 : dur
+
+VigTick() {
+    pc := A_IsCritical
+    Critical
+    sw := FxIsHit()
+    if (sw)
+        FxHitLook(true)
+    try VigTickInner()
+    finally {
+        if (sw)
+            FxHitLook(false)
+        Critical(pc ? "On" : "Off")
+    }
+}
+
+VigTickInner() {
+    global VigState, VigStyle, VigIntensity, VigPillOn, VigGui, VigPGui, VigTimerOn, VigAnim, VigMinShow, PillAlways, FreezeDuration
+    if (!IsObject(VigState)) {
+        SetTimer(VigTick, 0)
+        VigTimerOn := false
+        return
+    }
+    now := A_TickCount
+    T := now - VigState.t0
+    dur := VigState.dur
+    hit := VigState.hit                                       ; (a hit effect: no countdown)
+    pillOn := VigPillOn && !hit
+    fi := 1 - (1 - Min(1.0, T / ((hit || (dur > 0 && dur < 500)) ? 35 : 130))) ** 3
+    fo := 1.0
+    if (VigState.hideAt && now >= VigState.hideAt)
+        fo := 1 - Min(1.0, (now - VigState.hideAt) / 220)
+    po := fo                                                  ; the countdown stays until its number reached 0
+    if (dur > 0) {
+        tp := now - (VigState.t0 + Max(VigSpan(dur) + ((dur < 500) ? 250 : 120), VigMinShow))
+        po := (tp <= 0) ? 1.0 : 1 - Min(1.0, tp / 220)
+    }
+    if (VigState.hideAt && fo <= 0 && (!pillOn || po <= 0 || dur <= 0)) {
+        VigGui.Hide()
+        if (!PillAlways || hit)
+            try VigPGui.Hide()
+        VigState := 0
+        SetTimer(VigTick, 0)
+        VigTimerOn := false
+        return
+    }
+    if (fo <= 0)
+        try VigGui.Hide()
+    gap := VigRedrawGap(VigStyle)
+    if (VigStyle = 13 && T > 620)
+        gap := 0                                              ; (the tunnel has closed: nothing moves any more)
+    if (fo > 0 && ((VigStyle = 4 && now - VigState.lastFx > 110) || (VigAnim && now - VigState.lastFx > 70) || (gap && now - VigState.lastFx > gap))) {
+        VigState.lastFx := now
+        VigRender()
+    }
+    pulse := (VigStyle = 2) ? 0.62 + 0.38 * Sin(T / 170) : ((VigStyle = 10) ? VigBeat(T) : 1.0)
+    if (fo > 0)
+        VigSetAlpha(255 * fi * fo * VigIntensity / 100 * pulse)
+    if (pillOn && po > 0)
+        VigPillRender(T, dur, fi * po)
+    else if (pillOn && PillAlways)
+        VigPillRender(0, FreezeDuration, 1.0, true)           ; the countdown is over: back to the full time
+    else if (pillOn)
+        try VigPGui.Hide()
+}
+
+; dur: how long the freeze lasts in ms (0 = as long as the key is held, -1 = from the settings); hit: a macro hit effect
+ShowFreezeVignette(dur := -1, hit := false) {
+    global VigGui, VigPGui, VigState, VigTimerOn, VigSig, VigStyle, VigPillOn, VigSound, VigAnim, VigPillThru, PillAlways
+    global FreezeDuration, IsLagHold, LagKey, VigLastA
+    VigEnsure()
+    if (dur < 0)
+        dur := (IsLagHold && LagKey != "") ? 0 : FreezeDuration
+    VigState := {t0: A_TickCount, dur: dur, hideAt: 0, lastFx: A_TickCount, hit: hit}
+    if (hit || VigSig = "" || InStr(VigSig, "hit|") || VigSignature() != VigSig || VigStyle = 4 || VigAnim || VigRedrawGap(VigStyle))
+        VigRender()
+    VigLastA := -1
+    VigSetAlpha(0)
+    VigGui.Show("x0 y0 w" A_ScreenWidth " h" A_ScreenHeight " NA")
+    if (VigPillOn && !hit) {
+        pp := VigPillPos()
+        if (!VigPillThru) {                                   ; (it was a draggable preview a moment ago: clicks go through again)
+            try WinSetExStyle("+0x20", "ahk_id " VigPGui.Hwnd)
+            VigPillThru := true
+        }
+        VigPGui.Show("x" pp.x " y" pp.y " w" PillW() " h" PillH() " NA")
+        VigPillRender(0, dur, PillAlways ? 1.0 : 0)
+    }
+    if (VigSound && !hit)
+        VigSoundPlay(true)
+    if (!VigTimerOn) {
+        VigTimerOn := true
+        SetTimer(VigTick, 16, 1)                              ; (priority 1: keeps running while other code sleeps)
+    }
+}
+
+HideFreezeVignette(now := false) {
+    global VigState, VigSound, VigMinShow
+    if (!IsObject(VigState) || VigState.hideAt)
+        return
+    ; a freeze stays up for at least ~0.5 s so even a 70 ms freeze can be seen; the fade out starts after that
+    VigState.hideAt := now ? A_TickCount : Max(A_TickCount, VigState.t0 + VigMinShow)
+    if (VigSound && !VigState.hit)
+        VigSoundPlay(false)
+}
+
+FxPreview(*) {
+    ShowFreezeVignette(1400)
+    SetTimer(HideFreezeVignette, -1450)
+}
+
+; ---------- screen shake while frozen: a picture of the frozen game, shaken in a window right over it ----------
+Global ShkActive := false, Shaking := false, ShkFailed := false, ShkMin := 0, ShkMinReq := 0, ShkMode := 1, ShkTarget := 0
+Global ShkT0 := 0, ShkSDC := 0, ShkSBmp := 0, ShkODC := 0, ShkOBmp := 0, ShkHost := "", ShkL := 0, ShkTp := 0, ShkW := 0, ShkH := 0
+Global ShkMoved := false, ShkKick := 1, ShkCDC := [0, 0, 0], ShkCBmp := [0, 0, 0], ShkSlices := [], ShkSliceLast := 0
+Global ShkStyleNow := 1, ShkAmtNow := 40, ShkTimerOn := false
+
+ShakeStart(force := false, minLen := -1) {
+    global ShakeOn, ShakeStyle, ShakeAmt, ShakeWhere, ShakeLen, ShakeSyncLen, ShkActive, ShkMode, ShkTarget
+    global ShkStyleNow, ShkAmtNow, ShkMinReq, ShkTimerOn, UShown, UHwnd
+    if (!ShakeOn && !force)
+        return
+    hw := WinExist(GAME_EXE)
+    ShkMode := (ShakeWhere = 1 && hw) ? 1 : 2
+    ShkTarget := hw ? hw : (UShown ? UHwnd : 0)
+    ShkStyleNow := ShakeStyle, ShkAmtNow := ShakeAmt
+    ShkMinReq := (minLen >= 0) ? minLen : (ShakeSyncLen ? 0 : ShakeLen)
+    ShkActive := true
+    if (!ShkTimerOn) {
+        ShkTimerOn := true
+        SetTimer(ShakeTick, 16, 1)
+    }
+    ShakeTick()
+}
+
+ShakeStop(*) {
+    global ShkActive
+    ShkActive := false
+}
+
+ShakeTest(*) {
+    ShakeStart(true, 0)
+    SetTimer(ShakeStop, -900)
+}
+
+ShakeReset() {
+    global Shaking, ShkHost, ShkSDC, ShkSBmp, ShkODC, ShkOBmp, ShkCDC, ShkCBmp, ShkMoved
+    ShkMoved := false
+    if (IsObject(ShkHost))
+        try ShkHost.Hide()
+    Loop 3 {
+        if (ShkCDC[A_Index])
+            DllCall("DeleteDC", "Ptr", ShkCDC[A_Index])
+        if (ShkCBmp[A_Index])
+            DllCall("DeleteObject", "Ptr", ShkCBmp[A_Index])
+        ShkCDC[A_Index] := 0, ShkCBmp[A_Index] := 0
+    }
+    for hh in [ShkSDC, ShkODC]
+        if (hh)
+            DllCall("DeleteDC", "Ptr", hh)
+    for hh in [ShkSBmp, ShkOBmp]
+        if (hh)
+            DllCall("DeleteObject", "Ptr", hh)
+    ShkSDC := 0, ShkODC := 0, ShkSBmp := 0, ShkOBmp := 0
+    Shaking := false
+}
+
+ShkDib(w, h, &dcOut, &bmpOut) {
+    dcOut := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
+    bi := Buffer(40, 0)
+    NumPut("Int", 40, bi, 0), NumPut("Int", w, bi, 4), NumPut("Int", -h, bi, 8), NumPut("Short", 1, bi, 12), NumPut("Short", 32, bi, 14)
+    bits := 0
+    bmpOut := DllCall("CreateDIBSection", "Ptr", dcOut, "Ptr", bi, "UInt", 0, "Ptr*", &bits, "Ptr", 0, "UInt", 0, "Ptr")
+    DllCall("SelectObject", "Ptr", dcOut, "Ptr", bmpOut)
+}
+
+; the lowest of Destiny's own topmost windows: the shaken picture goes just below it (menu, HUD, effect stay above)
+ShkLowestOwn(skip) {
+    me := DllCall("GetCurrentProcessId", "UInt")
+    hh := DllCall("GetTopWindow", "Ptr", 0, "Ptr"), lowest := 0, guard := 0
+    while (hh && guard < 800) {
+        guard += 1
+        if (hh != skip && DllCall("IsWindowVisible", "Ptr", hh) && (DllCall("GetWindowLongPtr", "Ptr", hh, "Int", -20, "Ptr") & 8)) {
+            wp := 0
+            DllCall("GetWindowThreadProcessId", "Ptr", hh, "UInt*", &wp)
+            if (wp = me)
+                lowest := hh
+        }
+        hh := DllCall("GetWindow", "Ptr", hh, "UInt", 2, "Ptr")
+    }
+    return lowest
+}
+
+; mode 1: only the picture of the game window; mode 2: the whole screen the game is on
+ShakeBegin() {
+    global ShkHost, ShkL, ShkTp, ShkW, ShkH, ShkSDC, ShkSBmp, ShkODC, ShkOBmp, ShkMode, ShkTarget, ShkStyleNow
+    rc := Buffer(16, 0)
+    if (ShkMode = 1 && ShkTarget)
+        DllCall("GetWindowRect", "Ptr", ShkTarget, "Ptr", rc)
+    else {
+        mon := DllCall("MonitorFromWindow", "Ptr", ShkTarget, "UInt", 2, "Ptr")
+        mi := Buffer(40, 0)
+        NumPut("UInt", 40, mi, 0)
+        DllCall("GetMonitorInfoW", "Ptr", mon, "Ptr", mi)
+        DllCall("RtlMoveMemory", "Ptr", rc, "Ptr", mi.Ptr + 4, "UPtr", 16)
+    }
+    ShkL := NumGet(rc, 0, "Int"), ShkTp := NumGet(rc, 4, "Int")
+    ShkW := NumGet(rc, 8, "Int") - ShkL, ShkH := NumGet(rc, 12, "Int") - ShkTp
+    if (ShkW < 200 || ShkH < 200)
+        return false
+    ShkDib(ShkW, ShkH, &ShkSDC, &ShkSBmp)
+    ShkDib(ShkW, ShkH, &ShkODC, &ShkOBmp)
+    if (!ShakeGrab())
+        return false
+    if (ShkStyleNow = 12)
+        ShakeChannels()
+    if (!IsObject(ShkHost)) {
+        ShkHost := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny shake")
+        ShkHost.Show("Hide x0 y0 w100 h100")
+    }
+    ShkHost.Move(ShkL, ShkTp, ShkW, ShkH)
+    DllCall("BitBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkSDC, "Int", 0, "Int", 0, "UInt", 0x00CC0020)
+    ShakePush()
+    ShkHost.Show("NA")
+    low := (ShkMode = 1) ? ShkLowestOwn(ShkHost.Hwnd) : 0
+    DllCall("SetWindowPos", "Ptr", ShkHost.Hwnd, "Ptr", low ? low : -1, "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 19)
+    return true
+}
+
+; a picture of the game (or of its screen)
+ShakeGrab() {
+    global ShkMode, ShkTarget, ShkSDC, ShkW, ShkH, ShkL, ShkTp
+    got := false
+    if (ShkMode = 1)
+        got := DllCall("PrintWindow", "Ptr", ShkTarget, "Ptr", ShkSDC, "UInt", 2)
+    if (!got) {
+        scr := DllCall("GetDC", "Ptr", 0, "Ptr")
+        got := DllCall("BitBlt", "Ptr", ShkSDC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", scr, "Int", ShkL, "Int", ShkTp, "UInt", 0x00CC0020)
+        DllCall("ReleaseDC", "Ptr", 0, "Ptr", scr)
+    }
+    return got
+}
+
+ShakePush() {
+    global ShkHost, ShkODC, ShkW, ShkH
+    sz := Buffer(8, 0), src := Buffer(8, 0), bf := Buffer(4, 0)
+    NumPut("Int", ShkW, sz, 0), NumPut("Int", ShkH, sz, 4)
+    NumPut("UChar", 255, bf, 2)
+    DllCall("UpdateLayeredWindow", "Ptr", ShkHost.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", ShkODC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
+}
+
+ShakeTick() {
+    global ShkActive, Shaking, ShkFailed, ShkMin, ShkMinReq, ShkT0, ShkKick, ShkMoved, ShkStyleNow, ShkAmtNow, ShkTimerOn
+    global ShkHost, ShkODC, ShkSDC, ShkL, ShkTp, ShkW, ShkH
+    if (!ShkActive) {
+        ShkFailed := false
+        if (!Shaking) {
+            SetTimer(ShakeTick, 0)
+            ShkTimerOn := false
+            return
+        }
+        if (A_TickCount - ShkT0 >= ShkMin || !ShakeGrab()) {  ; (after the freeze it keeps going until its length, on the live game)
+            ShakeReset()
+            SetTimer(ShakeTick, 0)
+            ShkTimerOn := false
+            return
+        }
+        ShkMoved := false
+    }
+    if (ShkFailed)
+        return
+    if (!Shaking) {
+        ShkMin := ShkMinReq
+        ShkKick := -ShkKick
+        if (!ShakeBegin()) {
+            ShakeReset()
+            ShkFailed := true
+            return
+        }
+        Shaking := true
+        ShkT0 := A_TickCount
+    }
+    T := Max(0, A_TickCount - ShkT0)
+    strength := ShkAmtNow
+    if (ShkStyleNow >= 4) {
+        ShakeFancy(ShkStyleNow, T, strength / 100, 4 + strength * 0.36)
+        return
+    }
+    amp0 := 4 + strength * 0.36
+    amp := amp0 * Min(1.0, 0.35 + T / 50)
+    if (ShkStyleNow = 1) {                                    ; Jitter
+        dx := Random(-1000, 1000) / 1000 * amp, dy := Random(-1000, 1000) / 1000 * amp
+    } else if (ShkStyleNow = 2) {                             ; Impact
+        dec := Exp(-T / 280)
+        dx := amp0 * dec * Sin(T / 17), dy := amp0 * dec * Cos(T / 21)
+    } else {                                                  ; Wobble
+        dx := amp * Sin(T / 64), dy := amp * 0.7 * Sin(T / 85 + 1)
+    }
+    if (!ShkMoved) {                                          ; the picture is put on once, after that only its window moves
+        DllCall("BitBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkSDC, "Int", 0, "Int", 0, "UInt", 0x00CC0020)
+        ShakePush()
+        ShkMoved := true
+    }
+    DllCall("SetWindowPos", "Ptr", ShkHost.Hwnd, "Ptr", 0, "Int", ShkL + Round(dx), "Int", ShkTp + Round(dy), "Int", 0, "Int", 0, "UInt", 0x15)
+}
+
+; the picture split into its red, green and blue parts (once; the RGB split only moves them)
+ShakeChannels() {
+    global ShkCDC, ShkCBmp, ShkSDC, ShkW, ShkH
+    for i, col in [0x0000FF, 0x00FF00, 0xFF0000] {
+        ShkDib(ShkW, ShkH, &d, &b)
+        br := DllCall("CreateSolidBrush", "UInt", col, "Ptr")
+        old := DllCall("SelectObject", "Ptr", d, "Ptr", br, "Ptr")
+        DllCall("BitBlt", "Ptr", d, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkSDC, "Int", 0, "Int", 0, "UInt", 0x00C000CA)
+        DllCall("SelectObject", "Ptr", d, "Ptr", old)
+        DllCall("DeleteObject", "Ptr", br)
+        ShkCDC[i] := d, ShkCBmp[i] := b
+    }
+}
+
+; zoom a little and move (the zoom keeps the edges covered)
+ShakeDraw(dx, dy, z, peak) {
+    global ShkODC, ShkSDC, ShkW, ShkH
+    lev := (1 + 2 * (peak + 4) / ShkH) * (1 + z)
+    srcW := ShkW / lev, srcH := ShkH / lev
+    x := Max(0, Min(ShkW - srcW, (ShkW - srcW) / 2 + dx))
+    y := Max(0, Min(ShkH - srcH, (ShkH - srcH) / 2 + dy))
+    DllCall("StretchBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkSDC, "Int", Round(x), "Int", Round(y), "Int", Round(srcW), "Int", Round(srcH), "UInt", 0x00CC0020)
+}
+
+ShakeFancy(style, T, k, a) {
+    global ShkSliceLast, ShkSlices, ShkKick, ShkODC, ShkSDC, ShkW, ShkH, ShkCDC
+    env := Min(1.0, 0.35 + T / 50)
+    if (style = 4) {                                          ; Punch: a quick zoom in that settles
+        e := Exp(-T / 170)
+        ShakeDraw(Random(-1000, 1000) / 1000 * a * 0.35 * Exp(-T / 220), Random(-1000, 1000) / 1000 * a * 0.35 * Exp(-T / 220), k * 0.13 * e * Min(1.0, T / 14) + 0.012, a * 0.35)
+    } else if (style = 5) {                                   ; Heartbeat: two thumps, then a pause
+        p := Mod(T, 820)
+        ShakeDraw(0, 0, k * 0.085 * (Exp(-p / 85) + 0.65 * ((p > 230) ? Exp(-(p - 230) / 100) : 0)) + 0.01, 0)
+    } else if (style = 6) {                                   ; Earthquake: a heavy sway with a fast rumble
+        ShakeDraw(a * 1.7 * Sin(T / 41) * Sin(T / 157 + 0.8) * env, (a * 0.8 * Sin(T / 27) + Random(-1000, 1000) / 1000 * a * 0.25) * env, 0.01, a * 2.0)
+    } else if (style = 7) {                                   ; Kick: one hard shove that springs back
+        e := Exp(-T / 150)
+        ShakeDraw(ShkKick * a * 2.2 * e * Cos(T / 55), a * 0.35 * e * Sin(T / 35), k * 0.03 * e, a * 2.3)
+    } else if (style = 8) {                                   ; Drunk sway: slow and floaty
+        ShakeDraw(a * 1.5 * Sin(T / 310) * env, a * 0.9 * Sin(T / 410 + 1) * env, k * 0.045 * (0.5 + 0.5 * Sin(T / 520)), a * 1.6)
+    } else if (style = 9) {                                   ; Roll: the picture tilts and swings
+        th := k * 0.09 * Sin(T / 240) * env + 0.004 * Sin(T / 53)
+        c := Cos(th), sn := Sin(th)
+        sc := c + Abs(sn) * Max(ShkW / ShkH, ShkH / ShkW) + 0.02
+        hw := ShkW / 2 * sc, hh := ShkH / 2 * sc, cx := ShkW / 2, cy := ShkH / 2
+        pts := Buffer(24, 0)
+        NumPut("Int", Round(cx + c * -hw - sn * -hh), pts, 0), NumPut("Int", Round(cy + sn * -hw + c * -hh), pts, 4)
+        NumPut("Int", Round(cx + c * hw - sn * -hh), pts, 8), NumPut("Int", Round(cy + sn * hw + c * -hh), pts, 12)
+        NumPut("Int", Round(cx + c * -hw - sn * hh), pts, 16), NumPut("Int", Round(cy + sn * -hw + c * hh), pts, 20)
+        DllCall("PatBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "UInt", 0x42)
+        DllCall("PlgBlt", "Ptr", ShkODC, "Ptr", pts, "Ptr", ShkSDC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", 0, "Int", 0, "Int", 0)
+    } else if (style = 10) {                                  ; Vertical roll: scrolls up like a TV that lost its sync
+        yo := Mod(Round(T * (0.35 + k * 1.1) * ShkH / 1000), ShkH)
+        DllCall("BitBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH - yo, "Ptr", ShkSDC, "Int", 0, "Int", yo, "UInt", 0x00CC0020)
+        if (yo > 0)
+            DllCall("BitBlt", "Ptr", ShkODC, "Int", 0, "Int", ShkH - yo, "Int", ShkW, "Int", yo, "Ptr", ShkSDC, "Int", 0, "Int", 0, "UInt", 0x00CC0020)
+    } else if (style = 11) {                                  ; Glitch slices: strips of the picture jump sideways
+        if (ShkSlices.Length = 0 || T - ShkSliceLast >= 60) {
+            ShkSliceLast := T
+            ShkSlices := []
+            Loop Random(4, 8 + Round(k * 8)) {
+                hgt := Random(6, 20 + Round(k * 80))
+                ShkSlices.Push([Random(0, Max(1, ShkH - hgt)), hgt, Round(Random(-1000, 1000) / 1000 * (a * 3.2 + 12))])
+            }
+        }
+        DllCall("BitBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkSDC, "Int", 0, "Int", 0, "UInt", 0x00CC0020)
+        for sl in ShkSlices
+            DllCall("BitBlt", "Ptr", ShkODC, "Int", sl[3], "Int", sl[1], "Int", ShkW, "Int", sl[2], "Ptr", ShkSDC, "Int", 0, "Int", sl[1], "UInt", 0x00CC0020)
+    } else if (style = 12) {                                  ; RGB split: the colour channels slide apart
+        if (!ShkCDC[1])
+            ShakeChannels()
+        d := Round(a * 0.5 * (0.4 + 0.6 * Abs(Sin(T / 55))) + Random(0, 1000) / 1000 * a * 0.15)
+        DllCall("PatBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "UInt", 0x42)
+        DllCall("BitBlt", "Ptr", ShkODC, "Int", -d, "Int", Random(-2, 2), "Int", ShkW, "Int", ShkH, "Ptr", ShkCDC[1], "Int", 0, "Int", 0, "UInt", 0x00CC0020)
+        DllCall("BitBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkCDC[2], "Int", 0, "Int", 0, "UInt", 0x00EE0086)
+        DllCall("BitBlt", "Ptr", ShkODC, "Int", d, "Int", Random(-2, 2), "Int", ShkW, "Int", ShkH, "Ptr", ShkCDC[3], "Int", 0, "Int", 0, "UInt", 0x00EE0086)
+    } else {                                                  ; Zoom blur: copies of the picture, each a bit bigger, blended
+        zp := k * 0.16 * Exp(-T / 230) * Min(1.0, T / 12) + 0.006
+        DllCall("StretchBlt", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkSDC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "UInt", 0x00CC0020)
+        Loop 4 {
+            lev := 1 + zp * A_Index / 4
+            sw := ShkW / lev, shh := ShkH / lev
+            DllCall("msimg32\AlphaBlend", "Ptr", ShkODC, "Int", 0, "Int", 0, "Int", ShkW, "Int", ShkH, "Ptr", ShkSDC, "Int", Round((ShkW - sw) / 2), "Int", Round((ShkH - shh) / 2), "Int", Round(sw), "Int", Round(shh), "UInt", 85 << 16)
+        }
+    }
+    ShakePush()
+}
+
+; ---------- sounds: tiny tones built in memory (their loudness can be set), or a file; they never make anything wait ----------
+VigSoundPlay(start := true) {
+    global VigSoundIdx, VigSoundFile
+    if (VigSoundIdx = 6) {
+        if (start && VigSoundFile != "")
+            VigPlayFile(VigSoundFile, VigVol)
+        return
+    }
+    SetTimer(VigBeepPattern.Bind(VigSoundIdx, start, VigVol), -1)
+}
+
+VigPlayFile(f, vol) {
+    try {
+        VigSetOutVol(vol)
+        if (StrLower(SubStr(f, -4)) = ".wav")
+            DllCall("winmm\PlaySoundW", "Str", f, "Ptr", 0, "UInt", 0x20003)   ; SND_FILENAME | SND_ASYNC | SND_NODEFAULT
+        else
+            SoundPlay(f)
+    }
+}
+
+VigSetOutVol(pct) {
+    v := Round(65535 * (pct / 100) ** 1.6)
+    DllCall("winmm\waveOutSetVolume", "Ptr", 0, "UInt", v | (v << 16))
+}
+
+VigBeepPattern(idx, start, vol) {
+    switch idx {
+        case 2: tones := start ? [[900, 30], [1150, 30]] : [[560, 30]]
+        case 3: tones := start ? [[700, 25], [900, 25], [1150, 25]] : [[900, 25], [620, 25]]
+        case 4: tones := start ? [[1150, 25], [900, 25], [700, 25]] : [[620, 25], [900, 25]]
+        case 5: tones := [[start ? 1600 : 1000, 12]]
+        default: tones := [[start ? 900 : 560, 35]]
+    }
+    VigPlayTones(tones, vol)
+}
+
+; a WAV in memory (22050 Hz, 16 bit, mono) from [Hz, ms] tones
+VigToneWav(tones, vol) {
+    rate := 22050, total := 0
+    for t in tones
+        total += Round(rate * t[2] / 1000)
+    amp := 30000 * (vol / 100) ** 1.6
+    buf := Buffer(44 + total * 2, 0)
+    NumPut("UInt", 0x46464952, buf, 0), NumPut("UInt", 36 + total * 2, buf, 4), NumPut("UInt", 0x45564157, buf, 8)
+    NumPut("UInt", 0x20746D66, buf, 12), NumPut("UInt", 16, buf, 16), NumPut("UShort", 1, buf, 20), NumPut("UShort", 1, buf, 22)
+    NumPut("UInt", rate, buf, 24), NumPut("UInt", rate * 2, buf, 28), NumPut("UShort", 2, buf, 32), NumPut("UShort", 16, buf, 34)
+    NumPut("UInt", 0x61746164, buf, 36), NumPut("UInt", total * 2, buf, 40)
+    pos := 44
+    for t in tones {
+        n := Round(rate * t[2] / 1000), w := 6.283185307 * t[1] / rate
+        Loop n {
+            e := Min(1.0, A_Index / 80, (n - A_Index + 1) / 80)   ; short fade in / out, no clicks
+            NumPut("Short", Round(Sin(w * A_Index) * amp * e), buf, pos)
+            pos += 2
+        }
+    }
+    return buf
+}
+
+VigPlayTones(tones, vol) {
+    static ring := [0, 0, 0, 0], slot := 0                    ; (a sound still playing keeps its memory)
+    slot := Mod(slot, 4) + 1
+    ring[slot] := VigToneWav(tones, vol)
+    VigSetOutVol(100)                                         ; (the tones are scaled themselves)
+    DllCall("winmm\PlaySoundW", "Ptr", ring[slot], "Ptr", 0, "UInt", 0x5)   ; SND_MEMORY | SND_ASYNC
+}
+
+VigSoundTest(*) {
+    VigSoundPlay(true)
+    SetTimer(() => VigSoundPlay(false), -450)
+}
+
+; picks a sound file (the menu steps back so the file window is not hidden behind it)
+FxChooseFile() {
+    global UGui
+    try WinSetAlwaysOnTop(0, UGui)
+    f := ""
+    try f := FileSelect(1, , "Choose a sound", "Sounds (*.wav; *.mp3; *.wma)")
+    try WinSetAlwaysOnTop(1, UGui)
+    return f
+}
+
+FxPickSound(i) {
+    global VigSoundIdx, VigSoundFile
+    if (i = 6 && VigSoundFile = "") {
+        f := FxChooseFile()
+        if (f = "") {
+            SoundDDL.idx := VigSoundIdx
+            return
+        }
+        VigSoundFile := f
+    }
+    VigSoundIdx := i
+    VigSoundPlay(true)
+}
+
+FxChooseSoundFile(*) {
+    global VigSoundIdx, VigSoundFile
+    f := FxChooseFile()
+    if (f = "")
+        return
+    VigSoundFile := f, VigSoundIdx := 6, SoundDDL.idx := 6
+    VigSoundPlay(true)
+}
+
+; ---------- hit effects: when a macro fires from its key (after its moves are done, so they never shift its timing) ----------
+MacroFx(*) {
+    global HitOn
+    if (HitOn)
+        SetTimer(HitFire, -1)
+}
+
+HitFire(*) {
+    global HitVig, HitShake, HitSound, HitDur, HitShakeAmt, FreezeActive
+    static last := 0
+    if (A_TickCount - last < 60)
+        return
+    last := A_TickCount
+    if (HitVig && !FreezeActive) {
+        ShowFreezeVignette(0, true)
+        SetTimer(HitVigHide, -HitDur)
+    }
+    KFPlay("hit")
+    if (HitShake)
+        HitShakeStart(HitDur, HitShakeAmt)
+    if (HitSound)
+        HitSoundPlay()
+}
+
+HitVigHide() {
+    global VigState
+    if (IsObject(VigState) && VigState.hit)
+        HideFreezeVignette(true)
+}
+
+HitSoundPlay() {
+    global HitSoundIdx, HitSoundFile, HitVol
+    switch {
+        case HitSoundIdx = 1: VigPlayTones([[2600, 12], [1900, 20]], HitVol)
+        case HitSoundIdx = 2: VigPlayTones([[1320, 55], [1760, 120]], HitVol)
+        case HitSoundIdx = 3: VigPlayTones([[700, 22], [1100, 22], [1650, 30], [2300, 70]], HitVol)
+        case HitSoundIdx <= 8: VigBeepPattern(HitSoundIdx - 3, true, HitVol)
+        default:
+            if (HitSoundFile != "")
+                VigPlayFile(HitSoundFile, HitVol)
+    }
+}
+
+FxPickHitSound(i) {
+    global HitSoundIdx, HitSoundFile
+    if (i = 9 && HitSoundFile = "") {
+        f := FxChooseFile()
+        if (f = "") {
+            HitSoundDDL.idx := HitSoundIdx
+            return
+        }
+        HitSoundFile := f
+    }
+    HitSoundIdx := i
+    HitSoundPlay()
+}
+
+FxChooseHitFile(*) {
+    global HitSoundIdx, HitSoundFile
+    f := FxChooseFile()
+    if (f = "")
+        return
+    HitSoundFile := f, HitSoundIdx := 9, HitSoundDDL.idx := 9
+    HitSoundPlay()
+}
+
+; the hit shake moves the game window itself a few pixels (and puts it back exactly): the game keeps running
+Global HitShk := 0
+
+HitShakeStart(len, amt := 40) {
+    global HitShk
+    hw := WinExist(GAME_EXE)
+    if (!hw)
+        return
+    if (!IsObject(HitShk) || HitShk.hw != hw) {
+        try WinGetPos(&x, &y, , , "ahk_id " hw)
+        catch
+            return
+        HitShk := {hw: hw, x: x, y: y}
+    }
+    HitShk.t0 := A_TickCount, HitShk.len := Max(80, len), HitShk.amt := amt, HitShk.ang := Random(0, 6283) / 1000
+    SetTimer(HitShakeTick, 10)
+}
+
+HitShakeTick() {
+    global HitShk, HitShakeStyle
+    if (!IsObject(HitShk)) {
+        SetTimer(HitShakeTick, 0)
+        return
+    }
+    el := A_TickCount - HitShk.t0
+    if (el >= HitShk.len || !WinExist("ahk_id " HitShk.hw)) {
+        HitShakeRestore()
+        return
+    }
+    a0 := 3 + HitShk.amt * 0.18, p := el / HitShk.len
+    a := a0 * (1 - p) ** 1.4
+    r() => Random(0, 2000) / 1000 - 1
+    switch HitShakeStyle {
+        case 2:                                               ; Punch: one hard hit in a random direction that springs back
+            k := a0 * 1.6 * Exp(-el / 90) * Cos(el / 22)
+            dx := Cos(HitShk.ang) * k, dy := Sin(HitShk.ang) * k
+        case 3: dx := a * 1.2 * Sin(el / 11), dy := r() * a * 0.15                ; Horizontal
+        case 4: dx := r() * a * 0.15, dy := a * 1.2 * Sin(el / 11)                ; Vertical
+        case 5:                                               ; Earthquake: big, slower rolling that fades late
+            e := a0 * 1.3 * (1 - p) ** 0.7
+            dx := e * (Sin(el / 41) + 0.5 * Sin(el / 17)) / 1.5 + r() * e * 0.2
+            dy := e * (Sin(el / 33 + 1) + 0.5 * Sin(el / 13)) / 1.5 + r() * e * 0.2
+        case 6: dy := -a0 * 1.5 * Exp(-el / 75) + r() * a * 0.2, dx := r() * a * 0.3   ; Recoil
+        default: dx := r() * a, dy := r() * a                                   ; Jitter
+    }
+    DllCall("SetWindowPos", "Ptr", HitShk.hw, "Ptr", 0, "Int", HitShk.x + Round(dx), "Int", HitShk.y + Round(dy), "Int", 0, "Int", 0, "UInt", 0x15)
+}
+
+HitShakeRestore(*) {
+    global HitShk
+    SetTimer(HitShakeTick, 0)
+    if (IsObject(HitShk)) {
+        try DllCall("SetWindowPos", "Ptr", HitShk.hw, "Ptr", 0, "Int", HitShk.x, "Int", HitShk.y, "Int", 0, "Int", 0, "UInt", 0x15)
+        HitShk := 0
+    }
+}
+
+; ---------- extra effects: kill-screen style effects (own full-screen click-through window, about half a second each) ----------
+; on a freeze they take the freeze effect's colours; on a macro hit the hit effect's own colour
+Global KFNames := ["Off", "Random (new every time)", "Hit marker", "Blood splatter", "Slash", "Shatter", "Speed lines", "Shockwave", "Neon frame"]
+Global KFColNames := ["Red", "Logo gradient", "Accent", "White"]
+Global LagKFIdx := 1, HitKFIdx := 1, HitKFCol := 1
+Global LagKFDDL := UList(KFNames, LagKFIdx, KFPickLag)
+Global HitKFDDL := UList(KFNames, HitKFIdx, KFPickHit)
+Global HitKFColDDL := UList(KFColNames, HitKFCol, FxSet.Bind("HitKFCol"))
+Global KFGui := "", KFS := 0, KFState := 0
+
+KFPickLag(i) {
+    global LagKFIdx
+    LagKFIdx := i
+    if (i > 1)
+        SetTimer(() => KFPlay("lag"), -150)
+}
+
+KFPickHit(i) {
+    global HitKFIdx
+    HitKFIdx := i
+    if (i > 1)
+        SetTimer(() => KFPlay("hit"), -150)
+}
+
+; one of the extra effects (src "lag" or "hit"), a random one when Random is chosen (never the same twice in a row)
+KFPlay(src) {
+    global LagKFIdx, HitKFIdx
+    static last := 0
+    idx := (src = "lag") ? LagKFIdx : HitKFIdx
+    if (idx <= 1)
+        return
+    if (idx = 2) {
+        Loop
+            idx := Random(3, 9)
+        until (idx != last)
+    }
+    last := idx
+    KFStart(idx - 1, src)
+}
+
+; the hit effect's colours: two shades (the second for highlights)
+KFHitCols() {
+    global HitKFCol, LogoGrad, AccentColor
+    switch HitKFCol {
+        case 2:
+            st := GradStops(LogoGrad), t := A_TickCount / 1000
+            return [GradSample(st, t * 0.3), GradSample(st, t * 0.3 + 0.45)]
+        case 3:
+            a := UHexArr(AccentColor)
+            return [a, KFShade(a, 0.35)]
+        case 4: return [[255, 255, 255], [190, 215, 255]]
+        default: return [[255, 36, 56], [255, 128, 96]]
+    }
+}
+
+; lighter (f > 0) or darker (f < 0)
+KFShade(c, f) => (f >= 0) ? [Round(c[1] + (255 - c[1]) * f), Round(c[2] + (255 - c[2]) * f), Round(c[3] + (255 - c[3]) * f)]
+    : [Round(c[1] * (1 + f)), Round(c[2] * (1 + f)), Round(c[3] * (1 + f))]
+
+; starts one effect (all random parts are decided here, so every time looks a bit different)
+KFStart(style, src) {
+    global KFGui, KFS, KFState, HitDur, FreezeDuration
+    W := A_ScreenWidth, H := A_ScreenHeight, k := Min(W, H) / 1080
+    if (!IsObject(KFGui)) {
+        UGdipInit()
+        KFGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny extra effect")
+        KFS := UMakeSurface(W, H)
+    }
+    st := {style: style, t0: A_TickCount, dur: (src = "lag") ? Max(420, Min(1400, FreezeDuration + 320)) : Max(380, Round(HitDur * 1.3))
+        , W: W, H: H, k: k, lines: 0, lineAt: -1, src: src}
+    switch style {
+        case 3:                                               ; blood: blobs near the edges and corners
+            st.blobs := []
+            Loop 6 {
+                side := Random(1, 4)
+                x := (side = 1) ? Random(0.0, 0.16) * W : (side = 2) ? W - Random(0.0, 0.16) * W : Random(0.05, 0.95) * W
+                y := (side = 3) ? Random(0.0, 0.18) * H : (side = 4) ? H - Random(0.0, 0.18) * H : Random(0.05, 0.95) * H
+                b := {x: x, y: y, r: Random(55, 135) * k, sats: [], drips: []}
+                Loop 9
+                    b.sats.Push([Random(-1.7, 1.7) * b.r, Random(-1.7, 1.7) * b.r, Random(6, 26) * k])
+                Loop 3
+                    b.drips.Push([Random(-0.6, 0.6) * b.r, Random(5, 12) * k, Random(0.7, 1.6)])
+                st.blobs.Push(b)
+            }
+        case 4:                                               ; slash: long streaks through the middle
+            st.slashes := []
+            Loop 3 {
+                a := (Random(-38, 38) + (Mod(A_Index, 2) ? 0 : 180)) * 0.01745
+                px := W / 2 + Random(-0.18, 0.18) * W, py := H / 2 + Random(-0.14, 0.14) * H, L := 1.5 * W
+                st.slashes.Push({sx: px - Cos(a) * L / 2, sy: py - Sin(a) * L / 2, dx: Cos(a), dy: Sin(a), L: L})
+            }
+        case 5:                                               ; shatter: cracks from a point near the middle, with branches
+            st.ox := W / 2 + Random(-120, 120) * k, st.oy := H / 2 + Random(-90, 90) * k
+            st.cracks := []
+            Loop 13 {
+                a := (A_Index * 27.7 + Random(-9, 9)) * 0.01745, x := st.ox, y := st.oy
+                pts := [x, y], total := 0, maxL := Random(0.22, 0.55) * W
+                while (total < maxL) {
+                    a += Random(-0.4, 0.4), sl := Random(28, 80) * k
+                    x += Cos(a) * sl, y += Sin(a) * sl, total += sl
+                    pts.Push(x, y)
+                    if (Random(1, 100) <= 18) {               ; a short branch
+                        bx := x, by := y, ba := a + Random(-1.1, 1.1), bp := [bx, by]
+                        Loop 3 {
+                            ba += Random(-0.4, 0.4), bl := Random(18, 45) * k
+                            bx += Cos(ba) * bl, by += Sin(ba) * bl
+                            bp.Push(bx, by)
+                        }
+                        st.cracks.Push(bp)
+                    }
+                }
+                st.cracks.Push(pts)
+            }
+    }
+    KFState := st
+    KFRender()
+    KFGui.Show("x0 y0 w" W " h" H " NA")
+    SetTimer(KFTick, 16)
+}
+
+KFTick() {
+    global KFState, KFGui
+    if (!IsObject(KFState) || A_TickCount - KFState.t0 > KFState.dur) {
+        SetTimer(KFTick, 0)
+        KFState := 0
+        if (IsObject(KFGui))
+            try KFGui.Hide()
+        return
+    }
+    KFRender()
+}
+
+KFRender() {
+    pc := A_IsCritical
+    Critical
+    try KFRenderInner()
+    finally Critical(pc ? "On" : "Off")
+}
+
+KFEase(x) => 1 - (1 - Max(0.0, Min(1.0, x))) ** 3
+
+KFRing(x, y, r, argb, wd) {
+    global UG
+    if (r > 0.5)
+        DllCall("gdiplus\GdipDrawEllipse", "Ptr", UG, "Ptr", UPen(argb, wd), "Float", x - r, "Float", y - r, "Float", 2 * r, "Float", 2 * r)
+}
+
+; a filled polygon from a flat list of points [x1, y1, x2, y2, ...]
+KFPoly(pts, argb) {
+    global UG
+    n := pts.Length // 2
+    buf := Buffer(8 * n, 0)
+    Loop n
+        NumPut("Float", pts[2 * A_Index - 1], buf, (A_Index - 1) * 8), NumPut("Float", pts[2 * A_Index], buf, (A_Index - 1) * 8 + 4)
+    DllCall("gdiplus\GdipFillPolygon", "Ptr", UG, "Ptr", UBrush(argb), "Ptr", buf, "Int", n, "Int", 0)
+}
+
+KFRenderInner() {
+    global KFState, KFGui, KFS, UG, UAlpha, VigIntensity, HitFxInt, HitKFCol
+    st := KFState
+    if (!IsObject(st) || !IsObject(KFGui))
+        return
+    UCacheTrim()
+    W := st.W, H := st.H, k := st.k, cx := W / 2, cy := H / 2
+    el := A_TickCount - st.t0, t := Min(1.0, el / st.dur)
+    fade := (t < 0.55) ? 1.0 : Max(0.0, 1 - (t - 0.55) / 0.45)
+    if (st.src = "lag") {                                     ; (on a freeze: the colours of the freeze effect)
+        VigUpdateStops()
+        c1 := VigColAt(0.15 + t * 0.2), c2 := VigColAt(0.6 + t * 0.2)
+    } else
+        cs := KFHitCols(), c1 := cs[1], c2 := cs[2]
+    C(c, a) => UC(c[1], c[2], c[3], Max(0, Min(255, Round(a))))
+    prevG := UG, prevA := UAlpha
+    UG := KFS.g, UAlpha := (st.src = "lag") ? VigIntensity / 100 : HitFxInt / 100
+    DllCall("gdiplus\GdipGraphicsClear", "Ptr", UG, "UInt", 0)
+    try {
+        switch st.style {
+            case 2:                                           ; hit marker: an X that pops out from the crosshair, a ring and sparks
+                pop := KFEase(el / 140)
+                gap := (16 + 26 * KFEase(t * 1.4)) * k, len := (36 + 10 * (1 - pop)) * k
+                for d in [[1, 1], [1, -1], [-1, 1], [-1, -1]] {
+                    x1 := cx + d[1] * gap * 0.707, y1 := cy + d[2] * gap * 0.707
+                    x2 := x1 + d[1] * len * 0.707, y2 := y1 + d[2] * len * 0.707
+                    ULine(x1, y1, x2, y2, C(c1, 130 * fade), 15 * k)
+                    ULine(x1, y1, x2, y2, (el < 160) ? C(c1, 255 * fade) : C([255, 255, 255], 255 * fade), 5.5 * k)
+                }
+                KFRing(cx, cy, (18 + 120 * KFEase(el / 320)) * k, C(c2, 170 * (1 - KFEase(el / 320))), 3 * k)
+                Loop 10 {
+                    a := A_Index * 0.628 + 0.3, r := (30 + 150 * KFEase(el / 380)) * k
+                    UDisc(cx + Cos(a) * r, cy + Sin(a) * r, 3 * k * (1 - t) + 0.5, C([255, 255, 255], 230 * (1 - t)))
+                }
+            case 3:                                           ; blood splatter with drips running down
+                g := KFEase(el / 90)
+                cb := (st.src = "hit" && HitKFCol = 1) ? [138, 0, 14] : KFShade(c1, -0.4)
+                for b in st.blobs {
+                    for sp in b.sats
+                        UDisc(b.x + sp[1] * g, b.y + sp[2] * g, sp[3] * g, C(cb, 205 * fade))
+                    UDisc(b.x, b.y, b.r * g, C(cb, 215 * fade))
+                    for dr in b.drips {
+                        L := b.r * (0.3 + 1.8 * t * dr[3])
+                        URR(b.x + dr[1] - dr[2] / 2, b.y + b.r * 0.2, dr[2], L, dr[2] / 2, C(cb, 205 * fade))
+                        UDisc(b.x + dr[1], b.y + b.r * 0.2 + L, dr[2] * 0.75, C(cb, 205 * fade))
+                    }
+                    UDisc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.22 * g, C([255, 255, 255], 36 * fade))
+                }
+            case 4:                                           ; slash: bright streaks cut across the screen
+                for j, sl in st.slashes {
+                    p := KFEase((el - (j - 1) * 55) / 120)
+                    if (p <= 0)
+                        continue
+                    ex := sl.sx + sl.dx * sl.L * p, ey := sl.sy + sl.dy * sl.L * p
+                    mx := (sl.sx + ex) / 2, my := (sl.sy + ey) / 2, nx := -sl.dy, ny := sl.dx
+                    for ly in [[30, c1, 60], [14, c2, 150], [5, [255, 255, 255], 255]] {
+                        sw := ly[1] * k
+                        KFPoly([sl.sx, sl.sy, mx + nx * sw, my + ny * sw, ex, ey, mx - nx * sw, my - ny * sw], C(ly[2], ly[3] * fade))
+                    }
+                }
+            case 5:                                           ; shatter: cracks run out from the hit, a white flash
+                if (el < 130)
+                    VigSolid(UG, 0, 0, W, H, C([255, 255, 255], 70 * (1 - el / 130)))
+                p := KFEase(el / 150)
+                KFRing(st.ox, st.oy, (10 + 40 * p) * k, C(c1, 200 * fade), 3 * k)
+                for cr in st.cracks {
+                    n := cr.Length // 2 - 1, upto := n * p
+                    Loop n {
+                        i := A_Index
+                        if (i > upto + 1)
+                            break
+                        f := Min(1.0, upto - (i - 1))
+                        x1 := cr[2 * i - 1], y1 := cr[2 * i], x2 := x1 + (cr[2 * i + 1] - x1) * f, y2 := y1 + (cr[2 * i + 2] - y1) * f
+                        ULine(x1, y1, x2, y2, C(c1, 80 * fade), 7 * k)
+                        ULine(x1, y1, x2, y2, C([255, 255, 255], 230 * fade), 2 * k)
+                    }
+                }
+            case 6:                                           ; anime speed lines (they flicker), a flash in the middle
+                if (!IsObject(st.lines) || el // 45 != st.lineAt) {
+                    st.lineAt := el // 45, st.lines := []
+                    Loop 80
+                        st.lines.Push([Random(0.0, 6.2832), Random(0.25, 0.42), Random(4, 15) * k, Mod(A_Index, 3) = 0])
+                }
+                ro := Sqrt(W * W + H * H) / 2 + 20
+                ia := Min(1.0, el / 60) * fade
+                for ln in st.lines {
+                    dx := Cos(ln[1]), dy := Sin(ln[1]), ri := ln[2] * Min(W, H)
+                    KFPoly([cx + dx * ri, cy + dy * ri, cx + dx * ro - dy * ln[3], cy + dy * ro + dx * ln[3], cx + dx * ro + dy * ln[3], cy + dy * ro - dx * ln[3]]
+                        , ln[4] ? C(c1, 170 * ia) : C([255, 255, 255], 150 * ia))
+                }
+                UDisc(cx, cy, 70 * k * (1 - t), C([255, 255, 255], 90 * Max(0, 1 - t * 2)))
+            case 7:                                           ; shockwave: three rings rush out from the middle
+                Loop 3 {
+                    e := KFEase((el - (A_Index - 1) * 90) / (st.dur * 0.8))
+                    if (e <= 0)
+                        continue
+                    R := e * 0.75 * W
+                    KFRing(cx, cy, R, C(c1, 70 * (1 - e)), 26 * k)
+                    KFRing(cx, cy, R, C(c2, 160 * (1 - e)), 9 * k)
+                    KFRing(cx, cy, R, C([255, 255, 255], 220 * (1 - e)), 2.5 * k)
+                }
+                UDisc(cx, cy, 90 * k * (1 - t), C([255, 255, 255], 130 * Max(0, 1 - t * 3)))
+            case 8:                                           ; neon frame: a glowing border snaps in, corner brackets, a scan line
+                ins := (14 + 60 * (1 - KFEase(el / 160))) * k
+                Loop 6 {
+                    j := A_Index * 2
+                    URRLine(ins - j, ins - j, W - 2 * ins + 2 * j, H - 2 * ins + 2 * j, 18 * k + j, C(c1, (80 - A_Index * 12) * fade))
+                }
+                URRLine(ins, ins, W - 2 * ins, H - 2 * ins, 18 * k, C([255, 255, 255], 210 * fade))
+                bl := 80 * k, bi := ins + 10 * k
+                for q in [[bi, bi, 1, 1], [W - bi, bi, -1, 1], [bi, H - bi, 1, -1], [W - bi, H - bi, -1, -1]] {
+                    ULine(q[1], q[2], q[1] + q[3] * bl, q[2], C(c2, 255 * fade), 5 * k)
+                    ULine(q[1], q[2], q[1], q[2] + q[4] * bl, C(c2, 255 * fade), 5 * k)
+                }
+                sy := H * KFEase(el / (st.dur * 0.7))
+                VigGradRect(UG, 0, Round(sy - 40 * k), W, Round(40 * k), C(c1, 0), C(c1, 90 * fade), 1)
+        }
+    }
+    UG := prevG, UAlpha := prevA
+    ULayered(KFGui.Hwnd, KFS.dc, W, H)
+}
+
+; ---------- configs ----------
+FxTo() {
+    global
+    return {style: VigStyle, grad: VigGrad, anim: VigAnim ? 1 : 0, animspd: VigAnimSpd, intensity: VigIntensity, tint: VigTint
+        , stay: VigMinShow, extra: LagKFIdx, pill: VigPillOn ? 1 : 0, pill_always: PillAlways ? 1 : 0, pill_sync: BurstSyncPill ? 1 : 0, pill_size: VigPillScale
+        , shake: {on: ShakeOn ? 1 : 0, style: ShakeStyle, amt: ShakeAmt, where: ShakeWhere, len: ShakeLen, sync: ShakeSyncLen ? 1 : 0}
+        , sound: {on: VigSound ? 1 : 0, idx: VigSoundIdx, file: VigSoundFile, vol: VigVol, tick: BurstSyncSound ? 1 : 0}
+        , hit: {on: HitOn ? 1 : 0, vig: HitVig ? 1 : 0, shake: HitShake ? 1 : 0, sound: HitSound ? 1 : 0, len: HitDur, amt: HitShakeAmt
+            , shake_style: HitShakeStyle, sound_idx: HitSoundIdx, file: HitSoundFile, vol: HitVol
+            , kf: HitKFIdx, kf_col: HitKFCol, fx_style: HitFxStyle, fx_grad: HitFxGrad, fx_anim: HitFxAnim ? 1 : 0, fx_int: HitFxInt, fx_tint: HitFxTint, fx_size: HitFxSize}}
+}
+
+FxFrom(o) {
+    global
+    local s, sd, h
+    gg(obj, name, def) => (IsObject(obj) && obj.HasOwnProp(name)) ? obj.%name% : def
+    num(obj, name, def, lo, hi) => Max(lo, Min(hi, Integer(gg(obj, name, def))))
+    VigStyle := num(o, "style", 6, 1, 14), VigGrad := num(o, "grad", 1, 1, VigGradNames.Length)
+    VigAnim := gg(o, "anim", 0) ? true : false, VigAnimSpd := num(o, "animspd", 5, 1, 10)
+    LagKFIdx := num(o, "extra", 1, 1, KFNames.Length), LagKFDDL.idx := LagKFIdx
+    VigIntensity := num(o, "intensity", 80, 10, 100), VigTint := num(o, "tint", 0, 0, 40), VigMinShow := num(o, "stay", 500, 200, 5000)
+    VigPillOn := gg(o, "pill", 1) ? true : false, PillAlways := gg(o, "pill_always", 0) ? true : false
+    BurstSyncPill := gg(o, "pill_sync", 1) ? true : false, VigPillScale := num(o, "pill_size", 100, 60, 160)
+    s := gg(o, "shake", {})
+    ShakeOn := gg(s, "on", 0) ? true : false, ShakeStyle := num(s, "style", 1, 1, 13), ShakeAmt := num(s, "amt", 40, 1, 100)
+    ShakeWhere := num(s, "where", 1, 1, 2), ShakeLen := num(s, "len", 400, 0, 2000), ShakeSyncLen := gg(s, "sync", 0) ? true : false
+    sd := gg(o, "sound", {})
+    VigSound := gg(sd, "on", 0) ? true : false, VigSoundFile := gg(sd, "file", ""), VigVol := num(sd, "vol", 100, 0, 100)
+    VigSoundIdx := num(sd, "idx", 1, 1, 6), BurstSyncSound := gg(sd, "tick", 0) ? true : false
+    if (VigSoundIdx = 6 && (VigSoundFile = "" || !FileExist(VigSoundFile)))
+        VigSoundIdx := 1
+    h := gg(o, "hit", {})
+    HitOn := gg(h, "on", 0) ? true : false, HitVig := gg(h, "vig", 1) ? true : false, HitShake := gg(h, "shake", 1) ? true : false
+    HitSound := gg(h, "sound", 0) ? true : false, HitDur := num(h, "len", 450, 150, 1500), HitShakeAmt := num(h, "amt", 40, 1, 100)
+    HitShakeStyle := num(h, "shake_style", 1, 1, 6), HitSoundIdx := num(h, "sound_idx", 1, 1, 9), HitSoundFile := gg(h, "file", "")
+    HitVol := num(h, "vol", 70, 0, 100)
+    HitFxStyle := num(h, "fx_style", 1, 1, 14), HitFxGrad := num(h, "fx_grad", 2, 1, VigGradNames.Length)
+    HitFxAnim := gg(h, "fx_anim", 0) ? true : false, HitFxInt := num(h, "fx_int", 80, 10, 100)
+    HitFxTint := num(h, "fx_tint", 0, 0, 40), HitFxSize := num(h, "fx_size", 8, 2, 30)
+    HitFxStyleDDL.idx := HitFxStyle, HitFxGradDDL.idx := HitFxGrad
+    HitKFIdx := num(h, "kf", 1, 1, KFNames.Length), HitKFCol := num(h, "kf_col", 1, 1, KFColNames.Length)
+    HitKFDDL.idx := HitKFIdx, HitKFColDDL.idx := HitKFCol
+    if (HitSoundIdx = 9 && (HitSoundFile = "" || !FileExist(HitSoundFile)))
+        HitSoundIdx := 1
+    VigStyleDDL.idx := VigStyle, VigGradDDL.idx := VigGrad, ShakeStyleDDL.idx := ShakeStyle, ShakeWhereDDL.idx := ShakeWhere
+    SoundDDL.idx := VigSoundIdx, HitSoundDDL.idx := HitSoundIdx, HitShakeDDL.idx := HitShakeStyle
+    VigSig := ""
+}
+
+; ---------- menu pages ----------
+FxToggle(name, *) {
+    global
+    %name% := !%name%
+    VigSig := ""
+}
+
+FxSet(name, v) {
+    global
+    %name% := v
+    VigSig := ""
+}
+
+; Lagswitch > Freeze Effect
+UPageFreezeFx(top) {
+    global UCY, IsLagVignette, VignetteThickness, VigAnim, VigAnimSpd, VigIntensity, VigTint, VigMinShow
+    global VigPillOn, PillAlways, BurstSyncPill, VigPillScale
+    UColumn(1, top)
+    UCardBegin("c_fx", "Freeze Effect", Chr(0xE7B3))
+    UToggleRow("t_fxon", "Screen effect", "shows while the game is frozen", IsLagVignette, ToggleLagVignetteBox)
+    UDropRow("d_fxstyle", "Style", VigStyleDDL)
+    UDropRow("d_fxgrad", "Colour", VigGradDDL)
+    UDropRow("d_lagkf", "Extra effect", LagKFDDL)
+    UToggleRow("t_fxanim", "Animate colours", "", VigAnim, FxToggle.Bind("VigAnim"))
+    if (VigAnim)
+        USliderRow("s_fxspd", "Animation speed", 1, 10, VigAnimSpd, FxSet.Bind("VigAnimSpd"))
+    USliderRow("s_vig", "Glow size", 2, 30, VignetteThickness, SetVignetteThickness, "{} px")
+    USliderRow("s_fxint", "Intensity", 10, 100, VigIntensity, FxSet.Bind("VigIntensity"), "{}%")
+    USliderRow("s_fxtint", "Screen tint", 0, 40, VigTint, FxSet.Bind("VigTint"), "{}%")
+    USliderRow("s_fxstay", "Stays at least", 200, 2000, VigMinShow, FxSet.Bind("VigMinShow"), "{} ms")
+    UButtonRow([["b_fxprev", "Preview", FxPreview, true]])
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_pill", "Countdown", Chr(0xE916))
+    UToggleRow("t_pill", "Show the countdown", "a card that counts the freeze down", VigPillOn, FxToggle.Bind("VigPillOn"))
+    UToggleRow("t_pilla", "Keep it on screen", "also when nothing is frozen", PillAlways, FxToggle.Bind("PillAlways"))
+    UToggleRow("t_pills", "Count down per tick", "burst mode: again for every tick", BurstSyncPill, FxToggle.Bind("BurstSyncPill"))
+    USliderRow("s_pillsz", "Size", 60, 160, VigPillScale, FxSet.Bind("VigPillScale"), "{}%")
+    UTextRow("Drag it anywhere while the menu is open on the Lagswitch tab.", "", 2)
+    UCardEnd()
+    return Max(b1, UCY)
+}
+
+; Lagswitch > Shake & Sound
+UPageShakeSound(top) {
+    global UCY, ShakeOn, ShakeAmt, ShakeLen, ShakeSyncLen, VigSound, VigVol, BurstSyncSound, VigSoundIdx, VigSoundFile
+    UColumn(1, top)
+    UCardBegin("c_shk", "Screen Shake", Chr(0xE7F4))
+    UToggleRow("t_shk", "Shake while frozen", "shakes a picture of the frozen game", ShakeOn, FxToggle.Bind("ShakeOn"))
+    UDropRow("d_shkstyle", "Style", ShakeStyleDDL)
+    UDropRow("d_shkwhere", "What shakes", ShakeWhereDDL)
+    USliderRow("s_shkamt", "Strength", 1, 100, ShakeAmt, FxSet.Bind("ShakeAmt"), "{}%")
+    UToggleRow("t_shksync", "Only while frozen", "stops when the freeze ends", ShakeSyncLen, FxToggle.Bind("ShakeSyncLen"))
+    if (!ShakeSyncLen)
+        USliderRow("s_shklen", "Length", 0, 2000, ShakeLen, FxSet.Bind("ShakeLen"), "{} ms")
+    UButtonRow([["b_shktest", "Test shake", ShakeTest, true]])
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_snd", "Sound", Chr(0xE767))
+    UToggleRow("t_snd", "Sound cue", "a sound when the freeze starts and ends", VigSound, FxToggle.Bind("VigSound"))
+    UDropRow("d_snd", "Sound", SoundDDL)
+    if (VigSoundIdx = 6)
+        UTextRow(VigSoundFile, "", 1)
+    USliderRow("s_sndvol", "Volume", 0, 100, VigVol, FxSet.Bind("VigVol"), "{}%")
+    UToggleRow("t_sndtick", "Sound per tick", "burst mode: for every tick", BurstSyncSound, FxToggle.Bind("BurstSyncSound"))
+    UButtonRow([["b_sndplay", "Play", VigSoundTest, true], ["b_sndfile", "Choose file", FxChooseSoundFile]])
+    UCardEnd()
+    return Max(b1, UCY)
+}
+
+; Misc > Hit Effects
+UPageHitFx(top) {
+    global UCY, HitOn, HitVig, HitShake, HitSound, HitDur, HitShakeAmt, HitVol, HitSoundIdx, HitSoundFile
+    global HitFxAnim, HitFxInt, HitFxTint, HitFxSize
+    UColumn(1, top)
+    UCardBegin("c_hit", "Hit Effects", Chr(0xE945))
+    UToggleRow("t_hit", "Hit effects", "when a macro fires from its key", HitOn, FxToggle.Bind("HitOn"))
+    UToggleRow("t_hitvig", "Screen effect", "its own look, set below", HitVig, FxToggle.Bind("HitVig"))
+    UToggleRow("t_hitshk", "Shake", "shakes the game window", HitShake, FxToggle.Bind("HitShake"))
+    UToggleRow("t_hitsnd", "Sound", "", HitSound, FxToggle.Bind("HitSound"))
+    USliderRow("s_hitlen", "Length", 150, 1500, HitDur, FxSet.Bind("HitDur"), "{} ms")
+    UTextRow("They play right after the macro's own moves, so they never change its timing.", "", 2)
+    UButtonRow([["b_hittest", "Test", HitFire, true]])
+    UCardEnd()
+    UCardBegin("c_hitlook", "Hit Screen Effect", Chr(0xE7B3))
+    UDropRow("d_hitfx", "Style", HitFxStyleDDL)
+    UDropRow("d_hitfxg", "Colour", HitFxGradDDL)
+    UDropRow("d_hitkf", "Extra effect", HitKFDDL)
+    UDropRow("d_hitkfc", "Extra effect colour", HitKFColDDL)
+    UToggleRow("t_hitfxa", "Animate colours", "", HitFxAnim, FxToggle.Bind("HitFxAnim"))
+    USliderRow("s_hitfxsz", "Glow size", 2, 30, HitFxSize, FxSet.Bind("HitFxSize"), "{} px")
+    USliderRow("s_hitfxint", "Intensity", 10, 100, HitFxInt, FxSet.Bind("HitFxInt"), "{}%")
+    USliderRow("s_hitfxtint", "Screen tint", 0, 40, HitFxTint, FxSet.Bind("HitFxTint"), "{}%")
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_hitopt", "Shake & Sound", Chr(0xE7F4))
+    UDropRow("d_hitshk", "Shake style", HitShakeDDL)
+    USliderRow("s_hitamt", "Shake strength", 1, 100, HitShakeAmt, FxSet.Bind("HitShakeAmt"), "{}%")
+    UDropRow("d_hitsnd", "Sound", HitSoundDDL)
+    if (HitSoundIdx = 9)
+        UTextRow(HitSoundFile, "", 1)
+    USliderRow("s_hitvol", "Volume", 0, 100, HitVol, FxSet.Bind("HitVol"), "{}%")
+    UButtonRow([["b_hitplay", "Play", (*) => HitSoundPlay(), true], ["b_hitfile", "Choose file", FxChooseHitFile]])
+    UCardEnd()
+    return Max(b1, UCY)
 }
 
 
@@ -4542,6 +6631,7 @@ RegisterHotkeys() {
     global IsExtender1Checked, IsExtender2Checked, IsExtender4Checked, IsJumpBugChecked, IsLagSwitchChecked
     RecRegisterAll()                                          ; (the recorded dashes first: a built-in macro on the same key wins)
     BDRegisterAll()
+    XRegisterAll()
     MacroKey(curExtender1Key, ExecuteExtender1, IsExtender1Checked)
     MacroKey(curExtender2Key, ExecuteExtender2, IsExtender2Checked)
     MacroKey(curExtender4Key, ExecuteExtender4, IsExtender4Checked)
@@ -4572,26 +6662,28 @@ InputKeyOrMouse() {
         Sleep(10)
     
     Loop {
-        Sleep(10)
+        Sleep(5)
         if GetKeyState("Escape", "P") {
             KeyWait("Escape")
             return "Escape"
         }
+        if GetKeyState("Backspace", "P") {                    ; (Backspace clears the bind too)
+            KeyWait("Backspace")
+            return "Escape"
+        }
+        if GetKeyState("LButton", "P") {                      ; a left click cancels: the key box keeps its key
+            KeyWait("LButton")
+            return "Cancel"
+        }
         ; Check mouse buttons first
-        for m in MouseList {
-            if GetKeyState(m, "P") {
-                KeyWait(m)
-                if (m = "LButton" && UMouseOverMenu())       ; a click on the menu itself is not a bind: keep listening
-                    continue
+        for m in MouseList {                                  ; (the bind applies on the press, not on letting go)
+            if GetKeyState(m, "P")
                 return m
-            }
         }
         ; Check keyboard keys
         for k in KeyList {
-            if GetKeyState(k, "P") {
-                KeyWait(k)
+            if GetKeyState(k, "P")
                 return k
-            }
         }
     }
 }
@@ -4622,6 +6714,10 @@ StartBindExt1(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Ext1.Text := FormatKeyName(curExtender1Key)
+                break
+            }
             UnregisterExt1Key(curExtender1Key)
             if (Key != "Escape") {
                 Extender1Key   := Key
@@ -4647,6 +6743,10 @@ StartBindExt2(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Ext2.Text := FormatKeyName(curExtender2Key)
+                break
+            }
             UnregisterExt2Key(curExtender2Key)
             if (Key != "Escape") {
                 Extender2Key   := Key
@@ -4672,6 +6772,10 @@ StartBindExt4(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Ext4.Text := FormatKeyName(curExtender4Key)
+                break
+            }
             UnregisterExt4Key(curExtender4Key)
             if (Key != "Escape") {
                 Extender4Key   := Key
@@ -4697,6 +6801,10 @@ StartBindJumpBug(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_JumpBug.Text := FormatKeyName(curJumpBugKey)
+                break
+            }
             UnregisterJumpBugKey(curJumpBugKey)
             if (Key != "Escape") {
                 JumpBugKey    := Key
@@ -4722,6 +6830,10 @@ StartBindLag(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Lag.Text := FormatKeyName(curLagKey)
+                break
+            }
             UnregisterLagKey(curLagKey)
             if (Key != "Escape") {
                 LagKey    := Key
@@ -4837,6 +6949,10 @@ StartBindLock(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Lock.Text := FormatKeyName(curMacroLockKey)
+                break
+            }
             UnregisterSystemHotkeys()
             if (Key != "Escape") {
                 MacroLockKey   := Key
@@ -4862,6 +6978,10 @@ StartBindMin(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Min.Text := FormatKeyName(curMinimizeKey)
+                break
+            }
             UnregisterSystemHotkeys()
             if (Key != "Escape") {
                 MinimizeKey   := Key
@@ -4887,6 +7007,10 @@ StartBindRel(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Rel.Text := FormatKeyName(curReloadKey)
+                break
+            }
             UnregisterSystemHotkeys()
             if (Key != "Escape") {
                 ReloadKey   := Key
@@ -4912,6 +7036,10 @@ StartBindExit(*) {
     Loop {
         Key := InputKeyOrMouse()
         if (Key != "") {
+            if (Key = "Cancel") {
+                BtnK_Exit.Text := FormatKeyName(curExitKey)
+                break
+            }
             UnregisterSystemHotkeys()
             if (Key != "Escape") {
                 ExitKey   := Key
@@ -4959,6 +7087,7 @@ MacroLockToggle(*) {
         SetCheck(ChkBD3, IsBD3Checked)
         SetCheck(ChkJumpBug, IsJumpBugChecked)
         
+        XLock(false)
         IsMacrosLocked := false
         
         UpdateSidebarIndicators()
@@ -4996,6 +7125,7 @@ MacroLockToggle(*) {
         SetCheck(ChkBD3, false)
         SetCheck(ChkJumpBug, false)
         
+        XLock(true)
         IsMacrosLocked := true
         
         UpdateSidebarIndicators()
@@ -5067,6 +7197,7 @@ SaveProfileInternal(configName) {
         },
         visuals: UVisualsTo()
     }
+    XSaveTo(cfg)
     
     filePath := ConfigDir "\" configName ConfigExt
     try FileDelete(filePath)
@@ -5078,7 +7209,31 @@ SaveProfileInternal(configName) {
     }
 }
 
+; an older or hand-edited config may miss parts: they get the defaults, so loading never stops halfway
+CfgFill(cfg) {
+    if (!IsObject(cfg) || Type(cfg) != "Object")
+        throw Error("not a config")
+    defs := Map("macros", Map(), "timings", Map("freeze_dur", 250)
+        , "keybinds", Map("ext1_key", "", "ext2_key", "", "ext3_key", "", "lag_key", "")
+        , "system", Map("reload_key", "Insert", "minimize_key", "F8", "lock_key", "F5", "exit_key", "Delete"))
+    for sec, keys in defs {
+        if (!cfg.HasOwnProp(sec) || !IsObject(cfg.%sec%))
+            cfg.%sec% := {}
+        for k, v in keys
+            if (!cfg.%sec%.HasOwnProp(k))
+                cfg.%sec%.%k% := v
+    }
+    return cfg
+}
+
 LoadProfileInternal(configName) {
+    try
+        LoadProfileInner(configName)
+    catch Error as e
+        ShowStatus("CONFIG COULD NOT BE LOADED: " e.Message, "0x2A0808", 500, true)
+}
+
+LoadProfileInner(configName) {
     global ConfigDir, ConfigExt, BDPing
     global IsExtender1Checked, IsExtender2Checked, IsExtender3Checked, IsExtender4Checked, IsLagSwitchChecked
     global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked, IsJumpBugChecked
@@ -5101,7 +7256,7 @@ LoadProfileInternal(configName) {
     
     try {
         content := FileRead(filePath)
-        cfg := JsonToObj(content)
+        cfg := CfgFill(JsonToObj(content))
     } catch {
         ShowStatus("CONFIG LOAD ERROR", "0x2A0808", 500)
         return
@@ -5150,6 +7305,7 @@ LoadProfileInternal(configName) {
     JumpBugKey   := cfg.keybinds.HasOwnProp("jump_bug_key") ? cfg.keybinds.jump_bug_key : ""
     LagKey       := cfg.keybinds.lag_key
     BDSetKeysFrom(cfg.keybinds)
+    XLoadFrom(cfg)
     BDPing := cfg.timings.HasOwnProp("bd_ping") ? Max(0, Min(200, Integer(cfg.timings.bd_ping))) : 0
     
     curExtender1Key := Extender1Key
@@ -5318,6 +7474,7 @@ ResetDefaults(*) {
     BtnK_Lock.Text := FormatKeyName(MacroLockKey)
     BtnK_Exit.Text := FormatKeyName(ExitKey)
     
+    XLoadFrom({})
     RegisterHotkeys()
     RegisterSystemHotkeys()
     UpdateSidebarIndicators()
@@ -5487,7 +7644,7 @@ ParseJsonNumber(jsonStr, &pos) {
             break
         }
     }
-    return Integer(num)
+    return Number(num)                                        ; (Integer() dropped the decimals: a sens of 0.5 loaded as 0)
 }
 
 SkipWhitespace(jsonStr, &pos) {
