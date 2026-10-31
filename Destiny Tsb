@@ -4186,7 +4186,7 @@ ExecuteExtender1(*) {
     b2 := (BaseSensitivity > 0) ? BaseSensitivity : 0.8
     l1 := Round(1360 * (b2 / a2))
 
-    ; Straight dash, timed like the v1 script ran it (see V1Sleep): Space down, Sleep 1, Q down, Q up, Space up,
+    ; Straight dash, timed like the v1 script ran it (see V1Sleep):
     ; Sleep 16, Sleep 130, flick; each Send waits a key delay after it
     kd := V1Sleep(10)
     base := QMs()
@@ -4204,8 +4204,7 @@ ExecuteExtender1(*) {
     MacroFx()
 }
 
-; --- Macro 2: Instant Twisted (made on 0.2 sens): Q held 70 ms, then 5 moves left, 5 right, 5 back left, 10 ms apart
-;     with 30 ms between the groups; the three turns add up to 0, so the camera ends where it started ---
+; --- Macro 2: Instant Twisted (made on 0.2 sens)
 ExecuteExtender2(*) {
     global isExtender2Running, RobloxSensitivity
     if (!IsExtender2Checked || isExtender2Running || !WinActive(GAME_EXE))
@@ -4245,8 +4244,8 @@ ExecuteExtender2(*) {
     SetTimer(BlinkIndicator.Bind(2), -1)
 }
 
-; --- Backdash 1-4: skill + S + Q down together, skill up right away, S + Q held ~100 ms, then up.
-; The backdash key itself also goes through to the game (~). BDPing ("Ping timing"): S + Q come that many ms after
+; --- Backdash 1-4: 
+; The backdash key itself also goes through to the game, not sure  (~). BDPing ("Ping timing"): S + Q come that many ms after
 ; the skill - with a very low ping the backdash sometimes did not take, with a higher ping it did.
 ExecuteBackdash(n, *) {
     global BDRunning, IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked
