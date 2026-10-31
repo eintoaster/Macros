@@ -2,15 +2,14 @@
 #SingleInstance Force
 InstallKeybdHook(true, true)
 InstallMouseHook(true, true)
-#MaxThreads 255                    ; (the default of 10 can make a hotkey get ignored while many timers are running)
+#MaxThreads 255                    ; (the default of 10 can make a hotkey get ignored while many timers are running) i would not change ts 
 ProcessSetPriority("High")
 A_MaxHotkeysPerInterval := 99000000
-; No log files are written. (To help find a problem, an empty file called debug.on next to the script switches the logs on: configs\hotkeys.log and configs\lagswitch.log.)
 ; the folder the macro keeps its files in: a folder called M0MENT4M (with configs, tools, companion inside) next to this script
 Global AppBase := IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir
 Global AppDir := AppBase "\M0MENT4M"                ; everything the macro creates lives in this one folder next to the script
 try DirCreate(AppDir)
-for _d in ["configs", "tools", "companion"] {         ; files from an older version (next to the script) move into it once
+for _d in ["configs", "tools", "companion"] {         
     if (DirExist(AppBase "\" _d) && !DirExist(AppDir "\" _d))
         try DirMove(AppBase "\" _d, AppDir "\" _d)
 }
@@ -26,7 +25,7 @@ Global StrafeCurrentDir := "none"
 Global RawInputRegistered := false
 CoordMode("Mouse", "Screen")
 
-; --- Globals & Theme ---
+; globals & theme
 Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
 Global ConfigDir := AppDir "\configs"
 Global ConfigExt := ".json"
@@ -50,7 +49,7 @@ Global RainbowBarW := 480
 Global RainbowCanvas := "", RainbowMemDC := 0, RainbowBmp := 0, RainbowBmpW := 0
 Global RainbowBarSegments := []
 
-; --- Macro States & Keys ---
+; macro states & keys
 JumpKey := "Space"
 CKey := "c"
 SKey := "s"
@@ -87,13 +86,13 @@ isSpinbotRunning := false
 BBhopKey := ""
 isBBhopRunning := false
 
-; --- System Binds ---
+; system binds
 Global ReloadKey := "Insert"
 Global MinimizeKey := "F8"
 Global MacroLockKey := "F5"
 Global ExitKey := "Delete"
 
-; --- Checkbox States ---
+; checkbox states
 Global IsSlideChecked := false
 Global IsSlideBehindChecked := false
 Global SlideTurnAmount := 1400
@@ -210,7 +209,7 @@ Global IsClickChecked := false
 Global IsSpinbotChecked := false
 Global IsBBhopChecked := false, BBhopRunMs := 1500, BBhopTurn := 1400, BBhopPhase := 0   ; (Backwards Bhop: run forward, turn, bhop)
 
-; --- Lagswitch ---
+; lagswitch
 Global FreezeDuration := 200
 Global LagKey := ""
 Global currentLagKey := ""
@@ -239,7 +238,7 @@ currentMinimizeKey := MinimizeKey
 currentMacroLockKey := MacroLockKey
 currentExitKey := ExitKey
 
-; === F5 PANIC LOCK STATE ===
+; f5 panic lock state
 SavedSlideChecked := 0
 SavedBhopChecked := 0
 SavedStrafeChecked := 0
@@ -250,11 +249,11 @@ SavedSpinbotChecked := 0
 SavedBBhopChecked := 0
 IsMacrosLocked := false
 
-; --- GUI Build ---
+; gui build
 MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow -Theme +Resize +MinSize480x860", "M0MENT4M")
 MainGui.BackColor := "0x111111"
 
-; --- Skeet-only chrome: outer frame + group box pool. Created first so it sits behind every other control. ---
+; skeet-only chrome
 FrameBrd1 := MainGui.Add("Text", "x0 y0 w10 h10 Background000000", "")
 FrameBrd2 := MainGui.Add("Text", "x1 y1 w10 h10 Background2E2E2E", "")
 FrameBrd3 := MainGui.Add("Text", "x2 y2 w10 h10 Background0D0D0D", "")
@@ -295,13 +294,13 @@ BtnClose.SetFont("s8 Bold", "Consolas")
 BtnClose.Opt("Background" IconBgColor " c" AccentColor)
 BtnClose.OnEvent("Click", (*) => ExitWithAnimation())
 
-; --- Sidebar + content panel backgrounds ---
+; sidebar + content panel backgrounds
 SidebarBg := MainGui.Add("Text", "x0 y38 w76 h602 Background0A0A0A", "")
 PanelBorderBg := MainGui.Add("Text", "x85 y47 w380 h593 Background2A2A2A", "")
 PanelFillBg := MainGui.Add("Text", "x87 y49 w376 h591 Background171717", "")
 MainGui.OnEvent("Size", GuiResize)
 
-; --- Rainbow top border strip based on skeet menu ---
+; rainbow top border strip based on skeet menu
 Loop RainbowSegCount {
     seg := MainGui.Add("Text", "x0 y0 w10 h" RainbowBarHeight, "")
     seg.Visible := false
@@ -311,7 +310,7 @@ Loop RainbowSegCount {
 RainbowCanvas := MainGui.Add("Text", "x0 y0 w480 h" RainbowBarHeight " Background000000", "")
 PositionRainbowBar(480)
 
-; --- Sidebar icon nav  ---
+; sidebar icon nav
 TabNames := ["MACROS", "KEYBINDS", "LAGSWITCH", "MISC", "INFO", "CONFIG", "PERFORMANCE"]
 TabGlyphs := ["⚡", "⌨", "⚠", "⚙", "ℹ", "💾", "⏱"]
 TabIconY := [58, 118, 178, 238, 298, 358, 418]
@@ -326,13 +325,13 @@ Loop 7 {
 }
 AccentBar := MainGui.Add("Text", "x0 y58 w4 h50 BackgroundD98484", "")
 
-; --- fucking tiktok who gives a fucks ---
+; fucking tiktok who gives a fucks
 TikTokBtn := MainGui.Add("Text", "x13 y482 w50 h50 Center +0x200", "♪")
 TikTokBtn.SetFont("s18 Bold", "Segoe UI Symbol")
 TikTokBtn.Opt("Background" IconBgColor " c" AccentColor)
 TikTokBtn.OnEvent("Click", (*) => Run("https://www.tiktok.com/@yoshimixu3"))
 
-; --- Skeet tab strip (6 tabs with glyph + label) ---
+; skeet tab strip
 _skNames := ["MACRO", "BINDS", "LG", "MISC", "INFO", "CONFIG", "PERF"]
 _skGlyphs := ["⚡", "⌨", "⌛", "⚙", "ℹ", "💾", "⏱"]
 _skY := [36, 102, 168, 234, 300, 366, 432]
@@ -356,7 +355,7 @@ SkSlideBar := MainGui.Add("Text", "x10 y36 w3 h62 Background" AccentColor, "")
 SkeetChrome.Push(SkSlideBar)
 SkeetOnly.Push(SkSlideBar)
 
-; --- Screen overlay HUD for macro indicators (always-on-top, click-through): see "Macro HUD" section below ---
+; screen overlay hud for macro indicators
 Global HudDots := []
 Global IndicatorHud := SPHudC()
 
@@ -413,7 +412,7 @@ UpdateHudOpacity(*) {
     HudRequest()
 }
 
-; --- Page title headers  ---
+; page title headers
 PageTitles := []
 for idx, nm in TabNames {
     t := MainGui.Add("Text", "x104 y58 w340 c0xD98484 BackgroundTrans", nm)
@@ -424,7 +423,7 @@ MainGui.SetFont("s9 c0xD98484", "Consolas")
 
 PageControls := [[], [], [], [], [], [], []]
 
-; ===== PAGE 1: MACROS =====
+; page 1: macros
 ChkSlide := MainGui.Add("Text", "x104 y112 w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
 ChkSlide.SetFont("s10 Bold")
 LblSlide := MainGui.Add("Text", "x128 y114 w276 c0xD98484 BackgroundTrans", "INF SLIDE")
@@ -497,7 +496,7 @@ LblBBhop.OnEvent("Click", ToggleBBhopBox)
 PageControls[1].Push(ChkBBhop, LblBBhop)
 PageControls[1].Push(ChkSlide, LblSlide, ChkSlideBehind, LblSlideBehind, LblSlideTurn, SlideTurnSlider, ChkBhop, LblBhop, ChkBhopHold, LblBhopHold, ChkStrafe, LblStrafe, ChkCombo, LblCombo, ChkCSpam, LblCSpam, LblCSpamSpeed, CSpamSlider, ChkClick, LblClick, LblClickSpeed, ClickSlider, ChkSpinbot, LblSpinbot)
 
-; --- Hover tooltips (macros page) ---
+; hover tooltips
 AddTip2(ChkSlide, LblSlide, "Infinite slide. Turn on, then press the slide key in-game to start/stop it.")
 AddTip2(ChkSlideBehind, LblSlideBehind, "When infinite slide starts, snaps the camera 180 degrees behind you.`nTurns back when you stop the slide.")
 AddTip2(SlideTurnSlider, LblSlideTurn, "Mouse pixels used for the look-behind turn.`nTune it to your sensitivity until it turns exactly 180.")
@@ -512,7 +511,7 @@ AddTip2(ClickSlider, LblClickSpeed, "Delay between clicks in ms. Lower = faster.
 AddTip2(ChkSpinbot, LblSpinbot, "Continuously spins your camera while active.")
 SetTimer(TipPoll, 100)
 
-; ===== PAGE 2: CONFIG =====
+; page 2: config
 p2a := MainGui.Add("Text", "x104 y193 w300 c0xD98484 BackgroundTrans", " ")
 
 p2sys := MainGui.Add("Text", "x104 y218 w300 c0xD98484 BackgroundTrans", "── SYSTEM KEYBINDS ──")
@@ -543,7 +542,7 @@ BtnExitKey.OnEvent("Click", StartBindExit)
 p2colHeader := MainGui.Add("Text", "x104 y414 w300 c0xD98484 BackgroundTrans", "── COLORS ──")
 p2colHeader.SetFont("s9 Bold")
 
-; --- COLOR PICKERS ---
+; color pickers
 p2g := MainGui.Add("Text", "x104 y444 w150 c0xD98484 BackgroundTrans", "Text Color:")
 ColorSwatchBtn := MainGui.Add("Text", "x260 y439 w100 h24 Center +0x200 +Border", "")
 ColorSwatchBtn.Opt("BackgroundD98484")
@@ -609,7 +608,7 @@ AddTip(DesignApplyBtn, "Changes how the whole menu looks (fonts, borders, checkb
 PageControls[4].Push(p2g, ColorSwatchBtn, p2h, BgSwatchBtn, p2i, IconBgSwatchBtn, p2j, PanelSwatchBtn, p2k, ThemeDDL, ThemeApplyBtn, p2colHeader, p2indic, ChkSidebarIndicators, p2notif, ChkStatusNotifs, p2hudpos, HudPosDDL, p2hudopacity, LblHudOpacity, HudOpacitySlider)
 PageControls[4].Push(p2a, p2sys, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMacroLockKey, p2e, p2f, BtnExitKey)
 
-; ===== PAGE 3: KEYBINDS =====
+; page 3: keybinds
 p3a := MainGui.Add("Text", "x104 y100 w130 c0xD98484 BackgroundTrans", "Slide Key:")
 BtnSlideKey := MainGui.Add("Text", "x239 y95 w150 h25 Center +0x200", "NONE")
 BtnSlideKey.Opt("Background000000 c0xD98484")
@@ -663,7 +662,7 @@ p3note := MainGui.Add("Text", "x104 y418 w340 h34 c0xD98484 BackgroundTrans", "C
 PageControls[2].Push(p3note)
 AllTextControls.Push(p3note)
 
-; --- Hover tooltips (keybinds page) ---
+; hover tooltips
 for _b in [BtnSlideKey, BtnBhopKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey, BtnBBhopKey]
     AddTip(_b, "Click, then press a key or mouse button to bind it.`nESC clears the bind. Keys already in use are rejected.")
 AddTip(BtnBhopHoldKey, "The key you hold to bhop (default Space).`nClick, then press a key. ESC clears it.")
@@ -672,7 +671,7 @@ AddTip2(p2c, BtnMinimizeKey, "Shows or hides this menu.")
 AddTip2(p2d, BtnMacroLockKey, "Panic key: turns every macro off.`nPress again to restore them.")
 AddTip2(p2f, BtnExitKey, "Closes the macro script completely.")
 
-; ===== PAGE 4: MISC =====
+; page 4: misc
 p4a := MainGui.Add("Text", "x104 y95 w300 c0xD98484 BackgroundTrans", "LAGSWITCH (OP)")
 p4b := MainGui.Add("Text", "x104 y130 w200 c0xD98484 BackgroundTrans", "Freeze Duration (1-1000ms):")
 FreezeEdit := MainGui.Add("Edit", "x104 y155 w100", "")
@@ -729,7 +728,7 @@ p4d := MainGui.Add("Text", "x104 y500 w300 h40 c0xD98484 BackgroundTrans", "only
 StatusText := MainGui.Add("Text", "x104 y540 w300 c0xD98484 BackgroundTrans", "Status: Ready")
 PageControls[3].Push(p4a, p4b, FreezeEdit, ApplyBtn, TestBtn, p4c, BtnLagKey, ChkLagPrecision, LblLagPrecision, ChkLagBurst, LblLagBurst, LblLagBurstCount, LagBurstSlider, ChkLagHold, LblLagHold, ChkLagVignette, LblLagVignette, VignetteSwatchBtn, LblVignetteThickness, VignetteThicknessSlider, p4d, StatusText)
 
-; ===== PAGE 5: INFO =====
+; page 5: info
 p5a := MainGui.Add("Text", "x104 y95 w300 c0xD98484 BackgroundTrans", "SYSTEM INFO")
 p5b := MainGui.Add("Text", "x104 y120 w300 c0xD98484 BackgroundTrans", "Version: 2.2 M0MENT4M")
 p5d := MainGui.Add("Text", "x104 y150 w300 h66 c0xD98484 BackgroundTrans", "Full movement macro script for Evade. Not bannable, no executor. AutoHotkey v2. For further bugs, report them in the Discord server.")
@@ -756,7 +755,7 @@ p5diag.SetFont("underline")
 p5diag.OnEvent("Click", CopyDiagnostics)
 PageControls[5].Push(p5a, p5b, p5d, p5patchHeader, p5patch, p5e, p5f, p5g, p5k, p5h, p5diag)
 
-; --- Theme control lists ---
+; theme control lists
 AllTextControls.Push(TitleText, BtnMin, BtnClose, TikTokBtn)
 for t in PageTitles
     AllTextControls.Push(t)
@@ -777,7 +776,7 @@ AllIconBgControls.Push(TikTokBtn, BtnMin, BtnClose)
 for b in SideBtns
     AllIconBgControls.Push(b)
 
-; --- Presets UI ---
+; presets ui
 ConfigTitleLbl := MainGui.Add("Text", "x104 y80 w300 c0xD98484 BackgroundTrans", "── PRESETS ──")
 ConfigTitleLbl.SetFont("s9 Bold")
 
@@ -824,7 +823,7 @@ for _c in [p2a, p2sys, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMac
     _c.Move(_cx, _cy - 110)
 }
 
-; --- Skeet-only labels ---
+; skeet-only labels
 SkCfgInfoTitle := MainGui.Add("Text", "x0 y0 w200 h16 c0xE0E0E0 BackgroundTrans", "Active Configuration:")
 SkCfgInfoTitle.SetFont("s8 Bold", "Tahoma")
 SkCfgInfoText := MainGui.Add("Text", "x0 y0 w200 h200 c0x8C8C8C BackgroundTrans", "Configs are saved locally as JSON files in the configs folder.`n`nEvery setting is stored:`n- Macro toggles and options`n- Keybinds and mouse triggers`n- Colors, theme and design`n- Lagswitch and HUD setup`n`nLoading a config rebinds hotkeys and applies the design immediately.")
@@ -842,7 +841,7 @@ SkeetPages[4].Push(p2g, ColorSwatchBtn, p2h, BgSwatchBtn, p2i, IconBgSwatchBtn, 
 SkeetPages[5].Push(p5a, p5b, p5d, p5e, p5f, p5g, p5k, p5h, p5diag, p5patch)
 SkeetPages[6].Push(SaveLbl, SaveNameInput, SaveBtn, LoadLbl, ConfigDDL, LoadBtn, DeleteBtn, ResetBtn, SkCfgInfoTitle, SkCfgInfoText)
 
-; --- Smooth hover highlight on buttons ---
+; smooth hover highlight on buttons
 for _hb in [BtnSlideKey, BtnBhopKey, BtnBhopHoldKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey, BtnLagKey
           , BtnReloadKey, BtnMinimizeKey, BtnMacroLockKey, BtnExitKey, SaveBtn, LoadBtn, DeleteBtn, ResetBtn, ApplyBtn, TestBtn
           , ThemeApplyBtn, DesignApplyBtn, ChkSidebarIndicators, ChkStatusNotifs]
@@ -894,7 +893,7 @@ SwitchTab(tabIndex, *) {
     AnimMoveY(AccentBar, TabIconY[tabIndex])
 }
 
-; --- Config Persistence ---
+; config persistence
 
 EnsureConfigDir() {
     global ConfigDir
@@ -1117,7 +1116,7 @@ ExportConfig(*) {
     obj.lag_sound.multi := ""
     if (obj.lag_sound.idx >= VigSoundSel.custom)
         obj.lag_sound.idx := 1
-    obj.config_name := Trim(SaveNameInput.Value)               ; (so the one who imports it gets the same name)
+    obj.config_name := Trim(SaveNameInput.Value)               ; (so the one who imports it gets the same name) maybe?
     A_Clipboard := "M0M2:" ObjToJson(obj)
     ShowStatus("CONFIG COPIED", "0x082A13", 200, true)
 }
@@ -1985,7 +1984,7 @@ SkipWhitespace(jsonStr, &pos) {
     }
 }
 
-; --- Slide / Bhop hold / Strafer / Tooltip helpers ---
+; slide / bhop hold / strafer / tooltip helpers
 ToggleSlideBehindBox(*)
 {
     global IsSlideBehindChecked, ChkSlideBehind
@@ -2129,7 +2128,7 @@ TipPoll()
     }
 }
 
-; --- Lagswitch Functions ---
+; lagswitch functions
 ApplyLagSettings(*) {
     global FreezeDuration
     FreezeDuration := IsInteger(FreezeEdit.Value) ? Integer(FreezeEdit.Value) : 0
@@ -2188,7 +2187,7 @@ UpdateVignetteThickness(*) {
 
 Global VignetteGuis := []
 
-; ===== Lagswitch =====
+; lagswitch
 ; The freeze is a small state machine driven by timers instead of one long Sleep: a hotkey thread that sleeps for the whole
 ; freeze stops every other hotkey from firing. The game is paused with the smallest right Windows needs (suspend / resume);
 ; if Windows refuses that on the whole process, the threads are paused one by one. Whatever happens, it is reported.
@@ -2508,7 +2507,7 @@ FreezeEnd(ran := true, alreadyResumed := false)
     SetTimer(() => LblSet(StatusText, "Status: Ready"), -3000)
 }
 
-; === LAGSWITCH DYNAMIC KEYBIND ===
+; lagswitch dynamic keybind
 LagCond(*) {
     return GameActiveFast()
 }
@@ -2540,7 +2539,7 @@ StartBindLag(*)
 
 RegisterLagKey()
 
-; --- Window & App Controls ---
+; window & app controls
 isAppMinimized := false
 MinimizeApp(*)
 {
@@ -2663,7 +2662,7 @@ GuiResize(GuiObj, MinMax, Width, Height) {
     PositionRainbowBar(Width)
 }
 
-; --- Macro Loops & Hotkeys ---
+; macro loops & hotkeys
 
 SlideCond(*) {
     return IsSlideChecked == 1 && GameActiveFast()
@@ -2690,7 +2689,7 @@ SpinbotCond(*) {
     return IsSpinbotChecked == 1 && GameActiveFast()
 }
 
-; ===== Safety net for the macro hotkeys =====
+; safety net for the macro hotkeys
 ; Every macro key is registered twice: the normal one (only active when the macro is on and the game is the active window), and a second,
 ; passive one that works everywhere. When the normal one does not fire (for whatever reason: the "is the game active" answer came a moment
 ; too late, the key came while the script was busy ...) the passive one fires instead, checks everything again with a fresh look at the
@@ -2788,7 +2787,7 @@ RegisterHotkeys()
 
 RegisterHotkeys()
 
-; ===== The hotkeys live in a small helper program of their own =====
+; the hotkeys live in a small helper program of their own
 ; The macro hotkeys used to be handled by this script's own keyboard / mouse hook. That hook is only as quick as the script: when the script was
 ; busy (drawing, a freeze, the menu) a key press, or the release of a key, could be missed, and the next press then looked like a repeat of a key
 ; that was still held (that is the "I have to press twice"). Now a tiny second program (tools\hkhelper.ahk), which has nothing else to do,
@@ -3481,7 +3480,7 @@ ToggleSpinbotBox(*)
     UpdateSidebarIndicators()
 }
 
-; --- HUD Indicator Functions ---
+; hud indicator functions
 UpdateSidebarIndicators()
 {
     global ShowSidebarIndicators
@@ -3802,7 +3801,7 @@ StrafeMainLoop() {
 }
 
 
-; --- Raw Mouse Input ---
+; raw mouse input
 ; Roblox (and most games) lock or hide the cursor while you're looking around, so polling
 ; GetCursorPos/MouseGetPos would just read a frozen center-of-screen position. Raw Input
 ; (WM_INPUT) reports true relative mouse deltas regardless of cursor lock, which is what
@@ -4227,7 +4226,7 @@ SpinbotLoop()
     DllCall("mouse_event", "UInt", 0x0001, "Int", 60, "Int", 0, "UInt", 0, "UPtr", 0)
 }
 
-; === STATUS HUD POPUPS ===
+; status hud popups
 ShowStatus(text, colorHex, xPos, force := false)
 {
     global CurrentDesign, ShowStatusNotifs, SPMenuAction, SPQuiet, LayoutMode, MainGui
@@ -4238,7 +4237,7 @@ ShowStatus(text, colorHex, xPos, force := false)
         SPToast(text, xPos)
 }
 
-; --- Color Pickers ---
+; color pickers
 
 HSVtoRGBValues(h, s, v, &R, &G, &B)
 {
@@ -4672,7 +4671,7 @@ ShadeHex(R, G, B, delta)
     return Format("{:02X}{:02X}{:02X}", R, G, B)
 }
 
-; --- Theme Presets ---
+; theme presets
 Global ThemePresets := Map(
     "Default",    ["D98484", "000000", "000000", "111111"],
     "Cyberpunk",  ["00F0FF", "0A0014", "1A0033", "120022"],
@@ -4744,7 +4743,7 @@ ResetDesignColors(*)
     ShowStatus("COLORS RESET", "0x1A1A1A", 500)
 }
 
-; --- Design presets (look only; same layout and controls) ---
+; design presets
 Global DesignPresets := Map(
     "Classic", Map("layout", "classic", "font", "Consolas", "size", 9, "check", "tick", "borderPx", 2, "title", "big", "rainbowH", 4, "borderColor", "", "colors", ""),
     "Skeet",   Map("layout", "skeet", "font", "Tahoma",   "size", 8, "check", "fill", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "2E2E2E", "colors", ["A2D615", "111111", "161616", "141414"]),
@@ -4946,9 +4945,7 @@ ApplyDesign(name, applyColors := true)
     DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
 }
 
-; ===== Radiance design: the M0MENT4M layout in deep navy and violet, a faint doodle pattern in the window and glowing
-; light ribbons behind the menu. Picking it also switches the menu background effect and the macro HUD to their Radiance
-; versions; leaving it puts back what was set before (only if it was changed automatically). =====
+; radiance design
 
 RDDesignSwitched(oldSkin, newSkin)
 {
@@ -5126,7 +5123,7 @@ RDDoodle(g, kind, cx, cy, s, rot, col)
     DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", g, "Float", -cx, "Float", -cy, "Int", 0)
 }
 
-; ===== Skeet layout engine: same controls, re-arranged into grouped boxes across 6 tabs =====
+; skeet layout engine
 
 SkeetStripBg()
 {
@@ -5527,7 +5524,7 @@ SkeetSettle()
     RainbowTick()
 }
 
-; ===== Animations: window fade, sliding accent bar, smooth hover =====
+; animations
 FadeWindow(show)
 {
     global MainGui, FadeAlpha, FadeFrom, FadeTo, FadeStart
@@ -5738,7 +5735,7 @@ LerpHex(a, b, t)
     return Format("{:02X}{:02X}{:02X}", r, g, bl)
 }
 
-; ===== Startup intro: WELCOME + the Windows user name, then the menu fades in =====
+; startup intro
 ShowMenuStartup()
 {
     global MainGui, FadeAlpha, NLAlphaWin, NLGui, NLW, NLH, DesignPresets, NLInited
@@ -5935,7 +5932,7 @@ IntroDrawInner(t, alpha, uEnd)
     DllCall("UpdateLayeredWindow", "Ptr", Intro.g.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", Intro.dc, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
 }
 
-; ===== NEVERLOSE DESIGN: a custom-drawn (GDI+) window, same macro logic underneath =====
+; neverlose design
 Global NLStyle := "nl", SPDark := true, SPAvatar := 0, SPAvatarPath := "", SPScroll := 0.0, SPScrollT := 0.0, SPContentH := 0, NLFontB := 0, NLFontH := 0, NLFontLogo := 0
 Global NLGui := "", NLHwnd := 0, NLW := 690, NLH := 500, NLShown := false, NLInited := false
 Global NLToken := 0, NLG := 0, NLMemDC := 0, NLBmp := 0, NLFmt := 0, NLFmtW := 0
@@ -5967,7 +5964,7 @@ NLOnMouseActivate(wParam, lParam, msg, hwnd)
         return 3
 }
 
-; ---------- window ----------
+; window
 NLShow(x, y)
 {
     global NLGui, NLHwnd, NLW, NLH, NLShown, NLInited, NLX, NLY
@@ -5997,7 +5994,7 @@ NLHide()
     NLGui.Hide()
 }
 
-; ---------- GDI+ setup ----------
+; gdi+ setup
 NLGdipInit()
 {
     global NLToken, NLFmt, NLFmtW, NLFontUI, NLFontSm, NLFontTitle, NLFontIcon, NLFontB, NLFontH, NLFontLogo
@@ -6059,7 +6056,7 @@ NLPresent()
     DllCall("gdiplus\GdipResetWorldTransform", "Ptr", NLG)
 }
 
-; ---------- colours ----------
+; colours
 NLC(r, g, b, a := 255)
 {
     global NLAlphaPage
@@ -6125,7 +6122,7 @@ NLKnobCol(t)
     return NLC(Round(130 + (ar - 130) * t), Round(133 + (ag - 133) * t), Round(143 + (ab - 143) * t))
 }
 
-; ---------- primitives ----------
+; primitives
 NLPath(x, y, w, h, r)
 {
     path := 0
@@ -6347,7 +6344,7 @@ NLTextWRaw(str, font)
     return NumGet(out, 8, "Float")
 }
 
-; ---------- animation + hit testing ----------
+; animation + hit testing
 NLLerp(id, target, factor)
 {
     global NLAnim, NLAnimating
@@ -6435,7 +6432,7 @@ NLTick()
     }
 }
 
-; ---------- mouse ----------
+; mouse
 ; The menu reads the mouse directly (cursor position + button state) every ~16ms while it is visible instead of
 ; waiting for window messages: while the game has the mouse captured, Windows does not send mouse messages to
 ; other windows, but the physical state can always be read. Dragging the window is handled here too.
@@ -6586,7 +6583,7 @@ NLNumEnd(ih)
     NLRequest()
 }
 
-; ---------- resizing (any edge or corner) ----------
+; resizing
 NLEdgeAt(x, y)
 {
     global NLW, NLH
@@ -6713,7 +6710,7 @@ NLSliderDrag(x)
     }
 }
 
-; ---------- widgets (immediate style: draw + register a hit region) ----------
+; widgets
 NLGroup(title, x, y, w, h)
 {
     global NLCx, NLCy, NLCw, NLFontUI, NLStyle
@@ -7160,7 +7157,7 @@ NLSetFreeze(v) {
     FreezeEdit.Value := v
 }
 
-; ---------- rendering ----------
+; rendering
 ; How far the animations move this frame, in 60 fps frames: a slow frame moves them further, so a fade or a scroll takes
 ; the same time on every PC (they used to take 3 times longer when the menu drew slowly, and kept it busy all that time).
 Global NLFrameK := 1.0, NLFrameAt := 0, NLInFrame := false, NLFullDue := true
@@ -7280,7 +7277,7 @@ NLRenderBody()
     NLPresent()
 }
 
-; ----- the Fatality look: a top bar with a gradient line, a row of tabs, fieldset boxes -----
+; the fatality look
 NLFatBg(a := 255) => NLC(28, 20, 55, a)
 NLFatBox(a := 255) => NLC(31, 25, 66, a)
 NLFatEdge(a := 255) => NLC(70, 63, 106, a)
@@ -7382,7 +7379,7 @@ NLSideTab(n, icon, label, y)
     NLAddHit(id, 10, y, 150, 30, NLGoTab.Bind(n))
 }
 
-; ---------- pages ----------
+; pages
 NLPageMacro(x, y)
 {
     bw := NLBoxW(), rx := x + bw + 8, dh := NLH - 500
@@ -7639,7 +7636,7 @@ NLPageConfig(x, y)
     NLPara("Configs are saved as JSON files in the configs folder and store every macro option, keybind, color, theme and the design. Loading one rebinds the hotkeys and applies the design immediately.", NLCx, NLCy, NLCw, 120, NLDim())
 }
 
-; ===== M0MENT4M design: light / dark card UI, drawn by the same engine as Neverlose =====
+; m0ment4m design
 Global SPX := 0, SPY := 0, SPW := 0, SPVT := 66, SPVB := 0
 
 SPPal(key)
@@ -8025,7 +8022,7 @@ SPOnWheel(wParam, lParam, msg, hwnd)
 }
 OnMessage(0x020A, SPOnWheel)
 
-; ---------- hover descriptions ----------
+; hover descriptions
 Global SPTipRect := Map(), SPTipId := "", SPTipSince := 0, SPTipLast := ""
 Global SPTips := Map(
     "t_comppet", "Double-click a waifu while this menu is open: she gets happy and strikes a pose. The one peeking over the menu sometimes climbs out and stands on it for a moment. On by default.",
@@ -8199,7 +8196,7 @@ SPDrawTip()
     NLAlphaPage := 1.0
 }
 
-; ---------- widgets ----------
+; widgets
 SPCard(hoverId, h, tid := "")
 {
     global SPX, SPY, SPW, NLHoverId, SPTipRect
@@ -8345,7 +8342,7 @@ SPDropRow(id, label, ddl, after := 0)
     SPY += 58
 }
 
-; ---------- dropdown list (opens under the selector, animated) ----------
+; dropdown list
 Global SPDD := 0
 Global SPNavScroll := 0.0, SPNavScrollT := 0.0, SPNavH := 0
 Global SPLogoSel := SPLogoSelC()
@@ -8504,7 +8501,7 @@ SPParaCard(text, h)
     SPY += h + 10
 }
 
-; ---------- window ----------
+; window
 SPRender()
 {
     global SPSkin
@@ -8719,7 +8716,7 @@ SPRender()
     NLPresent()
 }
 
-; ----- the cached parts of the SP window -----
+; the cached parts of the sp window
 Global SPBgKey := "", SPHdrKey := "", SPHdrDue := true, SPPartialOK := false, SPLayers := Map(), SPNavKey := "", SPNavHits := []
 
 SPBgSig()
@@ -8905,7 +8902,7 @@ SPConfigRow(i, name, sel)
     NLAlphaPage := keep
 }
 
-; ---- animated gradient presets for the macro name (click the name to choose one) ----
+; animated gradient presets for the macro name
 Global SPLogoIdx := 1
 
 class SPLogoSelC {
@@ -9249,7 +9246,7 @@ SPNavItem(n, icon, label, y)
     return y + 40
 }
 
-; ---------- pages ----------
+; pages
 SPPageMacro()
 {
     SPSection("Movement")
@@ -9552,7 +9549,7 @@ SPPageConfig()
     SPParaCard("Click a config above to load it. Configs are JSON files in the configs folder and store every macro option, keybind, color, theme and the design.", 70)
 }
 
-; ===== M0MENT4M design: slide-in notification cards (bottom left) =====
+; m0ment4m design
 ; the look of the cards (Misc > Overlay > Notification style); saved in the configs with the widget looks
 Global NotifStyle := {id: "notif", bg: true, border: true, scale: 100, bstyle: 0, grad: 0}
 Global TW := 560, TH := 460, TMemDC := 0, TBmp := 0, TG := 0, TGui := "", TList := [], TTimerOn := false
@@ -9762,8 +9759,7 @@ SPToastRenderInner()
     DllCall("UpdateLayeredWindow", "Ptr", TGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", TMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
 }
 
-; ===== Radiance HUDs: small dark navy chips with a violet icon (the macro HUD style "Radiance", the watermark bar and the
-; notifications while the Radiance design is on) =====
+; radiance huds
 
 RDFonts()
 {
@@ -9951,7 +9947,7 @@ RDToastChip(it)
     RDChip(0, 0, icon, parts, 26)
 }
 
-; ----- the watermark bar: M0MENT4M | user | FPS | macros on | clock (Misc > Overlay); drag it while the menu is open -----
+; the watermark bar
 
 WMToggle(*)
 {
@@ -10115,8 +10111,7 @@ WMTick()
     }
 }
 
-; ===== Mercury overlay look: dark see-through boxes with a soft lavender glow, light labels and light blue values.
-; Picked per HUD: the macro HUD style, the lagswitch pill look, the notification look and the watermark look. =====
+; mercury overlay look
 MCInitFonts()
 {
     global MCFont, MCFontS
@@ -10404,8 +10399,7 @@ WMRenderMC(&w)
     }
 }
 
-; ===== Silentium overlay look: near-black glass with a fine light border, a soft glow and a line on top in the accent colour
-; (pink in the Silentium design) and the handwritten logo. Picked per HUD: the macro HUD style and the watermark look. =====
+; silentium overlay look
 SLFonts()
 {
     global SLFontScript, SLFontStar
@@ -10624,10 +10618,7 @@ class WMLookSelC {
     }
 }
 
-; ===== Lagswitch announcer: a kill-banner style emblem at the bottom of the screen every time you lagswitch (like the kill
-; banners in Valorant or the emblems in CrossFire). Every lagswitch builds the streak (no time limit) up to ten: the emblem grows wings,
-; the title changes (LAG ... LAG GOD), the stars fill and then turn gold, a crown appears. Colours follow the
-; logo gradient. Its own click-through window; off by default (Lagswitch > Announcer). =====
+; lagswitch announcer
 LagAnnounce()
 {
     global LAOn, LAStreak, LALast, LAMode, LACur, LALagIcon, LALagFrame
@@ -10980,9 +10971,7 @@ LARenderNeon()
     DllCall("UpdateLayeredWindow", "Ptr", LAGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", LADC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
 }
 
-; ===== Misc > Fun: the kill screen effects (their own full-screen click-through window, about half a second each).
-; Styles: hit marker, blood splatter, slash, shatter, anime speed lines, shockwave, neon frame - or a random one every hit.
-; An edge vignette can pulse with every hit. Colour, intensity and length are set on the Fun tab. =====
+; misc > fun
 FunCols()
 {
     global FunColIdx, FunColor, SPLogoIdx, AccentColor
@@ -11424,10 +11413,7 @@ ToggleShakeLive(*)
     NLRequest()
 }
 
-; ===== Misc > Fun: hit effects on a key (no macro, nothing is sent to the game - the key still goes through).
-; Every press (for example M1 when you hit a nextbot with the baton) plays the screen effect, the shake and the sound of the
-; lagswitch freeze (with your settings from the Lagswitch page, but without freezing anything) and a kill announcer that shows
-; a different logo every time: KILL, DOUBLE KILL ... GODLIKE (10), then it starts over. Off by default. =====
+; misc > fun
 FunHit(*)
 {
     global FunOn
@@ -11859,7 +11845,7 @@ SPPageFun()
     SPParaCard("Every press of the hit key (M1 by default) plays these effects while Roblox is the active window. Nothing is sent to the game and nothing freezes: the click still goes through.", 70)
 }
 
-; ===== Screen shake while the game is frozen =====
+; screen shake while the game is frozen
 ; The game cannot change while it is frozen, so a picture of it is taken the moment the freeze starts and shaken (zoomed a tiny bit and moved
 ; around a few pixels) in a window right over the game. The window is gone again the moment the freeze ends.
 Global ShakeOn := false, ShakeStyle := 1, ShakeAmt := 40, ShakeWhere := 1, ShakeLen := 400, ShakeSyncLen := false, ShakeState := 0, ShakeMagOK := 0
@@ -11954,7 +11940,7 @@ ShakeTest(*)
     SetTimer(ShakeStop, -900)
 }
 
-; ===== Menu background: the game behind the menu can be blurred, and drifting effects can play behind the menu =====
+; menu background
 ; Only while the menu is open. This is done by a second small program (tools\fxhelper.ahk) with its own windows, so that drawing it never
 ; takes time away from the menu, the widgets or the companion. Two click-through windows sit between the game and the menu: the lower one
 ; lets Windows blur what is behind it, the upper one carries the darkening and the effect. Everything is off by default.
@@ -12857,7 +12843,7 @@ MenuFxSync()
 }
 SetTimer(MenuFxSync, 50)
 
-; ===== Macro HUD: a small click-through card that shows which macros are running =====
+; macro hud
 Global HUDW := 156, HUDMAXH := 272, HudH := 272
 Global HudGui := "", HudMemDC := 0, HudBmp := 0, HudG := 0
 Global HudVisible := false, HudBusy := false, HudTimerOn := false
@@ -13081,7 +13067,7 @@ HudEnsure()
     DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", HudG, "Int", 4)
 }
 
-; ===== Appear animation of the HUDs: when one is switched on it fades in and grows a little (about 0.4 s) =====
+; appear animation of the huds
 Global HAnimAt := Map(), HLeave := Map()
 
 HAnimStart(key)
@@ -13447,7 +13433,7 @@ HudRenderInner()
     }
     now := A_TickCount
     busy := false
-    ; --- animate each row and work out the card height
+    ; animate each row and work out the card height
     cy := 12
     anyOn := false
     ev := []
@@ -13495,7 +13481,7 @@ HudRenderInner()
         else
             HudGui.Move(, , HUDW, H)
     }
-    ; --- draw
+    ; draw
     prevG := NLG, prevA := NLAlphaPage
     NLG := HudG
     hap := HAnimAp("hud")
@@ -13580,7 +13566,7 @@ HudRenderInner()
     DllCall("UpdateLayeredWindow", "Ptr", HudGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", HudMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
 }
 
-; ----- the Skeet look of the macro HUD: a dark box with a coloured line on top, one row per running macro: name on the left, [On] on the right -----
+; the skeet look of the macro hud
 Global SkPatCache := Map(), SkFont := 0
 
 SkOutline(x, y, w, h, c, s := 1)
@@ -13693,7 +13679,7 @@ HudRenderSkeet(states, labels)
     DllCall("UpdateLayeredWindow", "Ptr", HudGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", HudMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
 }
 
-; ----- the Neverlose look of the macro HUD: a flat dark bar (blue icon + title) with a light, see-through list under it -----
+; the neverlose look of the macro hud
 Global NLHudFontT := 0, NLHudFontR := 0
 
 HudRenderNL(states, labels)
@@ -13766,7 +13752,7 @@ HudRenderNL(states, labels)
     DllCall("UpdateLayeredWindow", "Ptr", HudGui.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", sz, "Ptr", HudMemDC, "Ptr", src, "UInt", 0, "Ptr", bf, "UInt", 2)
 }
 
-; ===== Freeze effect: a soft full-screen glow (several styles) plus an optional countdown pill =====
+; freeze effect
 Global VigDbg := "", VigMinShow := 500, VigAnim := false, VigAnimSpd := 5, VigPhase := 0.0, VigStyle := 1, VigIntensity := 80, VigGrad := 1, VigTint := 0, VigPillOn := true, VigSound := false
 Global VigLastText := "", VigStops := "", VigGui := "", VigDC := 0, VigBmp := 0, VigG := 0, VigSig := "", VigState := 0, VigTimerOn := false
 Global VigPGui := "", VigPDC := 0, VigPBmp := 0, VigPG := 0
@@ -14131,7 +14117,7 @@ VigEdges(G, depth, peak)
     }
 }
 
-; ===== more freeze effects (styles 7 to 14) =====
+; more freeze effects
 ; Most of them are drawn again every few milliseconds while the freeze lasts (the game is paused then, so this costs no frames).
 ; T = milliseconds since the freeze began, dur = how long it lasts (0 = as long as the key is held).
 
@@ -14822,7 +14808,7 @@ HideFreezeVignette() {
         VigSoundPlay(false)
 }
 
-; ===== Performance HUD: a small separate card with the graphics card readouts (not part of the macro HUD) =====
+; performance hud
 Global PHUDW := 134, PHUDH := 92
 Global PHStyle := {id: "perf", bg: true, border: true, scale: 100, bstyle: 0, grad: 0}
 PHW() => Round(PHUDW * PHStyle.scale / 100)
@@ -15118,7 +15104,7 @@ PHudSecondTick()
 SetTimer(PHudSecondTick, 1000)
 DllCall("winmm\timeBeginPeriod", "UInt", 1)          ; timers tick every 1 ms instead of 15.6 ms: smooth widgets and companion
 
-; ===== Misc -> Input monitor: live keys, mouse speed graph and auto strafer activity =====
+; misc -> input monitor
 Global LiveDt := 40, LiveWheelAt := -9999, LiveWheelDir := 0, LiveHist := [], LiveStrafe := [], LiveKeyDown := Map(), LiveMag := 0.0, LiveWanted := false, LiveTimerOn := false
 Global LiveKeys := [["W", 0x57], ["A", 0x41], ["S", 0x53], ["D", 0x44], ["Space", 0x20], ["Ctrl", 0x11], ["Shift", 0x10], ["C", 0x43], ["LMB", 0x01], ["RMB", 0x02], ["MMB", 0x04], ["X1", 0x05], ["X2", 0x06]]
 
@@ -15653,7 +15639,7 @@ SPPageLive()
     SPParaCard("Everything here is read from your own keyboard and mouse input while this page is open; nothing is read from the game. The graph shows how fast you move the mouse (mouse counts per second), which is what drives the auto strafer.", 76)
 }
 
-; ===== On-screen widgets for the Input monitor: keys, mouse speed and auto strafer (separate small HUDs) =====
+; on-screen widgets for the input monitor
 Global WH := Map()
 WH["mbtn"] := {id: "mbtn", bg: false, border: false, scale: 100, bstyle: 0, grad: 0, w: 160, h: 196, on: false, custom: false, x: 304, y: A_ScreenHeight - 230, gui: "", dc: 0, bmp: 0, g: 0, thru: true}
 WH["keys"] := {id: "keys", bg: false, border: false, scale: 100, bstyle: 0, grad: 0, w: 270, h: 100, on: false, custom: false, x: 8, y: A_ScreenHeight - 200, gui: "", dc: 0, bmp: 0, g: 0, thru: true}
@@ -16393,7 +16379,7 @@ WHudDrawStrafer(W, H)
     }
 }
 
-; === EMERGENCY EXIT / RELOAD ===
+; emergency exit / reload
 ReloadAction(*)
 {
     global isAppMinimized, WH, ExitAnimBusy, ExitCardText
@@ -16525,7 +16511,7 @@ StartBindExit(*)
 
 RegisterSystemHotkeys()
 
-; ===== Classic / Skeet: the newer features, built from native controls =====
+; classic / skeet
 ; Each row is an object {page, kind, id, cy (classic y), col + y (skeet)}. AdvBuild creates them, AdvRefresh syncs them
 ; with the settings, AdvLayoutSkeet places them in the Skeet boxes.
 AdvReg(r, ctrls, texts, bgs)
@@ -16820,7 +16806,7 @@ AdvBuild()
     SwitchTab(CurrentTab)
 }
 
-; ===== FPS counter: PresentMon (Intel, open source) reads Roblox's frame times through Windows; the HUD shows them =====
+; fps counter
 ; PresentMon needs administrator rights to listen to Windows' graphics events, so a small helper script is started
 ; elevated (one Windows prompt per session). The helper runs PresentMon, turns its output into one tiny text file
 ; (fps.txt) and stops by itself when the macro closes. Nothing is injected into Roblox.
@@ -17264,7 +17250,7 @@ FpsWriteHelper()
 
 AdvBuild()
 
-; ===== Halloween design: top tab bar, glowing pumpkin, bats, a spider and cobwebs. Same pages as M0MENT4M. =====
+; halloween design
 Global HWTop := 154, HWBot := 568, HWView := 400
 
 HWPoly(pts, argb)
@@ -17534,7 +17520,7 @@ HWRender()
     NLPresent()
 }
 
-; ===== Companion: a little anime girl that lives on your screen (drawn in code, animated, reacts to your macros) =====
+; companion
 class CompHairSelC {
     items := ["Silver", "Pink", "Sky blue", "Midnight", "Blonde", "Violet"]
     Value => CompHair
@@ -18415,7 +18401,7 @@ CompDraw(t)
         CompDrawBubble()
 }
 
-; ----- petting: double-click a waifu while the menu is open (Waifus > Allow petting) -----
+; petting
 Global CompPetLinesElf := ["Ah... that feels nice.", "Hehe... thank you.", "You're very gentle.", "My head? ...Alright, just a little more.", "That's... rather pleasant.", "I wasn't expecting that. But I like it.", "Mm. You may continue.", "So warm..."]
 Global CompPetLinesBlair := ["Nya~ that tickles!", "Purr purr~ more please!", "Hehe, right behind the ears!", "Nyaa~ you're so sweet!", "Again! Again!", "Mrrrow~ I like you!", "Pet me more, nya~", "Hehe, I'm melting~"]
 
@@ -18604,7 +18590,7 @@ CompDrawBubble()
     }
 }
 
-; ===== The waifu peeking over the top edge of the menu (Waifus > Peek over the menu) =====
+; the waifu peeking over the top edge of the menu
 ; Her own small window sits on the menu's top edge; everything below the edge is cut off, so she looks like she is behind
 ; the menu, holding on to it. She peeks up when the menu opens, ducks now and then and can be dragged along the edge.
 
