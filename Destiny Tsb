@@ -1,7 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #MaxThreads 255
-ProcessSetPriority("High")
+ProcessSetPriority("Normal")
 A_MaxHotkeysPerInterval := 99000000
 DllCall("Winmm.dll\timeBeginPeriod", "UInt", 1)
 SetKeyDelay(-1, -1)
@@ -3189,14 +3189,17 @@ WTick() {
         WTurnHist := []
     }
     ; keys and buttons: the hook's physical state sees keys a macro swallows, GetAsyncKeyState sees keys a macro sends
-    sig := ""
+    sig := "", settled := true
     for k in WKeys {
         d := ((DllCall("GetAsyncKeyState", "Int", k[2], "Short") & 0x8000) || GetKeyState(k[1], "P")) ? 1 : 0
         WDown[k[1]] := d
         sig .= d
         t := WAnimT.Get(k[1], 0)
         t += (d - t) * 0.55
-        WAnimT[k[1]] := (Abs(d - t) < 0.02) ? d : t
+        t := (Abs(d - t) < 0.02) ? d : t
+        WAnimT[k[1]] := t
+        if (t != d)
+            settled := false
     }
     if (sig != WLastSig)
         WFade := 10
@@ -3210,7 +3213,7 @@ WTick() {
     WQuiet := (WTurnAcc != 0) ? 0 : WQuiet + 1
     WTurnAcc := 0
     ; redraw only what changed (plus the release animation and the appear / leave animation)
-    busyKeys := WFade > 0 || InStr(sig, "1") || WIdle
+    busyKeys := WFade > 0 || !settled || WIdle
     now := A_TickCount
     for id, wd in Widgets {
         if (!wd.visible)
@@ -5262,7 +5265,7 @@ KFStart(style) {
     KFState := st
     KFRender()
     KFGui.Show("x0 y0 w" W " h" H " NA")
-    SetTimer(KFTick, 16)
+    SetTimer(KFTick, 33)
 }
 
 KFTick() {
@@ -5517,8 +5520,22 @@ MacroKey(key, fn, on, prefix := "") {
     if (key = "" || key = "LButton")
         return
     HotIfWinActive(GAME_EXE)
-    try Hotkey(prefix "*" key, fn, on ? "On" : "Off")
+    try Hotkey(prefix "*" key, MacroRun.Bind(fn), on ? "On" : "Off")
     HotIf()
+}
+
+; Destiny runs at normal priority, so its drawing never takes CPU time from the game; a macro gets high priority only
+; while it plays (its timing stays exact), then it goes back
+Global MacroBusy := 0
+MacroRun(fn, hk := "") {
+    global MacroBusy
+    if (MacroBusy++ = 0)
+        ProcessSetPriority("High")
+    try fn.Call(hk)
+    finally {
+        if (--MacroBusy = 0)
+            ProcessSetPriority("Normal")
+    }
 }
 
 
