@@ -4088,7 +4088,7 @@ OpenAdvancedColorPicker(pickerTitle, currentHex, applyCallback)
     Gap := 16
 
     RGBHexToHSV(currentHex, &h0, &s0, &v0)
-    state := {hue: h0, sat: s0, val: v0, svBmp: 0, dragMode: 0}
+    state := {hue: h0, sat: s0, val: v0, svBmp: 0, dragMode: 0, closed: false}
 
     pickGui := Gui("+AlwaysOnTop +Owner" NLGui.Hwnd, pickerTitle)
     pickHwnd := pickGui.Hwnd
@@ -4141,7 +4141,8 @@ OpenAdvancedColorPicker(pickerTitle, currentHex, applyCallback)
 
     OnHexEditChange(*)
     {
-        if (updatingFromPicker)
+        Critical                                  ; (Apply or close must wait until the picker has finished updating)
+        if (updatingFromPicker || state.closed)
             return
         raw := Trim(hexEdit.Value)
         raw := RegExReplace(raw, "^(#|0x|0X)", "")
@@ -4188,6 +4189,9 @@ OpenAdvancedColorPicker(pickerTitle, currentHex, applyCallback)
 
     PollDrag()
     {
+        Critical
+        if (state.closed)
+            return
         if (!WinExist("ahk_id " pickHwnd)) {          ; the picker was closed from outside (for example by a design change): stop everything
             CleanUp()
             return
@@ -4212,6 +4216,9 @@ OpenAdvancedColorPicker(pickerTitle, currentHex, applyCallback)
 
     PickerClick(wParam, lParam, msg, hwnd)
     {
+        Critical
+        if (state.closed)
+            return
         if (!WinExist("ahk_id " pickHwnd)) {
             CleanUp()
             return
@@ -4236,6 +4243,7 @@ OpenAdvancedColorPicker(pickerTitle, currentHex, applyCallback)
 
     CleanUp()
     {
+        state.closed := true
         try OnMessage(0x201, PickerClick, 0)
         SetTimer(PollDrag, 0)
         if (state.svBmp) {
