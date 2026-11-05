@@ -2079,6 +2079,7 @@ HudRenderInner() {
     global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked
     if (!HudVisible || !IsObject(HudGui))
         return
+    UCacheTrim()
     now := A_TickCount
     busy := false
     ; appear / leave
@@ -2302,8 +2303,12 @@ UpdateHudPosition(*) => UPickHudPos(HudPosDDL.Value)
 
 KeepHudOnTop() {
     global HudGui, HudVisible
-    if (HudVisible && IsObject(HudGui))
-        try WinSetAlwaysOnTop(1, "ahk_id " HudGui.Hwnd)
+    if (!HudVisible || !IsObject(HudGui))
+        return
+    try {
+        if (!(WinGetExStyle("ahk_id " HudGui.Hwnd) & 0x8))
+            WinSetAlwaysOnTop(1, "ahk_id " HudGui.Hwnd)
+    }
 }
 
 
@@ -2378,6 +2383,7 @@ TTick() {
 
 TRender() {
     global TList, TS, TW, TH, TGui, UG, UAlpha, F_B, F_Sm, F_Icon
+    UCacheTrim()
     prevG := UG, prevA := UAlpha
     UG := TS.g
     DllCall("gdiplus\GdipGraphicsClear", "Ptr", UG, "UInt", 0)
@@ -3226,6 +3232,7 @@ WRenderInner(wd) {
     global UG, UAlpha, HudOpacity, RecState
     if (!wd.visible || !IsObject(wd.gui) || RecState != "idle")
         return
+    UCacheTrim()
     now := A_TickCount
     ap := 1.0
     if (wd.leaveAt) {
@@ -4828,6 +4835,7 @@ VigRender() {
 
 VigRenderInner() {
     global VigS, VigStyle, VigTint, VignetteThickness, VigSig, VigGrad, VigAnimSpd, VigPhase, VigDirty, VigState
+    UCacheTrim()
     G := VigS.g
     T := IsObject(VigState) ? A_TickCount - VigState.t0 : 0
     fdur := IsObject(VigState) ? VigState.dur : 0
