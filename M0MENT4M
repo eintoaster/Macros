@@ -42,12 +42,6 @@ Global HudPosition := "Top-Left"
 Global BlinkTimers := Map()
 Global AllTextControls := []
 Global AllBgControls := []
-Global RainbowSegCount := 40
-Global RainbowBarHeight := 4
-Global RainbowHueOffset := 0
-Global RainbowBarW := 480
-Global RainbowCanvas := "", RainbowMemDC := 0, RainbowBmp := 0, RainbowBmpW := 0
-Global RainbowBarSegments := []
 
 ; macro states & keys
 JumpKey := "Space"
@@ -97,11 +91,7 @@ Global IsSlideChecked := false
 Global IsSlideBehindChecked := false
 Global SlideTurnAmount := 1400
 Global SlideTurnedBehind := false
-Global TipMap := Map()
-Global TipLastCtl := 0
-Global TipHoverStart := 0
-Global TipShownCtl := 0
-Global CurrentDesign := "Classic", StartDesign := "M0MENT4M", SPSkin := ""
+Global CurrentDesign := "", StartDesign := "M0MENT4M", SPSkin := ""
 Global VigSoundIdx := 1, VigSoundFile := "", VigVol := 100, VigMulti := [], VigMultiLast := 0, BurstSyncSound := false, BurstSyncPill := true
 Global SPCust := Map(), SPDesignApplying := false
 Global CompOn := false, CompScale := 100, CompX := 0, CompY := 0, CompCustom := false, CompHair := 1, CompHat := true
@@ -187,20 +177,9 @@ class CompStyleSelC {
     }
 }
 Global CompStyleSel := CompStyleSelC()
-Global PreDesignColors := ""
-Global PanelBorderPx := 2
 Global FadeAlpha := 255, FadeFrom := 255, FadeTo := 255, FadeStart := 0
-Global AnimMoves := Map()
-Global HoverMap := Map(), HoverAnim := Map(), HoverCur := 0
 Global Intro := ""
-Global LayoutMode := "classic"
-Global SkeetPages := [[], [], [], [], [], [], []]
-Global AdvRows := []
-Global SkeetGroups := []
-Global SkeetChrome := []
-Global SkeetTabs := []
-Global SkeetOnly := []
-Global OrigPos := Map()
+Global LayoutMode := ""
 Global IsBhopChecked := false
 Global IsStrafeChecked := false
 Global IsComboChecked := false
@@ -253,28 +232,6 @@ IsMacrosLocked := false
 MainGui := Gui("+AlwaysOnTop -Caption +ToolWindow -Theme +Resize +MinSize480x860", "M0MENT4M")
 MainGui.BackColor := "0x111111"
 
-; skeet-only chrome
-FrameBrd1 := MainGui.Add("Text", "x0 y0 w10 h10 Background000000", "")
-FrameBrd2 := MainGui.Add("Text", "x1 y1 w10 h10 Background2E2E2E", "")
-FrameBrd3 := MainGui.Add("Text", "x2 y2 w10 h10 Background0D0D0D", "")
-FrameBg := MainGui.Add("Text", "x3 y3 w10 h10 Background" PanelColor, "")
-TabDivider := MainGui.Add("Text", "x78 y32 w1 h10 Background2A2A2A", "")
-SkeetChrome.Push(FrameBrd1, FrameBrd2, FrameBrd3, FrameBg, TabDivider)
-SkeetOnly.Push(FrameBrd1, FrameBrd2, FrameBrd3, FrameBg, TabDivider)
-_gbDefs := [[1, 1, "Movement"], [1, 2, "Movement Settings"], [2, 1, "Macro Keybinds"], [2, 2, "Keybind Tips"]
-          , [3, 1, "Lagswitch"], [3, 2, "Ticks && Vignette"], [4, 1, "Colors && Themes"], [4, 2, "HUD && Overlay"], [4, 2, "System Hotkeys"]
-          , [5, 1, "Information"], [5, 2, "Changelog && Notes"], [6, 1, "Config Manager"], [6, 2, "Storage && Config Info"]
-          , [3, 2, "Freeze Effect"], [4, 1, "HUD Style"], [7, 1, "Performance HUD"], [7, 2, "On-screen Widgets"]]
-Loop _gbDefs.Length {
-    _pg := _gbDefs[A_Index][1]
-    _gOb := MainGui.Add("Text", "x0 y0 w10 h10 Background2E2E2E", "")
-    _gFb := MainGui.Add("Text", "x0 y0 w10 h10 Background" PanelColor, "")
-    _gTt := MainGui.Add("Text", "x0 y0 w10 h15 c0xE0E0E0 Background" PanelColor, _gbDefs[A_Index][3])
-    _gTt.SetFont("s8 Bold", "Tahoma")
-    SkeetGroups.Push({ob: _gOb, fb: _gFb, tt: _gTt, page: _pg, col: _gbDefs[A_Index][2], title: _gbDefs[A_Index][3]})
-    SkeetPages[_pg].Push(_gOb, _gFb, _gTt)
-    SkeetOnly.Push(_gOb, _gFb, _gTt)
-}
 TitleShadow := MainGui.Add("Text", "x8 y6 w280 h30 c0x000000 BackgroundTrans", "M0MENT4M")
 TitleShadow.SetFont("s18 Bold", "Arial Black")
 
@@ -298,17 +255,6 @@ BtnClose.OnEvent("Click", (*) => ExitWithAnimation())
 SidebarBg := MainGui.Add("Text", "x0 y38 w76 h602 Background0A0A0A", "")
 PanelBorderBg := MainGui.Add("Text", "x85 y47 w380 h593 Background2A2A2A", "")
 PanelFillBg := MainGui.Add("Text", "x87 y49 w376 h591 Background171717", "")
-MainGui.OnEvent("Size", GuiResize)
-
-; rainbow top border strip based on skeet menu
-Loop RainbowSegCount {
-    seg := MainGui.Add("Text", "x0 y0 w10 h" RainbowBarHeight, "")
-    seg.Visible := false
-    RainbowBarSegments.Push(seg)
-}
-; The strip is one control painted from a pre-rendered bitmap (cheap to scroll, see RainbowTick).
-RainbowCanvas := MainGui.Add("Text", "x0 y0 w480 h" RainbowBarHeight " Background000000", "")
-PositionRainbowBar(480)
 
 ; sidebar icon nav
 TabNames := ["MACROS", "KEYBINDS", "LAGSWITCH", "MISC", "INFO", "CONFIG", "PERFORMANCE"]
@@ -330,30 +276,6 @@ TikTokBtn := MainGui.Add("Text", "x13 y482 w50 h50 Center +0x200", "♪")
 TikTokBtn.SetFont("s18 Bold", "Segoe UI Symbol")
 TikTokBtn.Opt("Background" IconBgColor " c" AccentColor)
 TikTokBtn.OnEvent("Click", (*) => Run("https://www.tiktok.com/@yoshimixu3"))
-
-; skeet tab strip
-_skNames := ["MACRO", "BINDS", "LG", "MISC", "INFO", "CONFIG", "PERF"]
-_skGlyphs := ["⚡", "⌨", "⌛", "⚙", "ℹ", "💾", "⏱"]
-_skY := [36, 102, 168, 234, 300, 366, 432]
-Loop 7 {
-    _i := A_Index
-    _ac := MainGui.Add("Text", "x10 y" _skY[_i] " w3 h62 Background111111", "")
-    _tb := MainGui.Add("Text", "x13 y" _skY[_i] " w60 h62 Background111111", "")
-    _tb.OnEvent("Click", SwitchTab.Bind(_i))
-    _tg := MainGui.Add("Text", "x13 y" (_skY[_i] + 8) " w60 h26 Center +0x200 Background111111 c0x8C8C8C", _skGlyphs[_i])
-    _tg.SetFont("s15 Bold", "Segoe UI Symbol")
-    _tg.OnEvent("Click", SwitchTab.Bind(_i))
-    _tl := MainGui.Add("Text", "x13 y" (_skY[_i] + 36) " w60 h20 Center +0x200 Background111111 c0x666666", _skNames[_i])
-    _tl.SetFont("s7 Bold", "Tahoma")
-    _tl.OnEvent("Click", SwitchTab.Bind(_i))
-    SkeetTabs.Push({ac: _ac, tb: _tb, tg: _tg, tl: _tl})
-    SkeetChrome.Push(_ac, _tb, _tg, _tl)
-    SkeetOnly.Push(_ac, _tb, _tg, _tl)
-}
-Global SkeetTabY := _skY
-SkSlideBar := MainGui.Add("Text", "x10 y36 w3 h62 Background" AccentColor, "")
-SkeetChrome.Push(SkSlideBar)
-SkeetOnly.Push(SkSlideBar)
 
 ; screen overlay hud for macro indicators
 Global HudDots := []
@@ -497,19 +419,6 @@ PageControls[1].Push(ChkBBhop, LblBBhop)
 PageControls[1].Push(ChkSlide, LblSlide, ChkSlideBehind, LblSlideBehind, LblSlideTurn, SlideTurnSlider, ChkBhop, LblBhop, ChkBhopHold, LblBhopHold, ChkStrafe, LblStrafe, ChkCombo, LblCombo, ChkCSpam, LblCSpam, LblCSpamSpeed, CSpamSlider, ChkClick, LblClick, LblClickSpeed, ClickSlider, ChkSpinbot, LblSpinbot)
 
 ; hover tooltips
-AddTip2(ChkSlide, LblSlide, "Infinite slide. Turn on, then press the slide key in-game to start/stop it.")
-AddTip2(ChkSlideBehind, LblSlideBehind, "When infinite slide starts, snaps the camera 180 degrees behind you.`nTurns back when you stop the slide.")
-AddTip2(SlideTurnSlider, LblSlideTurn, "Mouse pixels used for the look-behind turn.`nTune it to your sensitivity until it turns exactly 180.")
-AddTip2(ChkBhop, LblBhop, "Auto bhop. Taps jump rapidly while active.`nPress the Bhop key to toggle it (or use Hold mode).")
-AddTip2(ChkBhopHold, LblBhopHold, "Auto bhops as long as you hold your Bhop Hold key.")
-AddTip2(ChkStrafe, LblStrafe, "Auto strafer. Holds W and presses A/D depending on which way you move your mouse.")
-AddTip2(ChkCombo, LblCombo, "Edash. Holds crouch and spams jump while active.")
-AddTip2(ChkCSpam, LblCSpam, "Spams the crouch key. Use the slider to set the speed.")
-AddTip2(CSpamSlider, LblCSpamSpeed, "Delay between crouch taps in ms. Lower = faster.")
-AddTip2(ChkClick, LblClick, "Auto clicker. Toggle with its key.")
-AddTip2(ClickSlider, LblClickSpeed, "Delay between clicks in ms. Lower = faster.")
-AddTip2(ChkSpinbot, LblSpinbot, "Continuously spins your camera while active.")
-SetTimer(TipPoll, 100)
 
 ; page 2: config
 p2a := MainGui.Add("Text", "x104 y193 w300 c0xD98484 BackgroundTrans", " ")
@@ -594,7 +503,7 @@ ThemeApplyBtn := MainGui.Add("Text", "x264 y701 w120 h23 Center +0x200", "APPLY 
 ThemeApplyBtn.Opt("Background" BgColor " c0xD98484")
 ThemeApplyBtn.OnEvent("Click", ApplyThemePreset)
 
-DesignDDL := MainGui.Add("DropDownList", "x104 y730 w150", ["M0MENT4M","Classic","Skeet","Neverlose","Halloween","Fatality","Radiance","Silentium"])
+DesignDDL := MainGui.Add("DropDownList", "x104 y730 w150", ["M0MENT4M","Fatality","Halloween","Radiance","Silentium"])
 DesignDDL.Opt("Background000000")
 DesignDDL.Value := 1
 DesignApplyBtn := MainGui.Add("Text", "x264 y730 w120 h23 Center +0x200", "APPLY DESIGN")
@@ -603,7 +512,6 @@ DesignApplyBtn.OnEvent("Click", ApplyDesignPreset)
 PageControls[4].Push(DesignDDL, DesignApplyBtn)
 AllTextControls.Push(DesignDDL, DesignApplyBtn)
 AllBgControls.Push(DesignDDL, DesignApplyBtn)
-AddTip(DesignApplyBtn, "Changes how the whole menu looks (fonts, borders, checkboxes).`nClassic = original look, Skeet = flat gamesense style. Macros are unaffected.")
 
 PageControls[4].Push(p2g, ColorSwatchBtn, p2h, BgSwatchBtn, p2i, IconBgSwatchBtn, p2j, PanelSwatchBtn, p2k, ThemeDDL, ThemeApplyBtn, p2colHeader, p2indic, ChkSidebarIndicators, p2notif, ChkStatusNotifs, p2hudpos, HudPosDDL, p2hudopacity, LblHudOpacity, HudOpacitySlider)
 PageControls[4].Push(p2a, p2sys, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMacroLockKey, p2e, p2f, BtnExitKey)
@@ -663,13 +571,6 @@ PageControls[2].Push(p3note)
 AllTextControls.Push(p3note)
 
 ; hover tooltips
-for _b in [BtnSlideKey, BtnBhopKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey, BtnBBhopKey]
-    AddTip(_b, "Click, then press a key or mouse button to bind it.`nESC clears the bind. Keys already in use are rejected.")
-AddTip(BtnBhopHoldKey, "The key you hold to bhop (default Space).`nClick, then press a key. ESC clears it.")
-AddTip2(p2b, BtnReloadKey, "Restarts the macro script.")
-AddTip2(p2c, BtnMinimizeKey, "Shows or hides this menu.")
-AddTip2(p2d, BtnMacroLockKey, "Panic key: turns every macro off.`nPress again to restore them.")
-AddTip2(p2f, BtnExitKey, "Closes the macro script completely.")
 
 ; page 4: misc
 p4a := MainGui.Add("Text", "x104 y95 w300 c0xD98484 BackgroundTrans", "LAGSWITCH (OP)")
@@ -823,41 +724,7 @@ for _c in [p2a, p2sys, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMac
     _c.Move(_cx, _cy - 110)
 }
 
-; skeet-only labels
-SkCfgInfoTitle := MainGui.Add("Text", "x0 y0 w200 h16 c0xE0E0E0 BackgroundTrans", "Active Configuration:")
-SkCfgInfoTitle.SetFont("s8 Bold", "Tahoma")
-SkCfgInfoText := MainGui.Add("Text", "x0 y0 w200 h200 c0x8C8C8C BackgroundTrans", "Configs are saved locally as JSON files in the configs folder.`n`nEvery setting is stored:`n- Macro toggles and options`n- Keybinds and mouse triggers`n- Colors, theme and design`n- Lagswitch and HUD setup`n`nLoading a config rebinds hotkeys and applies the design immediately.")
-SkCfgInfoText.SetFont("s7", "Tahoma")
-SkeetOnly.Push(SkCfgInfoTitle, SkCfgInfoText)
-
-SkBindsNote := MainGui.Add("Text", "x0 y0 w200 h100 c0x8C8C8C BackgroundTrans", "Click a [KEY], then press a key or mouse button to bind it.")
-SkBindsNote.SetFont("s8", "Tahoma")
-SkeetOnly.Push(SkBindsNote)
-
-SkeetPages[1].Push(ChkBBhop, LblBBhop, ChkSlide, LblSlide, ChkSlideBehind, LblSlideBehind, LblSlideTurn, SlideTurnSlider, ChkBhop, LblBhop, ChkBhopHold, LblBhopHold, ChkStrafe, LblStrafe, ChkCombo, LblCombo, ChkCSpam, LblCSpam, LblCSpamSpeed, CSpamSlider, ChkClick, LblClick, LblClickSpeed, ClickSlider, ChkSpinbot, LblSpinbot)
-SkeetPages[2].Push(p3i, BtnBBhopKey, p3a, BtnSlideKey, p3b, BtnBhopKey, p3hold, BtnBhopHoldKey, p3c, BtnStrafeKey, p3d, BtnComboKey, p3e, BtnCSpamKey, p3f, BtnClickKey, p3h, BtnSpinbotKey, SkBindsNote)
-SkeetPages[3].Push(p4c, BtnLagKey, p4b, FreezeEdit, ApplyBtn, TestBtn, ChkLagPrecision, LblLagPrecision, ChkLagHold, LblLagHold, StatusText, p4d, ChkLagBurst, LblLagBurst, LblLagBurstCount, LagBurstSlider, ChkLagVignette, LblLagVignette, VignetteSwatchBtn, LblVignetteThickness, VignetteThicknessSlider)
-SkeetPages[4].Push(p2g, ColorSwatchBtn, p2h, BgSwatchBtn, p2i, IconBgSwatchBtn, p2j, PanelSwatchBtn, p2k, ThemeDDL, ThemeApplyBtn, DesignDDL, DesignApplyBtn, p2indic, ChkSidebarIndicators, p2notif, ChkStatusNotifs, p2hudpos, HudPosDDL, p2hudopacity, LblHudOpacity, HudOpacitySlider, p2b, BtnReloadKey, p2c, BtnMinimizeKey, p2c2, p2d, BtnMacroLockKey, p2e, p2f, BtnExitKey)
-SkeetPages[5].Push(p5a, p5b, p5d, p5e, p5f, p5g, p5k, p5h, p5diag, p5patch)
-SkeetPages[6].Push(SaveLbl, SaveNameInput, SaveBtn, LoadLbl, ConfigDDL, LoadBtn, DeleteBtn, ResetBtn, SkCfgInfoTitle, SkCfgInfoText)
-
-; smooth hover highlight on buttons
-for _hb in [BtnSlideKey, BtnBhopKey, BtnBhopHoldKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey, BtnLagKey
-          , BtnReloadKey, BtnMinimizeKey, BtnMacroLockKey, BtnExitKey, SaveBtn, LoadBtn, DeleteBtn, ResetBtn, ApplyBtn, TestBtn
-          , ThemeApplyBtn, DesignApplyBtn, ChkSidebarIndicators, ChkStatusNotifs]
-    RegisterHover([_hb], () => BgColor)
-for _hb in [BtnMin, BtnClose, TikTokBtn]
-    RegisterHover([_hb], () => IconBgColor)
-for _hb in SideBtns
-    RegisterHover([_hb], () => (LayoutMode = "classic") ? IconBgColor : "")
-for _idx, _t in SkeetTabs
-    RegisterHover([_t.tb, _t.tg, _t.tl], MakeTabBase(_idx))
-
 SwitchTab(1)
-OnMessage(0x0201, WM_LBUTTONDOWN)
-OnMessage(0x0200, HoverMouseMove)
-OnMessage(0x0214, SkeetOnSizing)     ; WM_SIZING: only sent while an edge/corner is being dragged
-OnMessage(0x0232, SkeetOnExitSize)   ; WM_EXITSIZEMOVE
 if (EnvGet("M0M_NOINTRO") = "1") {
     EnvSet("M0M_NOINTRO", "")
     ShowMenuStartup()
@@ -870,27 +737,8 @@ try DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", MainGui.Hwnd, "Int", 34, "Int
 DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x127, "Ptr", 0x10001, "Ptr", 0) ; WM_CHANGEUISTATE, UIS_SET|UISF_HIDEFOCUS
 
 SwitchTab(tabIndex, *) {
-    global PageControls, PageTitles, SideBtns, AccentBar, TabIconY, AccentColor, CurrentTab, IconBgColor, LayoutMode, SkeetOnly
+    global CurrentTab
     CurrentTab := tabIndex
-    if (LayoutMode = "nl")          ; the drawn designs have their own pages (and a tab 8) and need nothing from the control pages
-        return
-    if (LayoutMode = "skeet") {
-        SwitchTabSkeet(tabIndex)
-        return
-    }
-    for i, ctrls in PageControls {
-        vis := (i = tabIndex)
-        for c in ctrls
-            c.Visible := vis
-        PageTitles[i].Visible := vis
-    }
-    for c in SkeetOnly
-        c.Visible := false
-    for i, b in SideBtns {
-        b.Opt("Background" IconBgColor " c" AccentColor)
-        b.Redraw()
-    }
-    AnimMoveY(AccentBar, TabIconY[tabIndex])
 }
 
 ; config persistence
@@ -1553,8 +1401,6 @@ LoadConfigInner() {
         RegisterSystemHotkeys()
     }
     UpdateSidebarIndicators()
-
-    AdvRefresh()
     ShowStatus("Config loaded: " configName, "0x082A13", 200)
     KeyConflictWarn()
 }
@@ -1780,7 +1626,6 @@ ResetDefaults(*) {
 
     RegisterSystemHotkeys()
     RegisterHotkeys()
-    AdvRefresh()
     ShowStatus("Reset to defaults!", "0x2A0808", 200)
 }
 
@@ -2089,43 +1934,6 @@ SetBhopHoldHotkey(on)
     if (BhopHoldKey == "")
         return
     SyncMacroHotkeys()                      ; (the hold hotkey follows "bhop is running": it must not fire on the Space presses of the macro itself)
-}
-
-AddTip(ctrl, text)
-{
-    global TipMap
-    TipMap[ctrl.Hwnd] := text
-}
-
-AddTip2(ctrlA, ctrlB, text)
-{
-    AddTip(ctrlA, text)
-    AddTip(ctrlB, text)
-}
-
-TipPoll()
-{
-    global MainGui, TipMap, TipLastCtl, TipHoverStart, TipShownCtl
-    MouseGetPos(, , &win, &ctl, 2)
-    if (win != MainGui.Hwnd || !ctl || !TipMap.Has(ctl)) {
-        if (TipShownCtl)
-            ToolTip()
-        TipLastCtl := 0
-        TipShownCtl := 0
-        return
-    }
-    if (ctl != TipLastCtl) {
-        if (TipShownCtl)
-            ToolTip()
-        TipLastCtl := ctl
-        TipHoverStart := A_TickCount
-        TipShownCtl := 0
-        return
-    }
-    if (TipShownCtl != ctl && A_TickCount - TipHoverStart > 450) {
-        ToolTip(TipMap[ctl])
-        TipShownCtl := ctl
-    }
 }
 
 ; lagswitch functions
@@ -2566,64 +2374,6 @@ A_TrayMenu.Add("Exit", ExitWithAnimation)
 A_TrayMenu.Default := "Show / Hide M0MENT4M"
 A_TrayMenu.ClickCount := 1
 
-WM_LBUTTONDOWN(wParam, lParam, msg, hwnd) {
-    if (hwnd == MainGui.Hwnd)
-        PostMessage(0xA1, 2, 0, MainGui.Hwnd)
-}
-
-PositionRainbowBar(width) {
-    global RainbowCanvas, RainbowBarHeight, RainbowBarW
-    RainbowBarW := width
-    RainbowCanvas.Move(0, 0, width, RainbowBarHeight)
-    RainbowTick()
-}
-
-; One rainbow cycle at a fixed size (stored twice side by side so it scrolls seamlessly). It is stretched to
-; the bar width when drawn, so resizing the window never has to rebuild it.
-BuildRainbowBitmap() {
-    global RainbowMemDC, RainbowBmp, RainbowBmpW
-    if (RainbowBmp)
-        return
-    w := 720
-    RainbowMemDC := DllCall("CreateCompatibleDC", "Ptr", 0, "Ptr")
-    bi := Buffer(40, 0)
-    NumPut("int", 40, bi, 0)
-    NumPut("int", w * 2, bi, 4)
-    NumPut("int", -4, bi, 8)
-    NumPut("short", 1, bi, 12)
-    NumPut("short", 32, bi, 14)
-    pBits := 0
-    hBmp := DllCall("CreateDIBSection", "Ptr", RainbowMemDC, "Ptr", bi, "UInt", 0, "Ptr*", &pBits, "Ptr", 0, "UInt", 0, "Ptr")
-    Loop w * 2 {
-        x := A_Index - 1
-        HSVtoRGBValues(Mod(x / w * 360, 360), 1, 1, &R, &G, &B)
-        px := B | (G << 8) | (R << 16) | (255 << 24)
-        Loop 4
-            NumPut("UInt", px, pBits, ((A_Index - 1) * w * 2 + x) * 4)
-    }
-    DllCall("SelectObject", "Ptr", RainbowMemDC, "Ptr", hBmp, "Ptr")
-    RainbowBmp := hBmp
-    RainbowBmpW := w
-}
-
-; Scrolls the menu's rainbow strip (same speed as the intro). Runs only while the menu is visible.
-RainbowTick() {
-    global RainbowCanvas, RainbowMemDC, RainbowBarHeight, RainbowBmpW, RainbowBarW
-    if (LayoutMode = "nl")
-        return
-    if (!RainbowBmpW) {
-        BuildRainbowBitmap()
-        if (!RainbowBmpW)
-            return
-    }
-    shift := Floor(Mod(A_TickCount * 0.25, 360) / 360 * RainbowBmpW)
-    hdc := DllCall("GetDC", "Ptr", RainbowCanvas.Hwnd, "Ptr")
-    DllCall("SetStretchBltMode", "Ptr", hdc, "Int", 3)
-    DllCall("StretchBlt", "Ptr", hdc, "Int", 0, "Int", 0, "Int", RainbowBarW, "Int", RainbowBarHeight
-        , "Ptr", RainbowMemDC, "Int", shift, "Int", 0, "Int", RainbowBmpW, "Int", RainbowBarHeight, "UInt", 0x00CC0020)
-    DllCall("ReleaseDC", "Ptr", RainbowCanvas.Hwnd, "Ptr", hdc)
-}
-
 HSVtoHex(h) {
     h := Mod(h, 360)
     c := 255
@@ -2641,25 +2391,6 @@ HSVtoHex(h) {
     else
         r := c, g := 0, b := x
     return Format("{:02X}{:02X}{:02X}", Round(r), Round(g), Round(b))
-}
-
-GuiResize(GuiObj, MinMax, Width, Height) {
-    global SidebarBg, PanelBorderBg, PanelFillBg, BtnMin, BtnClose
-    if (MinMax = -1)
-        return
-    if (LayoutMode = "skeet") {
-        SkeetResizeThrottled(Width, Height)
-        return
-    }
-    SidebarBg.Move(, , 76, Height - 38 - 10)
-    LayoutPanel(Width, Height)
-
-    closeX := Width - 34 - 12
-    minX := closeX - 34 - 4
-    BtnClose.Move(closeX)
-    BtnMin.Move(minX)
-
-    PositionRainbowBar(Width)
 }
 
 ; macro loops & hotkeys
@@ -3356,8 +3087,7 @@ InputKeyOrMouse()
 
 FormatKeyName(key)
 {
-    r := KeyNameCore(key)
-    return (LayoutMode = "skeet") ? "[" r "]" : r
+    return KeyNameCore(key)
 }
 
 KeyNameCore(key)
@@ -4232,7 +3962,7 @@ ShowStatus(text, colorHex, xPos, force := false)
     global CurrentDesign, ShowStatusNotifs, SPMenuAction, SPQuiet, LayoutMode, MainGui
     CompReact(text)
     ; every design only shows cards for what you do in the menu, plus a few important hotkey events (nothing while you play)
-    inMenu := SPMenuAction || (LayoutMode != "nl" && WinActive("ahk_id " MainGui.Hwnd))   ; a click inside the Classic / Skeet window counts too
+    inMenu := SPMenuAction
     if ((inMenu && !(SPQuiet && InStr(text, "UPDATED"))) || InStr(text, "ALREADY USED") || InStr(text, "MACROS: LOCKED") || InStr(text, "MACROS: RESTORED"))
         SPToast(text, xPos)
 }
@@ -4360,7 +4090,7 @@ OpenAdvancedColorPicker(pickerTitle, currentHex, applyCallback)
     RGBHexToHSV(currentHex, &h0, &s0, &v0)
     state := {hue: h0, sat: s0, val: v0, svBmp: 0, dragMode: 0}
 
-    pickGui := Gui("+AlwaysOnTop +Owner" (LayoutMode = "nl" ? NLGui.Hwnd : MainGui.Hwnd), pickerTitle)
+    pickGui := Gui("+AlwaysOnTop +Owner" NLGui.Hwnd, pickerTitle)
     pickHwnd := pickGui.Hwnd
     pickGui.BackColor := "0x111111"
     pickGui.SetFont("s9 c0xC8C8C8", "Consolas")
@@ -4659,7 +4389,6 @@ ApplyPanelColor(hex)
     PanelFillBg.Opt("Background" hex)
     PanelFillBg.Redraw()
 
-    SkeetRecolor()
     ShowStatus("MENU BACKGROUND UPDATED", "0x1A1A1A", 500)
 }
 
@@ -4725,18 +4454,8 @@ ApplyThemePreset(*)
 ; Puts the four colours back to what the current design looks like by itself.
 ResetDesignColors(*)
 {
-    global CurrentDesign, SPCust, SPDesignApplying
-    if (CurrentDesign = "Classic") {
-        SPDesignApplying := true
-        try {
-            ApplyAccentColor("D98484")
-            ApplyBgColor("000000")
-            ApplyIconBgColor("000000")
-            ApplyPanelColor("111111")
-        } finally
-            SPDesignApplying := false
-    } else
-        ApplyDesign(CurrentDesign)
+    global CurrentDesign, SPCust
+    ApplyDesign(CurrentDesign)
     SPCust.Clear()
     WHudResetColors()
     try NLRequest()
@@ -4745,10 +4464,7 @@ ResetDesignColors(*)
 
 ; design presets
 Global DesignPresets := Map(
-    "Classic", Map("layout", "classic", "font", "Consolas", "size", 9, "check", "tick", "borderPx", 2, "title", "big", "rainbowH", 4, "borderColor", "", "colors", ""),
-    "Skeet",   Map("layout", "skeet", "font", "Tahoma",   "size", 8, "check", "fill", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "2E2E2E", "colors", ["A2D615", "111111", "161616", "141414"]),
     "M0MENT4M", Map("layout", "nl", "style", "sp", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["10B981", "EEF0F3", "FFFFFF", "FFFFFF"]),
-    "Neverlose", Map("layout", "nl", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["4D7DFF", "08090F", "0B1223", "0A0D17"]),
     "Fatality", Map("layout", "nl", "style", "fat", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["EB055A", "1C1437", "1F1942", "1C1437"]),
     "Halloween", Map("layout", "nl", "style", "sp", "skin", "hw", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["FF7A18", "0A0610", "1A0F24", "120A1C"]),
     "Radiance", Map("layout", "nl", "style", "sp", "skin", "rd", "font", "Segoe UI", "size", 9, "check", "tick", "borderPx", 1, "title", "small", "rainbowH", 3, "borderColor", "", "colors", ["7C6CFF", "10122A", "161A3A", "12152F"]),
@@ -4757,18 +4473,11 @@ Global DesignPresets := Map(
 
 CheckPairs()
 {
-    global AdvRows
     a := [[ChkSlide, IsSlideChecked], [ChkBhop, IsBhopChecked], [ChkStrafe, IsStrafeChecked], [ChkCombo, IsComboChecked],
             [ChkCSpam, IsCSpamChecked], [ChkClick, IsClickChecked], [ChkSpinbot, IsSpinbotChecked], [ChkBBhop, IsBBhopChecked],
             [ChkBhopHold, IsBhopHoldChecked], [ChkSlideBehind, IsSlideBehindChecked],
             [ChkLagPrecision, IsLagPrecisionChecked], [ChkLagBurst, IsLagBurstChecked],
             [ChkLagHold, IsLagHoldChecked], [ChkLagVignette, IsLagVignetteChecked]]
-    for r in AdvRows {
-        if (r.kind = "tog") {
-            g := r.getter
-            a.Push([r.chk, g() ? 1 : 0])
-        }
-    }
     return a
 }
 
@@ -4776,26 +4485,19 @@ RefreshChecks()
 {
     for pair in CheckPairs()
         SetChk(pair[1], pair[2])
-    AdvRefresh()
 }
 
 ; Draws a checkbox for the active design: tick = check mark on a dark box, fill = filled accent square.
 SetChk(ctrl, on)
 {
-    global DesignPresets, CurrentDesign, AccentColor, BgColor
-    if (DesignPresets[CurrentDesign]["check"] = "fill") {
-        ctrl.Text := ""
-        ctrl.Opt("Background" (on ? AccentColor : BgColor))
-    } else {
-        ctrl.Opt("Background" BgColor)
-        ctrl.Text := on ? "✓" : ""
-    }
+    global BgColor
+    ctrl.Opt("Background" BgColor)
+    ctrl.Text := on ? "✓" : ""
     ctrl.Redraw()
     RepaintCtrl(ctrl)
 }
 
-; In the Classic / Skeet layouts controls sit on top of panel controls (and see-through labels do not wipe their old text):
-; repaint that spot of the window, so a change shows at once and old text does not stay behind.
+; repaint that spot of the window
 RepaintCtrl(ctrl)
 {
     try {
@@ -4815,13 +4517,6 @@ LblSet(ctrl, txt)
     RepaintCtrl(ctrl)
 }
 
-LayoutPanel(w, h)
-{
-    global PanelBorderBg, PanelFillBg, PanelBorderPx
-    PanelBorderBg.Move(85, 47, w - 85 - 10, h - 47 - 10)
-    PanelFillBg.Move(85 + PanelBorderPx, 47 + PanelBorderPx, w - 85 - 10 - 2 * PanelBorderPx, h - 47 - 10 - 2 * PanelBorderPx)
-}
-
 ApplyDesignPreset(*)
 {
     global DesignDDL
@@ -4829,8 +4524,6 @@ ApplyDesignPreset(*)
     ApplyDesign(name, ColorsFollow)
     if (ColorsFollow)
         WHudResetColors()
-    if (ColorsFollow && name = "Classic")
-        ResetDesignColors()             ; Classic has no colours of its own in the table: it gets its usual dark/rose set
     ShowStatus("DESIGN: " name, "0x1A1A1A", 500)
 }
 
@@ -4847,102 +4540,36 @@ ToggleColorsFollow(*)
 ; applyColors = false keeps the current colors (used when a config supplies its own).
 ApplyDesign(name, applyColors := true)
 {
-    global DesignPresets, CurrentDesign, PreDesignColors, AccentColor, BgColor, IconBgColor, PanelColor
-    global AllTextControls, SideBtns, TikTokBtn, BtnMin, BtnClose, TitleText, TitleShadow, TitleGlow, PageTitles
-    global RainbowBarHeight, PanelBorderPx, MainGui, CurrentTab, DesignDDL, SPSkin
-    if (!DesignPresets.Has(name))
-        return
-    d := DesignPresets[name]
-    prev := CurrentDesign
-    CurrentDesign := name
-
+    global DesignPresets, CurrentDesign, MainGui, CurrentTab, DesignDDL, SPSkin, PanelColor
     global SPCust, SPDesignApplying
+    if (!DesignPresets.Has(name))                             ; (an old config with a design that no longer exists)
+        name := "M0MENT4M"
+    d := DesignPresets[name]
+    CurrentDesign := name
     if (applyColors) {
         SPCust.Clear()                  ; colours picked by hand go back to the new design's own look
         SPDesignApplying := true
         try {
-            if (IsObject(d["colors"])) {
-                if (!IsObject(PreDesignColors) && prev = "Classic")
-                    PreDesignColors := [AccentColor, BgColor, IconBgColor, PanelColor]
-                c := d["colors"]
-                ApplyAccentColor(c[1]), ApplyBgColor(c[2]), ApplyIconBgColor(c[3]), ApplyPanelColor(c[4])
-            } else if (IsObject(PreDesignColors)) {
-                c := PreDesignColors
-                PreDesignColors := ""
-                ApplyAccentColor(c[1]), ApplyBgColor(c[2]), ApplyIconBgColor(c[3]), ApplyPanelColor(c[4])
-            }
+            c := d["colors"]
+            ApplyAccentColor(c[1]), ApplyBgColor(c[2]), ApplyIconBgColor(c[3]), ApplyPanelColor(c[4])
         } finally
             SPDesignApplying := false
-    } else if (name = "Classic") {
-        PreDesignColors := ""
     }
-
-    ; Fonts. Glyph/icon controls, page titles and checkboxes keep their own fonts.
-    skip := Map()
-    for c in SideBtns
-        skip[c.Hwnd] := true
-    for c in [TikTokBtn, BtnMin, BtnClose, TitleText]
-        skip[c.Hwnd] := true
-    for c in PageTitles
-        skip[c.Hwnd] := true
-    for pair in CheckPairs()
-        skip[pair[1].Hwnd] := true
-    for c in AllTextControls {
-        if (skip.Has(c.Hwnd))
-            continue
-        try c.SetFont("s" d["size"] " norm", d["font"])
-    }
-    for c in [p2sys, p2colHeader, p2k, ConfigTitleLbl, p5patchHeader]
-        try c.SetFont("s" d["size"] " Bold", d["font"])
-    for c in PageTitles
-        try c.SetFont("s" (d["size"] + 2) " Bold", d["font"])
-    for c in AllTextControls
-        try c.Opt("c" AccentColor)
-
-    ; Title
-    if (d["title"] = "small") {
-        TitleShadow.Visible := false
-        TitleGlow.Visible := false
-        TitleText.SetFont("s9 Bold", "Tahoma")
-        TitleText.Move(14, 12, 200, 18)
-    } else {
-        TitleShadow.Visible := true
-        TitleGlow.Visible := true
-        TitleText.SetFont("s18 Bold", "Arial Black")
-        TitleText.Move(6, 4, 280, 30)
-    }
-
-    for c in [BtnSlideKey, BtnBhopKey, BtnBhopHoldKey, BtnStrafeKey, BtnComboKey, BtnCSpamKey, BtnClickKey, BtnSpinbotKey, BtnLagKey]
-        try c.SetFont(d["layout"] = "skeet" ? "s7 Bold" : "s" d["size"] " norm", d["layout"] = "skeet" ? "Consolas" : d["font"])
-
-    ; Layout (window size, tabs, boxes), frame + rainbow bar
-    RainbowBarHeight := d["rainbowH"]
-    PanelBorderPx := d["borderPx"]
-    oldSkin := (DesignPresets.Has(prev) && DesignPresets[prev]["layout"] = "nl") ? SPSkin : ""
-    if (d["layout"] = "nl") {
-        SPSkin := d.Has("skin") ? d["skin"] : ""
-        NLSetStyle(d.Has("style") ? d["style"] : "nl")
-        try NLRequest()
-        try CompSkinChanged()
-    }
-    RDDesignSwitched(oldSkin, d["layout"] = "nl" ? SPSkin : "")
-    ApplyLayout(d["layout"])
-    MainGui.GetClientPos(, , &cw, &ch)
-    if (LayoutMode = "classic")
-        LayoutPanel(cw, ch)
-    else if (LayoutMode = "skeet")
-        LayoutSkeet(cw, ch)
-    PositionRainbowBar(cw)
+    oldSkin := SPSkin
+    SPSkin := d.Has("skin") ? d["skin"] : ""
+    NLSetStyle(d["style"])
+    try NLRequest()
+    try CompSkinChanged()
+    RDDesignSwitched(oldSkin, SPSkin)
+    ApplyLayout()
     SPDesignApplying := true
     try ApplyPanelColor(PanelColor)
     finally SPDesignApplying := false
-
     if (CurrentTab > 7)
         CurrentTab := 4
     SwitchTab(CurrentTab)
     RefreshChecks()
     try DesignDDL.Choose(name)
-    DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
 }
 
 ; radiance design
@@ -5125,55 +4752,6 @@ RDDoodle(g, kind, cx, cy, s, rot, col)
 
 ; skeet layout engine
 
-SkeetStripBg()
-{
-    global PanelColor
-    return ShadeHex(Integer("0x" SubStr(PanelColor, 1, 2)), Integer("0x" SubStr(PanelColor, 3, 2)), Integer("0x" SubStr(PanelColor, 5, 2)), -6)
-}
-
-SkeetRecolor()
-{
-    global PanelColor, SkeetGroups, FrameBg, FrameBrd2, DesignPresets, CurrentDesign
-    border := DesignPresets[CurrentDesign]["borderColor"]
-    if (border = "")
-        border := "2E2E2E"
-    FrameBg.Opt("Background" PanelColor)
-    FrameBrd2.Opt("Background" border)
-    for g in SkeetGroups {
-        g.ob.Opt("Background" border)
-        g.fb.Opt("Background" PanelColor)
-        g.tt.Opt("Background" PanelColor)
-    }
-}
-
-CaptureOrigPos()
-{
-    global OrigPos, PageControls, BtnMin, BtnClose, TikTokBtn
-    if (OrigPos.Count > 0)
-        return
-    for ctrls in PageControls {
-        for c in ctrls {
-            c.GetPos(&x, &y, &w, &h)
-            OrigPos[c.Hwnd] := {c: c, x: x, y: y, w: w, h: h}
-        }
-    }
-    for c in [BtnMin, BtnClose, TikTokBtn] {
-        c.GetPos(&x, &y, &w, &h)
-        OrigPos[c.Hwnd] := {c: c, x: x, y: y, w: w, h: h}
-    }
-}
-
-RestoreOrigPos()
-{
-    global OrigPos
-    for hwnd, o in OrigPos {
-        if (o.c.Type = "DDL")
-            o.c.Move(o.x, o.y, o.w)
-        else
-            o.c.Move(o.x, o.y, o.w, o.h)
-    }
-}
-
 RefreshKeyButtons()
 {
     global TriggerKey, BhopKey, BhopHoldKey, StrafeKey, ComboKey, CSpamKey, ClickKey, SpinbotKey, LagKey
@@ -5194,334 +4772,21 @@ RefreshKeyButtons()
     BtnExitKey.Text := FormatKeyName(ExitKey)
 }
 
-SetMacroLabels(skeet)
-{
-    pairs := [[LblSlide, "INF SLIDE", "Infinite Slide"], [LblBhop, "AUTO BHOP", "Auto Bunnyhop"], [LblStrafe, "AUTO STRAFER", "Auto Strafer"]
-            , [LblCombo, "EDASH", "EDash"], [LblCSpam, "CROUCH SPAM", "Crouch Spam"], [LblClick, "AUTO CLICKER", "Auto Clicker"]
-            , [LblSpinbot, "SPINBOT", "Spinbot"], [LblBBhop, "BACKWARDS BHOP", "Backwards Bhop"], ]
-    for pr in pairs
-        pr[1].Text := skeet ? pr[3] : pr[2]
-    LblSet(LblCSpamSpeed, SpeedText("Crouch", CSpamSpeed))
-    LblSet(LblClickSpeed, SpeedText("Clicker", ClickSpeed))
-}
-
 SpeedText(kind, value)
 {
     return kind " speed: " value "ms"
 }
 
-ApplyLayout(mode)
+ApplyLayout()
 {
-    global LayoutMode, CurrentTab, MainGui, SidebarBg, PanelBorderBg, PanelFillBg, AccentBar, SideBtns, PageTitles, SkeetOnly, SkeetContentDone, SkeetGroupKey, NLX, NLY
-    if (mode = LayoutMode)
+    global LayoutMode, MainGui
+    if (LayoutMode = "nl")
         return
-    prev := LayoutMode
-    if (prev = "nl" && mode != "nl") {
-        NLHide()
-        MainGui.Move(NLX, NLY)
-    }
-    if (mode = "nl") {
-        MainGui.GetPos(&mx, &my)
-        LayoutMode := "nl"
-        MainGui.Hide()
-        NLShow(mx, my)
-        RefreshKeyButtons()
-        return
-    }
-    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 0, "Ptr", 0)
-    if (mode = "skeet") {
-        CaptureOrigPos()
-        LayoutMode := "skeet"
-        SkeetContentDone.Clear()
-        SkeetGroupKey.Clear()
-        for c in [SidebarBg, PanelBorderBg, PanelFillBg, AccentBar]
-            c.Visible := false
-        for c in SideBtns
-            c.Visible := false
-        for c in PageTitles
-            c.Visible := false
-        MainGui.Opt("+MinSize680x550 +0x02000000")   ; WS_CLIPCHILDREN: cheaper repaints while resizing
-        SkSlideBar.Move(, SkeetTabY[CurrentTab])
-        MainGui.Show("w680 h550 NA")
-        SetMacroLabels(true)
-    } else {
-        LayoutMode := "classic"
-        RestoreOrigPos()
-        for c in SkeetOnly
-            c.Visible := false
-        for c in [SidebarBg, PanelBorderBg, PanelFillBg, AccentBar]
-            c.Visible := true
-        for c in SideBtns
-            c.Visible := true
-        MainGui.Opt("+MinSize480x860 -0x02000000")
-        AccentBar.Move(, TabIconY[CurrentTab])
-        MainGui.Show("w480 h860 NA")
-        SetMacroLabels(false)
-    }
+    MainGui.GetPos(&mx, &my)
+    LayoutMode := "nl"
+    MainGui.Hide()
+    NLShow(mx, my)
     RefreshKeyButtons()
-    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 1, "Ptr", 0)
-}
-
-SwitchTabSkeet(i)
-{
-    global PageControls, PageTitles, SkeetPages, SkeetChrome, SkeetTabs, MainGui, IconBgColor, AccentColor
-    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 0, "Ptr", 0)
-    SkeetLayoutPage(i)
-    for ctrls in PageControls {
-        for c in ctrls
-            c.Visible := false
-    }
-    for t in PageTitles
-        t.Visible := false
-    for idx, pg in SkeetPages {
-        vis := (idx = i)
-        for c in pg
-            c.Visible := vis
-    }
-    for c in SkeetChrome
-        c.Visible := true
-    stripBg := SkeetStripBg()
-    for idx, t in SkeetTabs {
-        act := (idx = i)
-        bg := act ? IconBgColor : stripBg
-        t.ac.Opt("Background" stripBg)
-        t.tb.Opt("Background" bg)
-        t.tg.Opt("Background" bg " c" (act ? "FFFFFF" : "8C8C8C"))
-        t.tl.Opt("Background" bg " c" (act ? AccentColor : "666666"))
-    }
-    SkSlideBar.Opt("Background" AccentColor)
-    DllCall("SendMessage", "Ptr", MainGui.Hwnd, "UInt", 0x000B, "Ptr", 1, "Ptr", 0)
-    DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
-    AnimMoveY(SkSlideBar, SkeetTabY[i])
-}
-
-Global SkM := {W: 680, H: 550, colX1: 88, colX2: 383, colW1: 285, colW2: 285, colH: 492, btnHalfW: 124}
-Global SkeetContentDone := Map(), SkeetGroupKey := Map(), SkDragging := false
-Global SkLastLayout := 0, SkPendW := 680, SkPendH := 550
-
-; Re-lays out the chrome and the visible tab only. Other tabs are laid out lazily when you switch to them
-; (SwitchTabSkeet), which keeps dragging the window edge cheap.
-LayoutSkeet(W, H, full := true)
-{
-    global MainGui, FrameBrd1, FrameBrd2, FrameBrd3, FrameBg, TabDivider, BtnMin, BtnClose, TikTokBtn, SkM, CurrentTab, SkDragging
-
-    ; The big background rectangles and group boxes sit underneath everything else; moving them mid-drag makes
-    ; Windows repaint (and briefly blank) every control above them, so while an edge is being dragged they are
-    ; left alone and snapped to the final size when the mouse is released.
-    if (!SkDragging) {
-        Mv(FrameBrd1, 0, 0, W, H)
-        Mv(FrameBrd2, 1, 1, W - 2, H - 2)
-        Mv(FrameBrd3, 2, 2, W - 4, H - 4)
-        Mv(FrameBg, 3, 3, W - 6, H - 6)
-    }
-    Mv(BtnClose, W - 30, 7, 20, 18)
-    Mv(BtnMin, W - 52, 7, 20, 18)
-    PositionRainbowBar(W)
-    Mv(TabDivider, 78, 32, 1, H - 44)
-    Mv(TikTokBtn, 13, 498, 60, 38)
-
-    contentW := Max(580, W - 88 - 14)
-    colGap := 10
-    colW1 := (contentW - colGap) // 2
-    colW2 := contentW - colGap - colW1
-    SkM := {W: W, H: H, colX1: 88, colX2: 88 + colW1 + colGap, colW1: colW1, colW2: colW2
-          , colH: Max(492, H - 36 - 22), btnHalfW: (colW1 - 36) // 2}
-    SkeetLayoutPage(CurrentTab)
-    FlushMv()
-    if (full)
-        DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
-    else if (!SkDragging)
-        DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0081)
-}
-
-; Collects moves and applies them in one DeferWindowPos pass: one atomic update, far fewer repaints than
-; moving ~50 controls one by one.
-Global MvBatch := []
-Mv(ctrl, x, y, w := "", h := "")
-{
-    global MvBatch
-    MvBatch.Push([ctrl, x, y, w, h])
-}
-
-FlushMv()
-{
-    global MvBatch
-    items := MvBatch
-    MvBatch := []
-    if (items.Length = 0)
-        return
-    hdwp := DllCall("BeginDeferWindowPos", "Int", items.Length, "Ptr")
-    for it in items {
-        c := it[1]
-        if (c.Type = "DDL") {
-            if (it[4] = "")
-                c.Move(it[2], it[3])
-            else
-                c.Move(it[2], it[3], it[4])
-            continue
-        }
-        w := it[4], h := it[5]
-        if (w = "" || h = "") {
-            c.GetPos(, , &cw0, &ch0)
-            w := (w = "") ? cw0 : w
-            h := (h = "") ? ch0 : h
-        }
-        hdwp := DllCall("DeferWindowPos", "Ptr", hdwp, "Ptr", c.Hwnd, "Ptr", 0, "Int", it[2], "Int", it[3], "Int", w, "Int", h, "UInt", 0x14, "Ptr")
-    }
-    DllCall("EndDeferWindowPos", "Ptr", hdwp)
-}
-
-SkeetLayoutPage(i)
-{
-    global SkM, SkeetGroupKey, SkeetGroups, SkDragging
-    if (SkDragging)
-        return
-    key := SkM.W "x" SkM.H
-    if (SkeetGroupKey.Has(i) && SkeetGroupKey[i] = key)
-        return
-    SkeetGroupKey[i] := key
-    colX1 := SkM.colX1, colX2 := SkM.colX2, colW1 := SkM.colW1, colW2 := SkM.colW2
-    colH := SkM.colH, btnHalfW := SkM.btnHalfW
-
-    for g in SkeetGroups {
-        if (g.page != i)
-            continue
-        cx := (g.col = 1) ? colX1 : colX2
-        cw := (g.col = 1) ? colW1 : colW2
-        gy := 36, gh := colH
-        if (g.title = "HUD && Overlay")
-            gh := 212
-        else if (g.title = "Ticks && Vignette")
-            gh := 190
-        else if (g.title = "Freeze Effect")
-            gy := 238, gh := colH - 202
-        else if (g.title = "Colors && Themes")
-            gh := 262
-        else if (g.title = "HUD Style")
-            gy := 310, gh := 150
-        else if (g.title = "System Hotkeys")
-            gy := 260, gh := colH - 224
-        Mv(g.ob, cx, gy, cw, gh)
-        Mv(g.fb, cx + 1, gy + 1, cw - 2, gh - 2)
-        Mv(g.tt, cx + 14, gy - 7, StrLen(StrReplace(g.title, "&&", "&")) * 7 + 14, 15)
-    }
-
-    if (i = 1) {
-        Mv(ChkSlide, colX1 + 14, 58, 14, 14), Mv(LblSlide, colX1 + 36, 57, colW1 - 50, 16)
-        Mv(ChkBhop, colX1 + 14, 90, 14, 14), Mv(LblBhop, colX1 + 36, 89, colW1 - 50, 16)
-        Mv(ChkStrafe, colX1 + 14, 122, 14, 14), Mv(LblStrafe, colX1 + 36, 121, colW1 - 50, 16)
-        Mv(ChkCombo, colX1 + 14, 154, 14, 14), Mv(LblCombo, colX1 + 36, 153, colW1 - 50, 16)
-        Mv(ChkCSpam, colX1 + 14, 186, 14, 14), Mv(LblCSpam, colX1 + 36, 185, colW1 - 50, 16)
-        Mv(ChkClick, colX1 + 14, 218, 14, 14), Mv(LblClick, colX1 + 36, 217, colW1 - 50, 16)
-        Mv(ChkSlideBehind, colX2 + 14, 58, 14, 14), Mv(LblSlideBehind, colX2 + 36, 57, colW2 - 50, 16)
-        Mv(LblSlideTurn, colX2 + 36, 82, 112, 14), Mv(SlideTurnSlider, colX2 + 148, 78, colW2 - 162, 20)
-        Mv(ChkBhopHold, colX2 + 14, 110, 14, 14), Mv(LblBhopHold, colX2 + 36, 109, colW2 - 50, 16)
-        Mv(LblCSpamSpeed, colX2 + 36, 138, 112, 14), Mv(CSpamSlider, colX2 + 148, 134, colW2 - 162, 20)
-        Mv(LblClickSpeed, colX2 + 36, 162, 112, 14), Mv(ClickSlider, colX2 + 148, 158, colW2 - 162, 20)
-        Mv(ChkSpinbot, colX2 + 14, 192, 14, 14), Mv(LblSpinbot, colX2 + 36, 191, colW2 - 50, 16)
-        Mv(ChkBBhop, colX2 + 14, 216, 14, 14), Mv(LblBBhop, colX2 + 36, 215, colW2 - 50, 16)
-    } else if (i = 2) {
-        kbRows := [[p3a, BtnSlideKey], [p3b, BtnBhopKey], [p3hold, BtnBhopHoldKey], [p3c, BtnStrafeKey], [p3d, BtnComboKey], [p3e, BtnCSpamKey], [p3f, BtnClickKey], [p3h, BtnSpinbotKey], [p3i, BtnBBhopKey]]
-        for i, row in kbRows {
-            yy := 58 + (i - 1) * 38
-            Mv(row[1], colX1 + 14, yy, colW1 - 130, 16)
-            Mv(row[2], colX1 + colW1 - 110, yy - 3, 96, 22)
-        }
-        Mv(SkBindsNote, colX2 + 14, 58, colW2 - 28, 140)
-    } else if (i = 3) {
-        Mv(p4c, colX1 + 14, 58, 110, 16), Mv(BtnLagKey, colX1 + colW1 - 130, 55, 116, 20)
-        Mv(p4b, colX1 + 14, 90, colW1 - 28, 16), Mv(FreezeEdit, colX1 + 14, 108, colW1 - 28, 22)
-        Mv(ApplyBtn, colX1 + 14, 140, btnHalfW, 24), Mv(TestBtn, colX1 + 14 + btnHalfW + 8, 140, colW1 - 28 - btnHalfW - 8, 24)
-        Mv(ChkLagPrecision, colX1 + 14, 180, 14, 14), Mv(LblLagPrecision, colX1 + 36, 179, colW1 - 50, 16)
-        Mv(ChkLagHold, colX1 + 14, 208, 14, 14), Mv(LblLagHold, colX1 + 36, 207, colW1 - 50, 16)
-        Mv(StatusText, colX1 + 14, 246, colW1 - 28, 16)
-        Mv(p4d, colX1 + 14, 276, colW1 - 28, 44)
-        Mv(ChkLagBurst, colX2 + 14, 58, 14, 14), Mv(LblLagBurst, colX2 + 36, 57, colW2 - 50, 16)
-        Mv(LblLagBurstCount, colX2 + 36, 80, colW2 - 50, 14), Mv(LagBurstSlider, colX2 + 32, 96, colW2 - 44, 20)
-        Mv(ChkLagVignette, colX2 + 14, 134, 14, 14), Mv(LblLagVignette, colX2 + 36, 133, colW2 - 120, 16), Mv(VignetteSwatchBtn, colX2 + colW2 - 70, 131, 56, 20)
-        Mv(LblVignetteThickness, colX2 + 36, 160, colW2 - 50, 14), Mv(VignetteThicknessSlider, colX2 + 32, 176, colW2 - 44, 20)
-    } else if (i = 4) {
-        Mv(p2g, colX1 + 14, 58, colW1 - 80, 16), Mv(ColorSwatchBtn, colX1 + colW1 - 66, 55, 52, 20)
-        Mv(p2h, colX1 + 14, 88, colW1 - 80, 16), Mv(BgSwatchBtn, colX1 + colW1 - 66, 85, 52, 20)
-        Mv(p2i, colX1 + 14, 118, colW1 - 80, 16), Mv(IconBgSwatchBtn, colX1 + colW1 - 66, 115, 52, 20)
-        Mv(p2j, colX1 + 14, 148, colW1 - 80, 16), Mv(PanelSwatchBtn, colX1 + colW1 - 66, 145, 52, 20)
-        Mv(p2k, colX1 + 14, 184, colW1 - 28, 16)
-        Mv(ThemeDDL, colX1 + 14, 204, colW1 - 130), Mv(ThemeApplyBtn, colX1 + colW1 - 104, 203, 90, 24)
-        Mv(DesignDDL, colX1 + 14, 240, colW1 - 130), Mv(DesignApplyBtn, colX1 + colW1 - 104, 239, 90, 24)
-        Mv(p2indic, colX2 + 14, 58, colW2 - 90, 16), Mv(ChkSidebarIndicators, colX2 + colW2 - 76, 55, 62, 20)
-        Mv(p2notif, colX2 + 14, 92, colW2 - 90, 16), Mv(ChkStatusNotifs, colX2 + colW2 - 76, 89, 62, 20)
-        Mv(p2hudpos, colX2 + 14, 130, colW2 - 28, 16), Mv(HudPosDDL, colX2 + 14, 152, colW2 - 28)
-        Mv(p2hudopacity, colX2 + 14, 194, colW2 - 90, 16), Mv(LblHudOpacity, colX2 + colW2 - 76, 194, 62, 16)
-        Mv(HudOpacitySlider, colX2 + 14, 216, colW2 - 28, 20)
-        Mv(p2b, colX2 + 14, 284, colW2 - 130, 16), Mv(BtnReloadKey, colX2 + colW2 - 110, 281, 96, 22)
-        Mv(p2c, colX2 + 14, 322, colW2 - 130, 16), Mv(BtnMinimizeKey, colX2 + colW2 - 110, 319, 96, 22), Mv(p2c2, colX2 + 14, 340, colW2 - 28, 14)
-        Mv(p2d, colX2 + 14, 374, colW2 - 130, 16), Mv(BtnMacroLockKey, colX2 + colW2 - 110, 371, 96, 22), Mv(p2e, colX2 + 14, 392, colW2 - 28, 14)
-        Mv(p2f, colX2 + 14, 426, colW2 - 130, 16), Mv(BtnExitKey, colX2 + colW2 - 110, 423, 96, 22)
-    } else if (i = 5) {
-        Mv(p5a, colX1 + 14, 58, colW1 - 28, 16), Mv(p5b, colX1 + 14, 82, colW1 - 28, 16), Mv(p5d, colX1 + 14, 106, colW1 - 28, 46)
-        Mv(p5e, colX1 + 14, 168, colW1 - 28, 16), Mv(p5f, colX1 + 14, 190, colW1 - 28, 16), Mv(p5g, colX1 + 14, 212, colW1 - 28, 34)
-        Mv(p5k, colX1 + 14, 254, colW1 - 28, 16), Mv(p5h, colX1 + 14, 276, colW1 - 28, 16), Mv(p5diag, colX1 + 14, 300, colW1 - 28, 16)
-        Mv(p5patch, colX2 + 14, 58, colW2 - 28, colH - 70)
-    } else if (i = 6) {
-        Mv(SaveLbl, colX1 + 14, 58, colW1 - 28, 16), Mv(SaveNameInput, colX1 + 14, 80, colW1 - 106, 22), Mv(SaveBtn, colX1 + colW1 - 84, 79, 70, 24)
-        Mv(LoadLbl, colX1 + 14, 120, colW1 - 28, 16), Mv(ConfigDDL, colX1 + 14, 142, colW1 - 106), Mv(LoadBtn, colX1 + colW1 - 84, 141, 70, 24)
-        Mv(DeleteBtn, colX1 + 14, 185, btnHalfW, 24), Mv(ResetBtn, colX1 + 14 + btnHalfW + 8, 185, colW1 - 28 - btnHalfW - 8, 24)
-        Mv(SkCfgInfoTitle, colX2 + 14, 58, colW2 - 28, 16), Mv(SkCfgInfoText, colX2 + 14, 80, colW2 - 28, colH - 90)
-    }
-    AdvLayoutSkeet(i)
-    FlushMv()
-}
-
-; Window-edge drags fire a lot of size events: lay out at most every ~25ms, and always finish on the last size.
-SkeetResizeThrottled(W, H)
-{
-    global SkLastLayout, SkPendW, SkPendH
-    SkPendW := W, SkPendH := H
-    if (A_TickCount - SkLastLayout >= 25) {
-        SetTimer(SkeetResizeApply, 0)
-        SkeetResizeApply()
-    } else
-        SetTimer(SkeetResizeApply, -30)
-}
-
-SkeetResizeApply()
-{
-    global SkLastLayout, SkPendW, SkPendH
-    SkLastLayout := A_TickCount
-    LayoutSkeet(SkPendW, SkPendH, false)
-    SetTimer(SkeetSettle, -150)
-}
-
-; While an edge is being dragged (WM_SIZING is only sent for that, not for moving the window) nothing is re-laid
-; out, which keeps dragging smooth; the contents are scaled to the new size and repainted once on release.
-SkeetOnSizing(wParam, lParam, msg, hwnd)
-{
-    global SkDragging, MainGui, LayoutMode
-    if (hwnd != MainGui.Hwnd || LayoutMode != "skeet")
-        return
-    SkDragging := true
-}
-
-SkeetOnExitSize(wParam, lParam, msg, hwnd)
-{
-    global SkDragging, MainGui
-    if (!SkDragging || hwnd != MainGui.Hwnd)
-        return
-    SkDragging := false
-    SetTimer(SkeetResizeApply, 0)
-    MainGui.GetClientPos(, , &cw, &ch)
-    LayoutSkeet(cw, ch, true)
-    RainbowTick()
-}
-
-; Runs once the window has stopped changing size: one clean full repaint.
-SkeetSettle()
-{
-    global MainGui, LayoutMode
-    if (LayoutMode != "skeet")
-        return
-    DllCall("RedrawWindow", "Ptr", MainGui.Hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
-    RainbowTick()
 }
 
 ; animations
@@ -5533,7 +4798,6 @@ FadeWindow(show)
     if (show) {
         FadeApply(FadeAlpha)
         FadeShowWin()
-        SetTimer(RainbowTick, 48)
     }
     FadeStart := A_TickCount
     SetTimer(FadeTick, 15)
@@ -5552,7 +4816,6 @@ FadeTick()
         SetTimer(FadeTick, 0)
         if (FadeTo = 0) {
             FadeHideWin()
-            SetTimer(RainbowTick, 0)
         } else {
             NLWinK := 1.0, NLWinDy := 0.0
             FadeApply(255, true)
@@ -5560,17 +4823,13 @@ FadeTick()
     }
 }
 
-; The Neverlose design is its own window with per-pixel alpha, so fading goes through it instead of MainGui.
 FadeApply(a, final := false)
 {
     global MainGui, NLAlphaWin
     if (LayoutMode = "nl") {
         NLAlphaWin := a
         NLRequest()
-    } else if (final)
-        WinSetTransparent("Off", MainGui)
-    else
-        WinSetTransparent(a, MainGui)
+    }
 }
 
 ; The window you were in before the menu opened (usually the game); it gets the focus back when the menu hides.
@@ -5608,8 +4867,7 @@ FadeShowWin()
         NLGui.Show(), DllCall("ClipCursor", "Ptr", 0)
         SetTimer(NLInputTick, 16)
         NLRequest()
-    } else
-        MainGui.Show()
+    }
 }
 
 FadeHideWin()
@@ -5620,120 +4878,18 @@ FadeHideWin()
     if (LayoutMode = "nl") {
         NLShown := false
         NLGui.Hide()
-    } else
-        MainGui.Hide()
+    }
     ; hiding the menu would otherwise hand the focus to whatever window is behind it (e.g. the folder you started from)
     if (hadFocus && MenuPrevWin && DllCall("IsWindow", "Ptr", MenuPrevWin))
         try WinActivate("ahk_id " MenuPrevWin)
 }
 
-; Slides a control to a new Y with ease-out; calling it again mid-slide restarts from where it is.
-AnimMoveY(ctrl, toY, dur := 130)
-{
-    global AnimMoves
-    ctrl.GetPos(, &y)
-    if (y = toY && !AnimMoves.Has(ctrl.Hwnd))
-        return
-    AnimMoves[ctrl.Hwnd] := {c: ctrl, from: y, to: toY, start: A_TickCount, dur: dur}
-    SetTimer(AnimTick, 15)
-}
 
-AnimTick()
-{
-    global AnimMoves
-    done := []
-    for h, a in AnimMoves {
-        t := Min(1, (A_TickCount - a.start) / a.dur)
-        e := 1 - (1 - t) ** 3
-        a.c.Move(, Round(a.from + (a.to - a.from) * e))
-        if (t >= 1)
-            done.Push(h)
-    }
-    for h in done
-        AnimMoves.Delete(h)
-    if (AnimMoves.Count = 0)
-        SetTimer(AnimTick, 0)
-}
 
-RegisterHover(ctrls, baseFn)
-{
-    global HoverMap
-    g := {ctrls: ctrls, bfn: baseFn, t: 0, dir: 0}
-    for c in ctrls
-        HoverMap[c.Hwnd] := g
-}
 
-MakeTabBase(i)
-{
-    return () => (LayoutMode != "skeet" || CurrentTab = i) ? "" : SkeetStripBg()
-}
 
-HoverMouseMove(wParam, lParam, msg, hwnd)
-{
-    global HoverMap, HoverAnim, HoverCur
-    if (!HoverMap.Has(hwnd))
-        return
-    g := HoverMap[hwnd]
-    if (g = HoverCur)
-        return
-    if (IsObject(HoverCur)) {
-        HoverCur.dir := -1
-        HoverAnim[HoverCur] := true
-    }
-    HoverCur := g
-    g.dir := 1
-    HoverAnim[g] := true
-    SetTimer(HoverTick, 15)
-}
 
-HoverTick()
-{
-    global HoverMap, HoverAnim, HoverCur, MainGui
-    if (IsObject(HoverCur)) {
-        MouseGetPos(, , &win, &ctl, 2)
-        if (win != MainGui.Hwnd || !HoverMap.Has(ctl) || HoverMap[ctl] != HoverCur) {
-            HoverCur.dir := -1
-            HoverAnim[HoverCur] := true
-            HoverCur := 0
-        }
-    }
-    done := []
-    for g in HoverAnim {
-        base := g.bfn.Call()
-        if (base = "") {
-            g.t := 0, g.dir := 0
-            done.Push(g)
-            continue
-        }
-        g.t := Max(0, Min(1, g.t + g.dir * 0.15))
-        hex := LerpHex(base, LightenHex(base, 18), g.t)
-        for c in g.ctrls {
-            c.Opt("Background" hex)
-            c.Redraw()
-        }
-        if ((g.dir = 1 && g.t >= 1) || (g.dir = -1 && g.t <= 0)) {
-            g.dir := 0
-            done.Push(g)
-        }
-    }
-    for g in done
-        HoverAnim.Delete(g)
-    if (HoverAnim.Count = 0 && !IsObject(HoverCur))
-        SetTimer(HoverTick, 0)
-}
 
-LightenHex(hex, d)
-{
-    return ShadeHex(Integer("0x" SubStr(hex, 1, 2)), Integer("0x" SubStr(hex, 3, 2)), Integer("0x" SubStr(hex, 5, 2)), d)
-}
-
-LerpHex(a, b, t)
-{
-    r := Round(Integer("0x" SubStr(a, 1, 2)) + (Integer("0x" SubStr(b, 1, 2)) - Integer("0x" SubStr(a, 1, 2))) * t)
-    g := Round(Integer("0x" SubStr(a, 3, 2)) + (Integer("0x" SubStr(b, 3, 2)) - Integer("0x" SubStr(a, 3, 2))) * t)
-    bl := Round(Integer("0x" SubStr(a, 5, 2)) + (Integer("0x" SubStr(b, 5, 2)) - Integer("0x" SubStr(a, 5, 2))) * t)
-    return Format("{:02X}{:02X}{:02X}", r, g, bl)
-}
 
 ; startup intro
 ShowMenuStartup()
@@ -5749,15 +4905,9 @@ ShowMenuStartup()
     if (reloaded && StartDesign = "M0MENT4M")
         SetTimer(() => SPToast("Script reloaded", 7001, "on", "Everything is running again"), -900)
     SPLoadPrefs()
-    if (StartDesign != "Classic") {
-        NLAlphaWin := 0
-        ApplyDesign(StartDesign)
-        NLGui.Move((A_ScreenWidth - NLW) // 2, (A_ScreenHeight - NLH) // 2)
-        FadeWindow(true)
-        return
-    }
-    WinSetTransparent(0, MainGui)
-    MainGui.Show("w480 h860")
+    NLAlphaWin := 0
+    ApplyDesign(StartDesign)
+    NLGui.Move((A_ScreenWidth - NLW) // 2, (A_ScreenHeight - NLH) // 2)
     FadeWindow(true)
 }
 
@@ -5933,7 +5083,7 @@ IntroDrawInner(t, alpha, uEnd)
 }
 
 ; neverlose design
-Global NLStyle := "nl", SPDark := true, SPAvatar := 0, SPAvatarPath := "", SPScroll := 0.0, SPScrollT := 0.0, SPContentH := 0, NLFontB := 0, NLFontH := 0, NLFontLogo := 0
+Global NLStyle := "sp", SPDark := true, SPAvatar := 0, SPAvatarPath := "", SPScroll := 0.0, SPScrollT := 0.0, SPContentH := 0, NLFontB := 0, NLFontH := 0, NLFontLogo := 0
 Global NLGui := "", NLHwnd := 0, NLW := 690, NLH := 500, NLShown := false, NLInited := false
 Global NLToken := 0, NLG := 0, NLMemDC := 0, NLBmp := 0, NLFmt := 0, NLFmtW := 0
 Global NLFontUI := 0, NLFontSm := 0, NLFontTitle := 0, NLFontIcon := 0
@@ -5982,17 +5132,6 @@ NLShow(x, y)
     NLRequest()
 }
 
-NLHide()
-{
-    global NLGui, NLShown, NLInited
-    NLEditsStop()
-    if (!NLInited)
-        return
-    NLGui.GetPos(&nx, &ny)
-    NLX := nx, NLY := ny
-    NLShown := false
-    NLGui.Hide()
-}
 
 ; gdi+ setup
 NLGdipInit()
@@ -7105,8 +6244,6 @@ ExitAnimTick(first := false)
         NLWinDy := -26 * e                            ; ... drifting up a little ...
         NLAlphaWin := Round(255 * (1 - t) ** 1.5)     ; ... and fading away
         NLRequest()
-    } else {
-        try WinSetTransparent(Round(255 * (1 - t) ** 1.5), MainGui)
     }
     tc := Min(1.0, el / 1050)
     try ExitCardRender(tc)
@@ -7198,83 +6335,7 @@ NLRenderBody()
     else
         NLAnimating := true
 
-    if (NLStyle = "fat") {
-        NLRenderFat()
-        return
-    }
-    ; window
-    wc := SPCust.Has("panel") ? SPHexArr(SPCust["panel"]) : [9, 12, 21]
-    NLRR(0, 0, NLW, NLH, 10, NLC(wc[1], wc[2], wc[3], 238))
-    NLRRLine(0, 0, NLW, NLH, 10, NLC(255, 255, 255, 14))
-
-    ; title
-    tw := NLTextW("M0MENT4M", NLFontTitle)
-    NLText("M0MENT4M", 85 - tw / 2 + 1, 18, NLAccent(), NLFontTitle)
-    NLText("M0MENT4M", 85 - tw / 2, 18, NLWhite(), NLFontTitle)
-
-    ; sidebar
-    y := 70
-    NLText("MOVEMENT", 20, y, NLWhite(128), NLFontSm)
-    y += 18
-    NLSideTab(1, Chr(0x26A1), "Macros", y), y += 34
-    NLSideTab(2, Chr(0x2328), "Keybinds", y), y += 34
-    y += 12
-    NLText("UTILITY", 20, y, NLWhite(128), NLFontSm)
-    y += 18
-    NLSideTab(3, Chr(0x231B), "Lagswitch", y), y += 34
-    y += 12
-    NLText("SYSTEM", 20, y, NLWhite(128), NLFontSm)
-    y += 18
-    NLSideTab(4, Chr(0x2699), "Misc", y), y += 34
-    NLSideTab(8, Chr(0x2328), "System keys", y), y += 34
-    NLSideTab(5, Chr(0x2139), "Info", y), y += 34
-    NLSideTab(6, Chr(0x1F4BE), "Config", y), y += 34
-    NLSideTab(7, Chr(0x25D4), "Performance", y)
-
-    ; config block (bottom left)
-    NLLine(0, NLH - 50, 170, NLH - 50, NLC(255, 255, 255, 14))
-    NLDisc(30, NLH - 25, 15, NLFrameAct())
-    NLDisc(30, NLH - 29, 5, NLAccent())
-    NLRR(20, NLH - 21, 20, 8, 4, NLAccent())
-    NLText(A_UserName, 50, NLH - 41, NLWhite(), NLFontUI, 115, 32, 0, 1)
-
-    ; top bar
-    if (CurrentTab = 4 || CurrentTab = 3 || CurrentTab = 7) {
-        names := (CurrentTab = 3) ? ["Lagswitch", "Freeze effect", "Pill"] : (CurrentTab = 7) ? ["Overview", "HUD styles"] : ["Colors", "Overlay"]
-        NLRR(300, 20, 80 * names.Length, 25, 4, NLC(8, 9, 15))
-        NLRRLine(300, 20, 80 * names.Length, 25, 4, NLBorder())
-        for i, nm in names {
-            sx := 300 + (i - 1) * 80
-            st := NLLerp("sub" i, (NLSubTab = i) ? 1 : 0, 0.05)
-            NLRR(sx + 1, 21, 78, 23, 3, NLFrameAct(Round(205 * st)))
-            NLText(nm, sx, 20, (NLSubTab = i) ? NLWhite() : NLDim(), NLFontSm, 80, 25, 1, 1)
-            NLAddHit("sub" i, sx, 20, 80, 25, NLSetSub.Bind(i))
-        }
-    }
-    ; minimise / close
-    mh := NLLerp("min", (NLHoverId = "min") ? 1 : 0, 0.2)
-    ch := NLLerp("close", (NLHoverId = "close") ? 1 : 0, 0.2)
-    NLText(Chr(0x2013), NLW - 64, 14, NLC(130 + Round(125 * mh), 133 + Round(122 * mh), 143 + Round(112 * mh)), NLFontUI, 22, 22, 1, 1)
-    NLText(Chr(0x2715), NLW - 36, 14, NLC(130 + Round(125 * ch), 133 - Round(60 * ch), 143 - Round(70 * ch)), NLFontSm, 22, 22, 1, 1)
-    NLAddHit("min", NLW - 64, 14, 22, 22, MinimizeApp)
-    NLAddHit("close", NLW - 36, 14, 22, 22, NLQuit)
-
-    ; page content: fades in and slides up 5px
-    NLAlphaPage := NLPageAnim
-    cx := 185, cy := 81 - 5 * NLPageAnim
-    switch CurrentTab {
-        case 1: NLPageMacro(cx, cy)
-        case 2: NLPageBinds(cx, cy)
-        case 3: NLPageLag(cx, cy)
-        case 4: NLPageMisc(cx, cy)
-        case 5: NLPageInfo(cx, cy)
-        case 6: NLPageConfig(cx, cy)
-        case 7: NLPagePerf(cx, cy)
-        case 8: NLPageSysKeys(cx, cy)
-    }
-    NLAlphaPage := 1.0
-    NLHits := NLHitsB
-    NLPresent()
+    NLRenderFat()
 }
 
 ; the fatality look
@@ -7365,18 +6426,6 @@ NLRenderFat()
     NLAlphaPage := 1.0
     NLHits := NLHitsB
     NLPresent()
-}
-
-NLSideTab(n, icon, label, y)
-{
-    global CurrentTab, NLHoverId, NLFontUI, NLFontIcon
-    id := "tab" n
-    t := NLLerp(id, (CurrentTab = n) ? 1 : 0, 0.05)
-    hv := NLLerp(id "h", (NLHoverId = id) ? 1 : 0, 0.15)
-    NLRR(10, y, 150, 30, 5, NLFrameAct(Round(128 * t + 55 * hv * (1 - t))))
-    NLText(icon, 17, y, NLAccent(), NLFontIcon, 24, 30, 1, 1)
-    NLText(label, 45, y, NLWhite(), NLFontUI, 110, 30, 0, 1)
-    NLAddHit(id, 10, y, 150, 30, NLGoTab.Bind(n))
 }
 
 ; pages
@@ -7974,7 +7023,7 @@ SPDrawAvatar(x, y, size)
     DllCall("gdiplus\GdipDeletePath", "Ptr", path)
 }
 
-; Switches between the two Neverlose-engine looks ("nl" / "sp"), resizing the window if it is already open.
+; Switches between the two looks ("fat" / "sp"), resizing the window if it is already open.
 NLSetStyle(style)
 {
     global NLStyle, NLW, NLH, NLMinW, NLMinH, NLInited, NLGui, NLG, SPScroll, SPScrollT, LayoutMode
@@ -12953,13 +12002,7 @@ Global GpuLast := 0
 GpuTick()
 {
     global NLShown, NLStyle, CurrentTab, NLSubTab, GpuLast, LayoutMode
-    if (LayoutMode != "nl" && CurrentTab = 7 && GpuInit()) {
-        GpuPoll()
-        GpuLast := A_TickCount
-        AdvRefresh()
-        return
-    }
-    if (NLShown && ((NLStyle = "sp" && CurrentTab = 4 && NLSubTab = 3) || ((NLStyle = "nl" || NLStyle = "fat") && CurrentTab = 7))) {   ; the Performance page is showing live values
+    if (NLShown && ((NLStyle = "sp" && CurrentTab = 4 && NLSubTab = 3) || (NLStyle = "fat" && CurrentTab = 7))) {   ; the Performance page is showing live values
         GpuPoll()
         GpuLast := A_TickCount
         NLRequest()
@@ -16511,301 +15554,6 @@ StartBindExit(*)
 
 RegisterSystemHotkeys()
 
-; classic / skeet
-; Each row is an object {page, kind, id, cy (classic y), col + y (skeet)}. AdvBuild creates them, AdvRefresh syncs them
-; with the settings, AdvLayoutSkeet places them in the Skeet boxes.
-AdvReg(r, ctrls, texts, bgs)
-{
-    global AdvRows, PageControls, SkeetPages, AllTextControls, AllBgControls
-    r.ctrls := ctrls
-    for c in ctrls {
-        c.Visible := false
-        PageControls[r.page].Push(c)
-        if (r.sk)
-            SkeetPages[r.page].Push(c)
-    }
-    for c in texts
-        AllTextControls.Push(c)
-    for c in bgs
-        AllBgControls.Push(c)
-    AdvRows.Push(r)
-}
-
-AdvTip(id, ctrls*)
-{
-    global SPTips
-    if (SPTips.Has(id)) {
-        for c in ctrls
-            AddTip(c, SPTips[id])
-    }
-}
-
-AdvToggle(page, id, label, getter, fn, cy, col, y)
-{
-    global MainGui, BgColor, AccentColor
-    r := {page: page, kind: "tog", id: id, cy: cy, col: col, y: y, sk: true, getter: getter, fn: fn, label: label}
-    r.chk := MainGui.Add("Text", "x104 y" cy " w16 h16 Center +Border Background" BgColor " c" AccentColor, "")
-    r.chk.SetFont("s10 Bold")
-    r.lbl := MainGui.Add("Text", "x128 y" (cy + 2) " w" (id = "t_vsound" ? 100 : 276) " c0xD98484 BackgroundTrans", label)
-    h := AdvToggleClick.Bind(r)
-    r.chk.OnEvent("Click", h)
-    r.lbl.OnEvent("Click", h)
-    AdvTip(id, r.chk, r.lbl)
-    AdvReg(r, [r.chk, r.lbl], [r.chk, r.lbl], [r.chk])
-}
-
-AdvToggleClick(r, *)
-{
-    fn := r.fn
-    fn()
-    AdvRefresh()
-    g := r.getter
-    SPToast(r.label ": " (g() ? "ON" : "OFF"), 3000 + StrLen(r.label))
-}
-
-AdvSlider(page, id, label, mn, mx, getter, setter, cy, col, y)
-{
-    global MainGui
-    r := {page: page, kind: "sld", id: id, cy: cy, col: col, y: y, sk: true, getter: getter, setter: setter, label: label}
-    r.lbl := MainGui.Add("Text", "x104 y" (cy + 2) " w130 c0xD98484 BackgroundTrans", label)
-    r.sl := MainGui.Add("Slider", "x236 y" cy " w170 h20 Range" mn "-" mx " NoTicks", getter())
-    r.sl.OnEvent("Change", AdvSliderChange.Bind(r))
-    AdvTip(id, r.sl, r.lbl)
-    AdvReg(r, [r.lbl, r.sl], [r.lbl], [])
-}
-
-AdvSliderChange(r, ctl, *)
-{
-    v := ctl.Value
-    setter := r.setter
-    setter(v)
-    LblSet(r.lbl, r.label ": " v)
-}
-
-AdvDDL(page, id, label, sel, cy, col, y)
-{
-    global MainGui
-    r := {page: page, kind: "ddl", id: id, cy: cy, col: col, y: y, sk: true, sel: sel}
-    r.lbl := MainGui.Add("Text", "x104 y" (cy + 3) " w100 c0xD98484 BackgroundTrans", label)
-    r.ddl := MainGui.Add("DropDownList", "x206 y" cy " w190", sel.items)
-    r.ddl.Opt("Background000000")
-    r.ddl.Value := sel.Value
-    r.ddl.OnEvent("Change", AdvDDLChange.Bind(r))
-    AdvTip(id, r.ddl, r.lbl)
-    AdvReg(r, [r.lbl, r.ddl], [r.lbl, r.ddl], [r.ddl])
-}
-
-; a selector that sits to the right of the toggle above it (same row)
-AdvDDLNext(page, id, sel, cy, col, y)
-{
-    global MainGui
-    r := {page: page, kind: "ddlx", id: id, cy: cy, col: col, y: y, sk: true, sel: sel}
-    r.ddl := MainGui.Add("DropDownList", "x250 y" cy " w150", sel.items)
-    r.ddl.Opt("Background000000")
-    r.ddl.Value := sel.Value
-    r.ddl.OnEvent("Change", AdvDDLChange.Bind(r))
-    AdvTip(id, r.ddl)
-    AdvReg(r, [r.ddl], [r.ddl], [r.ddl])
-}
-
-AdvDDLChange(r, ctl, *)
-{
-    r.sel.Choose(ctl.Value)
-    AdvRefresh()
-}
-
-AdvButton(page, id, text, fn, cy, col, y)
-{
-    global MainGui, BgColor
-    r := {page: page, kind: "btn", id: id, cy: cy, col: col, y: y, sk: true}
-    r.btn := MainGui.Add("Text", "x104 y" cy " w250 h23 Center +0x200", text)
-    r.btn.Opt("Background" BgColor " c0xD98484")
-    r.btn.OnEvent("Click", (*) => fn())
-    RegisterHover([r.btn], () => BgColor)
-    AdvTip(id, r.btn)
-    AdvReg(r, [r.btn], [r.btn], [r.btn])
-}
-
-AdvHeader(page, text, cy)
-{
-    global MainGui
-    r := {page: page, kind: "hdr", cy: cy, sk: false}
-    r.lbl := MainGui.Add("Text", "x104 y" cy " w320 c0xD98484 BackgroundTrans", text)
-    r.lbl.SetFont("s9 Bold")
-    AdvReg(r, [r.lbl], [], [])
-}
-
-AdvGpuLine(which, cy, col, y)
-{
-    global MainGui
-    r := {page: 7, kind: "gpu", which: which, cy: cy, col: col, y: y, sk: true}
-    r.lbl := MainGui.Add("Text", "x104 y" cy " w330 c0xD98484 BackgroundTrans", " ")
-    AdvReg(r, [r.lbl], [r.lbl], [])
-}
-
-AdvFpsNote(page, cy, h, col, y)
-{
-    global MainGui
-    r := {page: page, kind: "fpsnote", cy: cy, h: h, col: col, y: y, sk: true}
-    r.lbl := MainGui.Add("Text", "x104 y" cy " w340 h" h " c0xD98484 BackgroundTrans", FpsStatusText())
-    AdvReg(r, [r.lbl], [r.lbl], [])
-}
-
-AdvNote(page, text, cy, h, col, y)
-{
-    global MainGui
-    r := {page: page, kind: "note", cy: cy, h: h, col: col, y: y, sk: true}
-    r.lbl := MainGui.Add("Text", "x104 y" cy " w340 h" h " c0xD98484 BackgroundTrans", text)
-    AdvReg(r, [r.lbl], [r.lbl], [])
-}
-
-AdvWidgetToggle(id, *)
-{
-    LiveEnsure()
-    WHudToggle(id)
-}
-
-AdvGpuText(r)
-{
-    global GpuLoad, GpuTemp, GpuUsed, GpuTotal
-    if (!GpuInit()) {
-        LblSet(r.lbl, (r.which = 1) ? "No NVIDIA graphics card found." : "")
-        return
-    }
-    switch r.which {
-        case 1: LblSet(r.lbl, "GPU load: " GpuLoad " %")
-        case 2: LblSet(r.lbl, "Temperature: " GpuTemp " " Chr(0xB0) "C")
-        case 3: LblSet(r.lbl, "Video memory: " Round(GpuUsed / 1024, 1) " / " Round(GpuTotal / 1024, 1) " GB")
-    }
-}
-
-AdvRefresh(*)
-{
-    global AdvRows
-    for r in AdvRows {
-        switch r.kind {
-            case "tog":
-                g := r.getter
-                SetChk(r.chk, g() ? 1 : 0)
-            case "sld":
-                g := r.getter
-                v := g()
-                r.sl.Value := v
-                LblSet(r.lbl, r.label ": " v)
-            case "ddl", "ddlx":
-                try r.ddl.Value := r.sel.Value
-            case "gpu":
-                AdvGpuText(r)
-            case "fpsnote":
-                LblSet(r.lbl, FpsStatusText())
-        }
-    }
-}
-
-AdvLayoutSkeet(i)
-{
-    global AdvRows, SkM
-    for r in AdvRows {
-        if (r.page != i || !r.sk)
-            continue
-        cx := (r.col = 1) ? SkM.colX1 : SkM.colX2
-        cw := (r.col = 1) ? SkM.colW1 : SkM.colW2
-        y := r.y
-        switch r.kind {
-            case "tog":
-                Mv(r.chk, cx + 14, y, 14, 14), Mv(r.lbl, cx + 36, y - 1, r.id = "t_vsound" ? 90 : cw - 50, 16)
-            case "sld":
-                Mv(r.lbl, cx + 14, y + 2, 112, 14), Mv(r.sl, cx + 124, y - 2, cw - 138, 20)
-            case "ddl":
-                Mv(r.lbl, cx + 14, y + 3, 100, 14), Mv(r.ddl, cx + 114, y, cw - 128)
-            case "ddlx":
-                Mv(r.ddl, cx + 130, y, cw - 144)
-            case "btn":
-                Mv(r.btn, cx + 14, y, cw - 28, 24)
-            case "gpu":
-                Mv(r.lbl, cx + 14, y, cw - 28, 16)
-            case "note", "fpsnote":
-                Mv(r.lbl, cx + 14, y, cw - 28, r.h)
-        }
-    }
-}
-
-; the macro checkboxes of the Classic / Skeet pages say what they did, like the other designs
-AdvMacroToast(label, key, getter, *)
-{
-    SPToast(label ": " (getter() ? "ON" : "OFF"), key)
-}
-
-AdvBuild()
-{
-    n := 0
-    for def in [[ChkSlide, LblSlide, "INF SLIDE", () => IsSlideChecked], [ChkSlideBehind, LblSlideBehind, "SLIDE TURN CAMERA", () => IsSlideBehindChecked]
-              , [ChkBhop, LblBhop, "AUTO BHOP", () => IsBhopChecked], [ChkBhopHold, LblBhopHold, "BHOP HOLD", () => IsBhopHoldChecked]
-              , [ChkStrafe, LblStrafe, "AUTO STRAFER", () => IsStrafeChecked], [ChkCombo, LblCombo, "EDASH", () => IsComboChecked]
-              , [ChkCSpam, LblCSpam, "CROUCH SPAM", () => IsCSpamChecked], [ChkClick, LblClick, "AUTO CLICKER", () => IsClickChecked]
-              , [ChkSpinbot, LblSpinbot, "SPINBOT", () => IsSpinbotChecked], [ChkBBhop, LblBBhop, "BACKWARDS BHOP", () => IsBBhopChecked]
-              , [ChkLagPrecision, LblLagPrecision, "HIGH PRECISION", () => IsLagPrecisionChecked], [ChkLagBurst, LblLagBurst, "TICK MODE", () => IsLagBurstChecked]
-              , [ChkLagHold, LblLagHold, "HOLD TO FREEZE", () => IsLagHoldChecked], [ChkLagVignette, LblLagVignette, "SCREEN EFFECT", () => IsLagVignetteChecked]] {
-        n += 1
-        h := AdvMacroToast.Bind(def[3], 1000 + n, def[4])
-        def[1].OnEvent("Click", h)
-        def[2].OnEvent("Click", h)
-    }
-    global VigStyleSel, VigGradSel, HudBorderSel, HudGradSel, PHudPosSel, WSel, WH, LayoutMode
-    ; macros page
-    AdvToggle(1, "t_edstrafe", "E-Dash autostrafer", () => IsEDashStrafe, ToggleEDashStrafe, 548, 2, 222)
-    ; lagswitch page: freeze effect
-    AdvHeader(3, "── FREEZE EFFECT ──", 568)
-    AdvDDL(3, "p_vstyle", "Style:", VigStyleSel, 590, 2, 258)
-    AdvDDL(3, "p_vgrad", "Colour:", VigGradSel, 616, 2, 284)
-    AdvToggle(3, "t_vanim", "Animate the colours", () => VigAnim, VigToggleAnim, 646, 2, 312)
-    AdvSlider(3, "s_vspd", "Anim speed", 1, 10, () => VigAnimSpd, VigSetSpd, 670, 2, 336)
-    AdvSlider(3, "s_vstay", "Stays (ms)", 200, 5000, () => VigMinShow, VigSetStay, 694, 2, 360)
-    AdvSlider(3, "s_vint", "Intensity", 10, 100, () => VigIntensity, VigSetInt, 718, 2, 384)
-    AdvSlider(3, "s_vtint", "Screen tint", 0, 40, () => VigTint, VigSetTint, 742, 2, 408)
-    AdvToggle(3, "t_vpill", "Countdown pill", () => VigPillOn, VigTogglePill, 770, 2, 436)
-    AdvToggle(3, "t_vpillalways", "Keep the pill on screen", () => PillAlways, VigTogglePillAlways, 794, 2, 460)
-    AdvToggle(3, "t_vsound", "Sound cue", () => VigSound, VigToggleSound, 820, 2, 486)
-    AdvDDLNext(3, "p_vsoundsel", VigSoundSel, 816, 2, 482)
-    AdvSlider(3, "s_vvol", "Volume", 0, 100, () => VigVol, VigSetVol, 846, 2, 512)
-    AdvButton(3, "b_vprev", "PREVIEW EFFECT", VigPreview, 874, 2, 540)
-    ; misc page: macro HUD style
-    AdvHeader(4, "── MACRO HUD STYLE ──", 650)
-    AdvDDL(4, "p_hudborder", "Border:", HudBorderSel, 674, 1, 332)
-    AdvDDL(4, "p_hudgrad", "Gradient:", HudGradSel, 700, 1, 360)
-    AdvToggle(4, "t_hudcompact", "Compact (running only)", () => HudCompact, HudToggleCompact, 732, 1, 392)
-    AdvToggle(4, "t_hudkeys", "Show keybinds", () => HudShowKeys, HudToggleKeys, 758, 1, 418)
-    AdvButton(4, "b_resetcol", "RESET COLORS", ResetDesignColors, 792, 1, 268)
-    ; performance page
-    AdvHeader(7, "── PERFORMANCE HUD ──", 95)
-    AdvToggle(7, "t_phud", "Show performance HUD", () => PHudOn, PHudToggle, 122, 1, 58)
-    AdvDDL(7, "p_phudpos", "Position:", PHudPosSel, 150, 1, 86)
-    AdvHeader(7, "── FPS COUNTER ──", 192)
-    AdvButton(7, "b_fpsinst", "INSTALL / REINSTALL FPS COUNTER", FpsInstallBtn, 216, 1, 128)
-    AdvToggle(7, "t_wfps", "Show the FPS HUD", () => WH["fps"].on, FpsToggle, 248, 1, 160)
-    AdvToggle(7, "t_fpsstats", "1% low and frame time", () => FpsShowStats, FpsToggleStats, 274, 1, 188)
-    AdvFpsNote(7, 300, 30, 1, 216)
-    AdvHeader(7, "── NVIDIA GRAPHICS CARD ──", 344)
-    AdvGpuLine(1, 370, 1, 252)
-    AdvGpuLine(2, 392, 1, 274)
-    AdvGpuLine(3, 414, 1, 296)
-    AdvNote(7, "Read from the NVIDIA driver once per second.", 440, 30, 1, 326)
-    AdvHeader(7, "── ON-SCREEN WIDGETS ──", 478)
-    AdvToggle(7, "t_wkeys", "Keys", () => WH["keys"].on, AdvWidgetToggle.Bind("keys"), 506, 2, 58)
-    AdvToggle(7, "t_wmbtn", "Mouse buttons", () => WH["mbtn"].on, AdvWidgetToggle.Bind("mbtn"), 532, 2, 84)
-    AdvToggle(7, "t_wmouse", "Mouse speed", () => WH["mouse"].on, AdvWidgetToggle.Bind("mouse"), 558, 2, 110)
-    AdvToggle(7, "t_wstrafer", "Auto strafer", () => WH["strafer"].on, AdvWidgetToggle.Bind("strafer"), 584, 2, 136)
-    AdvDDL(7, "p_wsel", "Settings for:", WSel, 614, 2, 168)
-    AdvToggle(7, "t_wbg", "Background", () => WHudSel().bg, WHudToggleBg, 646, 2, 200)
-    AdvToggle(7, "t_wborder", "Border", () => WHudSel().border, WHudToggleBorder, 672, 2, 226)
-    AdvDDL(7, "p_wbstyle", "Border style:", WBorderSel, 698, 2, 252)
-    AdvDDL(7, "p_wgrad", "Gradient:", WGradSel, 726, 2, 280)
-    AdvSlider(7, "s_wscale", "Size %", 60, 160, () => WHudSel().scale, WHudSetScale, 756, 2, 310)
-    AdvNote(7, "Drag a widget with the mouse while this menu is open. They stay click-through while you play.", 796, 50, 2, 344)
-    AdvRefresh()
-    SwitchTab(CurrentTab)
-}
-
 ; fps counter
 ; PresentMon needs administrator rights to listen to Windows' graphics events, so a small helper script is started
 ; elevated (one Windows prompt per session). The helper runs PresentMon, turns its output into one tiny text file
@@ -17248,7 +15996,6 @@ FpsWriteHelper()
     f.Close()
 }
 
-AdvBuild()
 
 ; halloween design
 Global HWTop := 154, HWBot := 568, HWView := 400
