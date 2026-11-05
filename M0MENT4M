@@ -2,7 +2,7 @@
 #SingleInstance Force
 InstallKeybdHook(true, true)
 InstallMouseHook(true, true)
-#MaxThreads 255                    ; (the default of 10 can make a hotkey get ignored while many timers are running) i would not change ts 
+#MaxThreads 255                    ; (the default of 10 can make a hotkey get ignored while many timers are running) i would not change ts ´s
 ProcessSetPriority("High")
 A_MaxHotkeysPerInterval := 99000000
 ; the folder the macro keeps its files in: a folder called M0MENT4M (with configs, tools, companion inside) next to this script
