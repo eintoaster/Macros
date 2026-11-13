@@ -2491,14 +2491,29 @@ ToggleStatusNotifs(*) {
 
 UpdateHudPosition(*) => UPickHudPos(HudPosDDL.Value)
 
+; a HUD is put back on top only when it lost its always-on-top, or when the game window got above it (fullscreen Roblox
+; can cover it while it keeps the flag); doing it every time made Windows redo the screen over the game
 KeepHudOnTop() {
     global HudInst
+    game := WinExist(GAME_EXE)
     for key, h in HudInst
         if (h.visible && IsObject(h.gui))
             try {
-                if (!(WinGetExStyle("ahk_id " h.gui.Hwnd) & 0x8))
+                if (!(WinGetExStyle("ahk_id " h.gui.Hwnd) & 0x8) || (game && WinIsAbove(game, h.gui.Hwnd)))
                     WinSetAlwaysOnTop(1, "ahk_id " h.gui.Hwnd)
             }
+}
+
+; is window a above window b in the z-order? (walks up from b)
+WinIsAbove(a, b) {
+    hw := b, n := 0
+    while (hw := DllCall("GetWindow", "Ptr", hw, "UInt", 3, "Ptr")) {
+        if (hw = a)
+            return true
+        if (++n > 600)
+            break
+    }
+    return false
 }
 
 
@@ -4463,7 +4478,6 @@ XSchedule(i) {
         return {sens: 0.8, ev: [[10, 300], [160, -450]]}      ; right 300, 150 ms, left 450
     if (XMac[i].id = "tw2")
         return {sens: 0.5, qd: 31, qu: 111, ev: [[0, 277], [141, -360]]}
-                                                              ; script: landed a bit too far left)
     ev := []
     ev.Push([190, -206])
     Loop 7
@@ -5883,8 +5897,11 @@ MacroRun(fn, hk := "") {
     global MacroBusy
     if (MacroBusy++ = 0)
         ProcessSetPriority("High")
+    pc := A_IsCritical
+    Critical                                                  ; (no timer - HUD, widgets, notifications - cuts into a macro)
     try fn.Call(hk)
     finally {
+        Critical(pc ? "On" : "Off")
         if (--MacroBusy = 0)
             ProcessSetPriority("Normal")
     }
