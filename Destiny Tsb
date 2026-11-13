@@ -12,7 +12,7 @@ CoordMode("Mouse", "Screen")
 CoordMode("Menu", "Screen")
 
 
-Global DestinyVersion := "Destiny v1"
+Global DestinyVersion := "Destiny v1.2 Beta"
 Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
 Global TargetProcess := "RobloxPlayerBeta.exe"
 Global ConfigBase := RTrim(IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir, "\")
@@ -122,8 +122,7 @@ Global AccentIdx := 1, AccentColor := "D946EF", AccentColor2 := "7C3AED", Destin
 Global LogoGrad := 1, LogoAnimated := true, GradeAmt := 60
 ; which kinds of notification cards show (Visuals > Notifications)
 Global NotifCats := Map("toggle", true, "fire", false, "slider", false, "pick", false, "key", false, "system", true)
-Global HudGrad := 1, HudBorder := 3, HudCompact := false, HudShowKeys := true
-Global HudCustom := false, HudCX := 10, HudCY := 80
+Global HudGrad := 1, HudBorder := 3, HudCompact := true, HudShowKeys := true
 Global UPrefsFile := RegExReplace(ConfigDir, "\\configs$") "\ui.ini"
 
 Global UW := 880, UH := 600, USide := 220, UTop := 92
@@ -1141,6 +1140,7 @@ UBuildBg() {
 
 UDrawSidebar() {
     global USide, UH, CurrentTab, CurrentSubTab, MiscSub, UHover, F_Tiny, F_Sm, F_B, F_UI, F_IconSm, IsMacrosLocked
+    global QuickSavedAt, EditProfileName
     UDrawLogo(24, 22)
     ; small edition pill
     URR(26, 60, 88, 20, 10, UCol("Pill", 220))
@@ -1148,12 +1148,12 @@ UDrawSidebar() {
     UDisc(37, 70, 3, UAcc())
     UText("TSB MACRO", 45, 60, UCol("Text2"), F_Tiny, 80, 20, 0, 1)
 
-    y := 104
+    y := 100
     UText("MAIN", 28, y, UCol("Muted"), F_Tiny, 120, 18, 0, 1)
     y += 22
     y := UNavItem(1, Chr(0xE945), "Macros", y)
-    y := USubList(1, ["Extenders", "Backdash", "Movement", "Recorder"], CurrentSubTab, "sub", "macx", UGoSub, y)
-    y += 10
+    y := USubList(1, ["Extenders", "Backdash", "Movement", "Combos", "Recorder"], CurrentSubTab, "sub", "macx", UGoSub, y)
+    y += 6
     UText("SETUP", 28, y, UCol("Muted"), F_Tiny, 120, 18, 0, 1)
     y += 22
     y := UNavItem(3, Chr(0xE765), "Keybinds", y)
@@ -1162,8 +1162,20 @@ UDrawSidebar() {
     y := UNavItem(5, Chr(0xE713), "Settings", y)
     y := UNavItem(6, Chr(0xE946), "Info", y)
 
-    ; profile card
+    ; quick save: the current config (the name in Settings > Configs) in one click
     fy := UH - 66
+    qy := fy - 40, qw := USide - 28
+    hv := ULerp("qsaveh", UHover = "qsave" ? 1 : 0, 0.25)
+    ok := ULerp("qsaveok", A_TickCount - QuickSavedAt < 1400 ? 1 : 0, 0.2)
+    URR(14, qy, qw, 32, 11, UMix("Card", "Hover", hv, 210))
+    URRLine(14, qy, qw, 32, 11, UCol("Border"))
+    if (ok > 0.01)
+        UGradFill(14, qy, qw, 32, 11, GradStops(1), 0, 0.28 * ok)
+    UText(Chr(ok > 0.5 ? 0xE73E : 0xE74E), 22, qy, ok > 0.5 ? UCol("Green") : UAcc(), F_IconSm, 22, 32, 1, 1)
+    UText(ok > 0.5 ? "Saved" : "Save config", 50, qy, UCol("Text"), F_B, 90, 32, 0, 1)
+    UText(Trim(EditProfileName.Value) = "" ? "Default" : Trim(EditProfileName.Value), 128, qy, UCol("Muted"), F_Tiny, qw - 120, 32, 2, 1)
+    UHit("qsave", 14, qy, qw, 32, QuickSave)
+    ; profile card
     URR(14, fy, USide - 28, 52, 14, UCol("Card", 200))
     URRLine(14, fy, USide - 28, 52, 14, UCol("Border"))
     UGradFill(26, fy + 10, 32, 32, 16, GradStops(LogoGrad), A_TickCount / 1000 * 0.2, 1.0, 64)
@@ -1186,11 +1198,11 @@ USubList(tab, subs, sel, prefix, animKey, goFn, y) {
     mo := ULerp(animKey, CurrentTab = tab ? 1 : 0, 0.18)
     if (mo <= 0.01)
         return y
-    UClip(0, y - 2, USide, (subs.Length * 30 + 6) * mo + 2)
+    UClip(0, y - 2, USide, (subs.Length * 28 + 6) * mo + 2)
     UAlpha := mo
-    ULine(38, y, 38, y + (subs.Length * 30 - 4) * mo, UCol("Border"))
+    ULine(38, y, 38, y + (subs.Length * 28 - 4) * mo, UCol("Border"))
     for i, nm in subs {
-        iy := y + (i - 1) * 30 * mo
+        iy := y + (i - 1) * 28 * mo
         st := ULerp(prefix i, sel = i ? 1 : 0, 0.2)
         hv := ULerp(prefix "h" i, UHover = prefix i ? 1 : 0, 0.25)
         URR(50, iy, USide - 64, 26, 8, UCol("Hover", Round(200 * Max(st * 0.9, hv * 0.6))))
@@ -1202,7 +1214,7 @@ USubList(tab, subs, sel, prefix, animKey, goFn, y) {
     }
     UAlpha := 1.0
     UClipReset()
-    return y + (subs.Length * 30 + 6) * mo
+    return y + (subs.Length * 28 + 6) * mo
 }
 
 
@@ -1253,7 +1265,7 @@ UNavItem(n, icon, label, y) {
         UText(icon, 26, y, UAcc(Round(255 * t)), F_Icon, 22, 36, 1, 1)
     UText(label, 58, y, UMix("Text2", "Text", Max(t, hv)), t > 0.5 ? F_B : F_UI, 130, 36, 0, 1)
     UHit(id, 14, y, w, 36, UGoTab.Bind(n))
-    return y + 40
+    return y + 38
 }
 
 UGoTab(n, *) {
@@ -1310,7 +1322,7 @@ UDrawTopBar() {
     UText(titles[CurrentTab], x, 22, UCol("Text"), F_H, 300, 32, 0, 1)
     tw := UTextW(titles[CurrentTab], F_H)
     if (CurrentTab = 1 || CurrentTab = 4) {
-        nm := (CurrentTab = 1) ? ["Extenders", "Backdash", "Movement", "Recorder"][CurrentSubTab] : ["Visuals", "Input Monitor", "Hit Effects"][MiscSub]
+        nm := (CurrentTab = 1) ? ["Extenders", "Backdash", "Movement", "Combos", "Recorder"][CurrentSubTab] : ["Visuals", "Input Monitor", "Hit Effects"][MiscSub]
         cw := UTextW(nm, F_Sm) + 22
         URR(x + tw + 4, 28, cw, 22, 11, UAcc(34))
         URRLine(x + tw + 4, 28, cw, 22, 11, UAcc(90))
@@ -1596,18 +1608,51 @@ UDrawPage(top) {
     }
 }
 
+; Macros > Combos: a card per character, each with its combos
+UPageCombos(top) {
+    global UCY, XMac
+    b := top, colY := Map(1, top, 2, top)
+    for info in [[1, "saitama", "Saitama"], [2, "garou", "Garou"], [1, "blade", "Blade Master"]] {
+        c := info.RemoveAt(1)
+        UColumn(c, colY[c])
+        UCardBegin("c_combo_" info[1], info[2], Chr(0xE8CB))
+        n := 0
+        for i, m in XMac
+            if (m.HasOwnProp("cat") && m.cat = info[1])
+                UToggleRow("t_" m.id, m.name, m.desc, m.on, XToggle.Bind(i)), n++
+        if (!n)
+            UTextRow("No combos yet.", "", 1)
+        UCardEnd()
+        colY[c] := UCY
+        b := Max(b, UCY)
+    }
+    return b
+}
+
 UPageMacros(top, sub) {
     global UCY, RobloxSensitivity, BDBoxes, BDPing
-    if (sub = 4)
+    if (sub = 5)
         return UPageRecorder(top)
+    if (sub = 4)
+        return UPageCombos(top)
     if (sub = 1) {
         UColumn(0, top)
         UCardBegin("c_ext", "Extender Tech", Chr(0xE945))
         UToggleRow("t_ext1", "Instant Lethal", "instant lethal extender", IsExtender1Checked, ToggleExt1Box)
         UToggleRow("t_ext2", "Instant Twisted", "instant twisted extender.", IsExtender2Checked, ToggleExt2Box)
         UToggleRow("t_ext4", "Dripz Tech", "the usual dripz dash, right timing is needed", IsExtender4Checked, ToggleExt4Box)
-        for i, m in XMac
+        for i, m in XMac {
+            if (m.HasOwnProp("cat"))
+                continue
             UToggleRow("t_" m.id, m.name, m.desc, m.on, XToggle.Bind(i))
+            if (m.id = "supa")
+                UToggleRow("t_supalag", "Supa lagswitch", "lagswitch on supa", SupaLag, FxToggle.Bind("SupaLag"))
+            if (m.id = "supa" && SupaLag) {
+                USliderRow("s_supalag", "Freeze starts at", 0, 800, SupaLagAt, FxSet.Bind("SupaLagAt"), "{} ms")
+                USliderRow("s_supams", "Freeze length", 10, 1000, SupaLagMs, FxSet.Bind("SupaLagMs"), "{} ms")
+                USliderRow("s_supab", "Bursts", 1, 10, SupaBursts, FxSet.Bind("SupaBursts"), "{}x")
+            }
+        }
         UCardEnd()
         UCardEnd()
         return UCY
@@ -1631,6 +1676,9 @@ UPageMacros(top, sub) {
     UColumn(0, top)
     UCardBegin("c_mv", "Movement Tech", Chr(0xE7C1))
     UToggleRow("t_jb", "Jump Bug", "you fly around trashcans/fences .", IsJumpBugChecked, ToggleJumpBugBox)
+    for i, m in XMac
+        if (m.HasOwnProp("cat") && m.cat = "move")
+            UToggleRow("t_" m.id, m.name, m.desc, m.on, XToggle.Bind(i))
     UCardEnd()
     return UCY
 }
@@ -1638,18 +1686,38 @@ UPageMacros(top, sub) {
 
 UPageKeys(top) {
     global UCY, SolRecs, BDBoxes
+    ; left: extenders and backdash; right: system, movement, combos, recordings, then the help
     UColumn(1, top)
-    UCardBegin("c_keys", "Macro Keys", Chr(0xE945))
+    UCardBegin("c_keys", "Extender Keys", Chr(0xE945))
     UKeyRow("k_ext1", "Instant Lethal", BtnK_Ext1, StartBindExt1)
     UKeyRow("k_ext2", "Instant Twisted", BtnK_Ext2, StartBindExt2)
     UKeyRow("k_ext4", "Dripz Tech", BtnK_Ext4, StartBindExt4)
     for i, m in XMac
-        UKeyRow("k_" m.id, m.name, m.box, StartBindX.Bind(i))
-    UKeyRow("k_jb", "Jump Bug", BtnK_JumpBug, StartBindJumpBug)
+        if (!m.HasOwnProp("cat"))
+            UKeyRow("k_" m.id, m.name, m.box, StartBindX.Bind(i))
     UCardEnd()
     UCardBegin("c_bdkeys", "Backdash Keys", Chr(0xE72B))
     Loop 4
         UKeyRow("k_bd" A_Index, "Backdash " A_Index, BDBoxes[A_Index], StartBindBD.Bind(A_Index))
+    UCardEnd()
+    b1 := UCY
+    UColumn(2, top)
+    UCardBegin("c_sys", "System Keys", Chr(0xE713))
+    UKeyRow("k_lock", "Macro lock", BtnK_Lock, StartBindLock)
+    UKeyRow("k_min", "Menu toggle", BtnK_Min, StartBindMin)
+    UKeyRow("k_rel", "Reload script", BtnK_Rel, StartBindRel)
+    UKeyRow("k_exit", "Macro exit", BtnK_Exit, StartBindExit)
+    UCardEnd()
+    UCardBegin("c_movekeys", "Movement Keys", Chr(0xE7C1))
+    UKeyRow("k_jb", "Jump Bug", BtnK_JumpBug, StartBindJumpBug)
+    for i, m in XMac
+        if (m.HasOwnProp("cat") && m.cat = "move")
+            UKeyRow("k_" m.id, m.name, m.box, StartBindX.Bind(i))
+    UCardEnd()
+    UCardBegin("c_combokeys", "Combo Keys", Chr(0xE8CB))
+    for i, m in XMac
+        if (m.HasOwnProp("cat") && m.cat != "move")
+            UKeyRow("k_" m.id, m.name, m.box, StartBindX.Bind(i))
     UCardEnd()
     if (SolRecs.Length) {
         UCardBegin("c_reckeys", "Recorded Dashes", Chr(0xE7C8))
@@ -1657,14 +1725,6 @@ UPageKeys(top) {
             UKeyRow("kr" i, rec.name, rec.box, RecBindKey.Bind(rec))
         UCardEnd()
     }
-    b1 := UCY
-    UColumn(2, top)
-    UCardBegin("c_sys", "System Keys", Chr(0xE713))
-    UKeyRow("k_lock", "Macro lock", BtnK_Lock, StartBindLock)
-    UKeyRow("k_min", "Menu toggle", BtnK_Min, StartBindMin)
-    UKeyRow("k_rel", "Reload script", BtnK_Rel, StartBindRel)
-    UKeyRow("k_exit", "Emergency exit", BtnK_Exit, StartBindExit)
-    UCardEnd()
     UCardBegin("c_howto", "How to bind", Chr(0xE946))
     UTextRow("Click a key box, then press a key or mouse button (Mouse 4/5, middle and right click work). Escape or Backspace clears the bind, a left click cancels.", "", 3)
     UCardEnd()
@@ -1673,9 +1733,13 @@ UPageKeys(top) {
 
 UPageVisuals(top) {
     global UCY, ShowSidebarIndicators, ShowStatusNotifs, HudCompact, HudShowKeys, HudOpacity, HudScale, GradeAmt, LogoAnimated
+    global HudSplit, HudCats, HudCatList
     UColumn(1, top)
     UCardBegin("c_hud", "Macro HUD", Chr(0xE7F4))
     UToggleRow("t_hud", "Show HUD", "drag it while the menu is open", ShowSidebarIndicators, ToggleSidebarIndicators)
+    UToggleRow("t_hudsplit", "Separate HUDs", "one HUD per macro category", HudSplit, HudSplitToggle)
+    for c in HudCatList
+        UToggleRow("t_hudc_" c[1], c[2], "on the HUD", HudCats[c[1]], HudCatToggle.Bind(c[1]))
     UToggleRow("t_hudc", "Compact", "only lists enabled macros", HudCompact, UToggleHudCompact)
     UToggleRow("t_hudk", "Show keys", "", HudShowKeys, UToggleHudKeys)
     UDropRow("d_hudpos", "Position", HudPosDDL)
@@ -1713,8 +1777,8 @@ UPageSettings(top) {
     UColumn(1, top)
     UCardBegin("c_cfg", "Configs", Chr(0xE74E))
     UEditRow("e_cfg", "Config name", EditProfileName.Value, "text", (v) => EditProfileName.Value := v)
-    UButtonRow([["b_save", "Save", SaveCustomProfile, true], ["b_load", "Load", LoadCustomProfile]])
     UDropRow("d_cfg", "Saved configs", ProfileDDL)
+    UButtonRow([["b_save", "Save", SaveCustomProfile, true], ["b_load", "Load", LoadCustomProfile]])
     UButtonRow([["b_del", "Delete", DeleteCustomProfile], ["b_reset", "Reset defaults", ResetDefaults]])
     UTextRow("Stored in " ConfigDir, "", 3)
     UCardEnd()
@@ -1737,14 +1801,14 @@ UPageInfo(top) {
     UColumn(1, top)
     UCardBegin("c_about", "Destiny // TSB Macro", Chr(0xE946))
     UTextRow("A macro for The Strongest Battlegrounds, still a work in progress.", UCol("Text2"), 2)
-    UTextRow("Macros only fire while Roblox is the active window.", "", 2)
+    UTextRow("Macros only work while Roblox is the active window.", "", 2)
     UInfoRow("", "Developers", "Aimwhere, Yeko", UAcc())
     UCardEnd()
     UCardBegin("c_short", "Shortcuts", Chr(0xE765))
     UInfoRow("i_lock", "Macro lock", FormatKeyName(MacroLockKey), "", UGoTab.Bind(3))
     UInfoRow("i_min", "Show / hide menu", FormatKeyName(MinimizeKey), "", UGoTab.Bind(3))
     UInfoRow("i_rel", "Reload script", FormatKeyName(ReloadKey), "", UGoTab.Bind(3))
-    UInfoRow("i_exit", "Exit", FormatKeyName(ExitKey), "", UGoTab.Bind(3))
+    UInfoRow("i_exit", "Macro exit", FormatKeyName(ExitKey), "", UGoTab.Bind(3))
     UCardEnd()
     UChangelogCard()
     b1 := UCY
@@ -1756,7 +1820,15 @@ UPageInfo(top) {
     UInfoRow("", "Macro lock", IsMacrosLocked ? "locked" : "off", IsMacrosLocked ? UCol("Red") : UCol("Text2"))
     UInfoRow("", "Version", DestinyVersion)
     UCardEnd()
+    UCardBegin("c_discord", "Discord", Chr(0xE8BD))
+    UTextRow("Join the server for updates, and report bugs there.", UCol("Text2"), 2)
+    UInfoRow("i_discord", "Server", "discord.gg/AjajPeXPt", UAcc(), OpenDiscord)
+    UCardEnd()
     return Max(b1, UCY)
+}
+
+OpenDiscord(*) {
+    try Run("https://discord.gg/AjajPeXPt")
 }
 
 
@@ -1856,9 +1928,9 @@ UPickHudBorder(i) {
 }
 
 UPickHudPos(i) {
-    global HudPosition, HudCustom
+    global HudPosition, HudPos
     HudPosition := HudPosDDL.items[i]
-    HudCustom := false
+    HudPos := Map()
     HudPlace()
     USavePrefs()
 }
@@ -1869,12 +1941,17 @@ USavePrefs() {
 }
 
 USavePrefsNow() {
-    global UPrefsFile, HudCustom, HudCX, HudCY, UX, UY, Widgets
+    global UPrefsFile, HudPos, UX, UY, Widgets
     try {
         f := UPrefsFile
-        IniWrite(HudCustom ? 1 : 0, f, "hud", "custom")
-        IniWrite(HudCX, f, "hud", "x")
-        IniWrite(HudCY, f, "hud", "y")
+        for key in ["all", "ext", "bd", "move", "combo", "rec"] {
+            sec := (key = "all") ? "hud" : "hud_" key
+            IniWrite(HudPos.Has(key) ? 1 : 0, f, sec, "custom")
+            if (HudPos.Has(key)) {
+                IniWrite(HudPos[key].x, f, sec, "x")
+                IniWrite(HudPos[key].y, f, sec, "y")
+            }
+        }
         IniWrite(UX, f, "menu", "x")
         IniWrite(UY, f, "menu", "y")
         for id, wd in Widgets {
@@ -1886,13 +1963,15 @@ USavePrefsNow() {
 }
 
 ULoadPrefs() {
-    global UPrefsFile, HudCustom, HudCX, HudCY, UX, UY, Widgets
+    global UPrefsFile, HudPos, UX, UY, Widgets
     f := UPrefsFile
     if (FileExist(f)) {
         try {
-            HudCustom := IniRead(f, "hud", "custom", 0) = "1"
-            HudCX := Integer(IniRead(f, "hud", "x", 10))
-            HudCY := Integer(IniRead(f, "hud", "y", 80))
+            for key in ["all", "ext", "bd", "move", "combo", "rec"] {
+                sec := (key = "all") ? "hud" : "hud_" key
+                if (IniRead(f, sec, "custom", 0) = "1")
+                    HudPos[key] := {x: Integer(IniRead(f, sec, "x", 10)), y: Integer(IniRead(f, sec, "y", 80))}
+            }
             UX := Integer(IniRead(f, "menu", "x", UX))
             UY := Integer(IniRead(f, "menu", "y", UY))
             for id, wd in Widgets {
@@ -1915,7 +1994,7 @@ UVisualsTo() {
         , hud_pos: HudPosition, hud_border: HudBorder, hud_grad: HudGrad, hud_size: HudScale, hud_opacity: HudOpacity
         , notifs: ShowStatusNotifs ? 1 : 0, notify: nc, accent: AccentPresets[AccentIdx].name, logo_grad: LogoGrad, logo_anim: LogoAnimated ? 1 : 0
         , grade: GradeAmt, rec_len: RecLen
-        , widgets: WStyleTo(), hit_fx: FxTo()}
+        , widgets: WStyleTo(), hit_fx: FxTo(), hud_split: HudSplit ? 1 : 0, hud_cats: HudCatsTo()}
 }
 
 ; sets the Visuals from a config's "visuals" part (anything missing = the default)
@@ -1923,7 +2002,7 @@ UVisualsFrom(v) {
     global
     g(name, def) => v.HasOwnProp(name) ? v.%name% : def
     ShowSidebarIndicators := g("hud_show", 1) ? true : false
-    HudCompact := g("hud_compact", 0) ? true : false
+    HudCompact := g("hud_compact", 1) ? true : false
     HudShowKeys := g("hud_keys", 1) ? true : false
     HudPosition := g("hud_pos", "Top-Left")
     if (!(HudPosition = "Top-Left" || HudPosition = "Top-Right" || HudPosition = "Bottom-Left" || HudPosition = "Bottom-Right"))
@@ -1943,6 +2022,8 @@ UVisualsFrom(v) {
     GradeAmt := Max(0, Min(100, Integer(g("grade", 60))))
     RecLen := Max(400, Min(1500, Integer(g("rec_len", 900))))
     WStyleFrom(g("widgets", {}))
+    HudSplit := g("hud_split", 0) ? true : false
+    HudCatsFrom(g("hud_cats", {}))
     fz := g("freeze", {})
     FxFrom(g("hit_fx", (IsObject(fz) && fz.HasOwnProp("hit")) ? fz.hit : {}))
     AccentDDL.idx := AccentIdx, LogoGradDDL.idx := LogoGrad, HudGradDDL.idx := HudGrad, HudBorderDDL.idx := HudBorder
@@ -1951,12 +2032,12 @@ UVisualsFrom(v) {
 
 ; after a config was loaded / reset: show the new look everywhere
 UVisualsApply() {
-    global ShowSidebarIndicators, HudVisible, HudLeaveAt
+    global ShowSidebarIndicators
     DestroyVignette()
     WApply()
-    if (ShowSidebarIndicators && (!HudVisible || HudLeaveAt))
+    if (ShowSidebarIndicators)
         HudOn()
-    else if (!ShowSidebarIndicators && HudVisible)
+    else
         HudOff()
     HudPlace()
     HudRequest()
@@ -1964,66 +2045,115 @@ UVisualsApply() {
 }
 
 
-Global HudGui := "", HudS := 0, HudVisible := false, HudW := 200, HudMaxH := 460, HudH := 120, HudScale := 80
+Global HudW := 200, HudMaxH := 460, HudScale := 80
 
 ; HUD size on screen (the card is drawn at 100 % and scaled, so it stays sharp)
 HudPx(v) => Round(v * HudScale / 100)
-Global HudRowT := Map(), HudFlashAt := Map(), HudTimerOn := false, HudBusy := false
-Global HudShowAt := 0, HudLeaveAt := 0, HudMoving := false, HudDragOff := 0, HudClickThru := true
+Global HudFlashAt := Map(), HudTimerOn := false
+; which macro categories the HUD shows, and whether every category gets a HUD of its own
+Global HudCatList := [["ext", "Extenders"], ["bd", "Backdash"], ["move", "Movement"], ["combo", "Combos"], ["rec", "Recordings"]]
+Global HudCats := Map("ext", true, "bd", true, "move", true, "combo", true, "rec", true), HudSplit := false
+; the HUDs: "all" (one HUD) or a category id (split) -> its window, position and animations; HudPos: dragged positions
+Global HudInst := Map(), HudPos := Map()
 
-HudEnsure() {
-    global HudGui, HudS, HudW, HudMaxH
-    if (IsObject(HudGui))
-        return
-    UGdipInit()
-    HudGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny HUD")
-    HudS := UMakeSurface(Ceil(HudW * 1.5), Ceil(HudMaxH * 1.5))
+HudNew(key) => {key: key, gui: "", s: 0, visible: false, h: 120, rowT: Map(), showAt: 0, leaveAt: 0, moving: false
+    , dragOff: 0, clickThru: true, busy: false, lastScale: 0}
+
+; the HUDs that should be on screen with the current settings
+HudKeys() {
+    global HudSplit, HudCats, HudCatList, SolRecs
+    if (!HudSplit)
+        return ["all"]
+    keys := []
+    for c in HudCatList
+        if (HudCats[c[1]] && (c[1] != "rec" || SolRecs.Length))   ; (no recordings: no empty Recordings HUD)
+            keys.Push(c[1])
+    return keys
 }
 
+HudEnsure(h) {
+    global HudW, HudMaxH
+    if (IsObject(h.gui))
+        return
+    UGdipInit()
+    h.gui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x80000 +E0x20 +E0x08000000 -DPIScale", "Destiny HUD")
+    h.s := UMakeSurface(Ceil(HudW * 1.5), Ceil(HudMaxH * 1.5))
+}
+
+; where a HUD sits: where it was dragged to, else the chosen corner (split HUDs side by side from there)
 HudXY(h) {
-    global HudPosition, HudCustom, HudCX, HudCY, HudW
-    h := HudPx(h)
-    w := HudPx(HudW)
-    if (HudCustom)
-        return {x: HudCX, y: HudCY}
+    global HudPosition, HudPos, HudW
+    if (HudPos.Has(h.key))
+        return {x: HudPos[h.key].x, y: HudPos[h.key].y}
+    hh := HudPx(h.h), w := HudPx(HudW)
+    idx := 0
+    for i, k in HudKeys()
+        if (k = h.key)
+            idx := i - 1
+    dx := idx * (w + 10)
     switch HudPosition {
-        case "Top-Right":    return {x: A_ScreenWidth - w - 10, y: 80}
-        case "Bottom-Left":  return {x: 10, y: A_ScreenHeight - h - 60}
-        case "Bottom-Right": return {x: A_ScreenWidth - w - 10, y: A_ScreenHeight - h - 60}
-        default:             return {x: 10, y: 80}
+        case "Top-Right":    return {x: A_ScreenWidth - w - 10 - dx, y: 80}
+        case "Bottom-Left":  return {x: 10 + dx, y: A_ScreenHeight - hh - 60}
+        case "Bottom-Right": return {x: A_ScreenWidth - w - 10 - dx, y: A_ScreenHeight - hh - 60}
+        default:             return {x: 10 + dx, y: 80}
     }
 }
 
 HudPlace() {
-    global HudGui, HudVisible, HudH, HudW
-    if (!HudVisible || !IsObject(HudGui))
-        return
-    p := HudXY(HudH)
-    HudGui.Move(p.x, p.y, HudPx(HudW), HudPx(HudH))
+    global HudInst, HudW
+    for key, h in HudInst
+        if (h.visible && !h.leaveAt && IsObject(h.gui)) {
+            p := HudXY(h)
+            h.gui.Move(p.x, p.y, HudPx(HudW), HudPx(h.h))
+        }
 }
 
+; shows the HUDs the settings ask for (and lets the ones no longer wanted leave)
 HudOn() {
-    global HudGui, HudVisible, HudShowAt, HudLeaveAt, HudH, HudW
-    HudEnsure()
-    HudVisible := true, HudShowAt := A_TickCount, HudLeaveAt := 0
-    p := HudXY(HudH)
-    HudGui.Show("x" p.x " y" p.y " w" HudPx(HudW) " h" HudPx(HudH) " NA")
+    global HudInst, HudW
+    want := HudKeys()
+    for key in want {
+        if (!HudInst.Has(key))
+            HudInst[key] := HudNew(key)
+        h := HudInst[key]
+        if (h.visible && !h.leaveAt)
+            continue
+        HudEnsure(h)
+        h.visible := true, h.showAt := A_TickCount, h.leaveAt := 0
+        p := HudXY(h)
+        h.gui.Show("x" p.x " y" p.y " w" HudPx(HudW) " h" HudPx(h.h) " NA")
+    }
+    for key, h in HudInst {
+        keep := false
+        for k in want
+            if (k = key)
+                keep := true
+        if (!keep && h.visible && !h.leaveAt)
+            h.leaveAt := A_TickCount
+    }
     HudKick()
     SetTimer(HudDragTick, 20)
 }
 
 HudOff() {
-    global HudVisible, HudLeaveAt
-    if (HudVisible && !HudLeaveAt) {
-        HudLeaveAt := A_TickCount
-        HudKick()
-    }
+    global HudInst
+    for key, h in HudInst
+        if (h.visible && !h.leaveAt)
+            h.leaveAt := A_TickCount
+    HudKick()
+}
+
+HudAnyVisible() {
+    global HudInst
+    for key, h in HudInst
+        if (h.visible)
+            return true
+    return false
 }
 
 ; called whenever something the HUD shows changes
 HudRequest() {
-    global HudVisible
-    if (HudVisible)
+    if (HudAnyVisible())
         HudKick()
 }
 
@@ -2049,109 +2179,127 @@ HudKick() {
 }
 
 HudTick() {
-    global HudVisible, HudBusy, HudTimerOn
-    if (!HudVisible) {
+    global HudInst, HudTimerOn
+    if (!HudAnyVisible()) {
         SetTimer(HudTick, 0)
         HudTimerOn := false
         return
     }
     HudRender()
-    if (!HudBusy) {
+    busy := false
+    for key, h in HudInst
+        busy := busy || (h.visible && h.busy)
+    if (!busy) {
         SetTimer(HudTick, 0)
         HudTimerOn := false
     }
 }
 
 HudRender() {
-    global RecState
+    global RecState, HudInst
     if (RecState != "idle")
         return
     pc := A_IsCritical
     Critical
-    try HudRenderInner()
+    try {
+        for key, h in HudInst
+            if (h.visible)
+                HudRenderInner(h)
+    }
     finally Critical(pc ? "On" : "Off")
 }
 
-HudRenderInner() {
-    global HudGui, HudS, HudVisible, HudW, HudMaxH, HudH, HudRowT, HudFlashAt, HudBusy, HudShowAt, HudLeaveAt, HudMoving
-    global HudOpacity, HudCompact, HudShowKeys, HudBorder, HudGrad, UG, UAlpha, F_B, F_Sm, F_UI, F_Tiny, IsMacrosLocked
-    global Extender1Key, Extender2Key, Extender4Key, JumpBugKey, MacroLockKey, SolRecs, BDKeys
-    global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked
-    if (!HudVisible || !IsObject(HudGui))
+; the rows of one HUD: every macro of its categories (all of the shown ones for the single HUD), the macro lock in the first
+HudRows(h) {
+    global HudCats, IsMacrosLocked, Extender1Key, Extender2Key, Extender4Key, JumpBugKey, MacroLockKey, SolRecs, BDKeys
+    global IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked, XMac
+    all := [["ext1", "Lethal", IsExtender1Checked, Extender1Key, "ext"], ["ext2", "Twisted", IsExtender2Checked, Extender2Key, "ext"]
+        , ["ext4", "Dripz", IsExtender4Checked, Extender4Key, "ext"], ["jb", "Jump Bug", IsJumpBugChecked, JumpBugKey, "move"]]
+    for m in XMac
+        all.Push([m.id, m.name, m.on, m.key, !m.HasOwnProp("cat") ? "ext" : (m.cat = "move" ? "move" : "combo")])
+    Loop 4
+        all.Push(["bd" A_Index, "Backdash " A_Index, [IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked][A_Index], BDKeys[A_Index], "bd"])
+    for rec in SolRecs
+        all.Push(["rec:" rec.name, rec.name, rec.enabled && !IsMacrosLocked, rec.key, "rec"])
+    rows := []
+    for r in all
+        if (HudCats[r[5]] && (h.key = "all" || h.key = r[5]))
+            rows.Push(r)
+    keys := HudKeys()
+    if (h.key = "all" || (keys.Length && keys[1] = h.key))
+        rows.Push(["lock", "Macro Lock", IsMacrosLocked, MacroLockKey, "lock"])
+    return rows
+}
+
+HudRenderInner(h) {
+    global HudW, HudMaxH, HudFlashAt, HudCatList, HudOpacity, HudCompact, HudShowKeys, HudBorder, HudGrad, HudScale
+    global UG, UAlpha, F_B, F_Sm, F_UI, F_Tiny, IsMacrosLocked
+    if (!h.visible || !IsObject(h.gui))
         return
     UCacheTrim()
     now := A_TickCount
     busy := false
     ; appear / leave
     ap := 1.0
-    if (HudLeaveAt) {
-        t := (now - HudLeaveAt) / 240
+    if (h.leaveAt) {
+        t := (now - h.leaveAt) / 240
         if (t >= 1) {
-            HudVisible := false, HudLeaveAt := 0
-            SetTimer(HudDragTick, 0)
-            HudGui.Hide()
+            h.visible := false, h.leaveAt := 0, h.busy := false
+            h.gui.Hide()
             return
         }
         ap := (1 - t) ** 2, busy := true
-    } else if (now - HudShowAt < 420) {
-        ap := UEase((now - HudShowAt) / 420), busy := true
+    } else if (now - h.showAt < 420) {
+        ap := UEase((now - h.showAt) / 420), busy := true
     }
-    ; rows: the built-in macros, every recorded dash, the macro lock
-    rows := [["ext1", "Lethal", IsExtender1Checked, Extender1Key], ["ext2", "Twisted", IsExtender2Checked, Extender2Key]
-        , ["ext4", "Dripz", IsExtender4Checked, Extender4Key], ["jb", "Jump Bug", IsJumpBugChecked, JumpBugKey]]
-    for m in XMac
-        rows.Push([m.id, m.name, m.on, m.key])
-    Loop 4
-        rows.Push(["bd" A_Index, "Backdash " A_Index, [IsBD1Checked, IsBD2Checked, IsBD3Checked, IsBD4Checked][A_Index], BDKeys[A_Index]])
-    for rec in SolRecs
-        rows.Push(["rec:" rec.name, rec.name, rec.enabled && !IsMacrosLocked, rec.key])
-    rows.Push(["lock", "Macro Lock", IsMacrosLocked, MacroLockKey])
+    rows := HudRows(h)
     ; row animations and the card height
-    cy := 46, any := false, ev := []
+    cy := 46, any := false, ev := [], onCount := 0, total := 0
     for i, r in rows {
         id := r[1]
         on := r[3] ? 1 : 0
+        if (id != "lock")
+            total++, onCount += on
         any := any || (on && id != "lock")
-        t := HudRowT.Get(id, on)
+        t := h.rowT.Get(id, on)
         t += (on - t) * 0.3
         if (Abs(on - t) < 0.02)
             t := on
         else
             busy := true
-        HudRowT[id] := t
+        h.rowT[id] := t
         vis := HudCompact ? Max(on, 0) : 1
-        e := HudRowT.Get("v" id, vis)
+        e := h.rowT.Get("v" id, vis)
         e += (vis - e) * 0.3
         if (Abs(vis - e) < 0.02)
             e := vis
         else
             busy := true
-        HudRowT["v" id] := e
+        h.rowT["v" id] := e
         ev.Push(e)
         cy += 28 * e
     }
-    idle := HudCompact && !any && !IsMacrosLocked
-    ia := HudRowT.Get("idle", idle ? 1 : 0)
+    idle := HudCompact && !any && !(IsMacrosLocked && rows.Length && rows[rows.Length][1] = "lock")
+    ia := h.rowT.Get("idle", idle ? 1 : 0)
     ia += ((idle ? 1 : 0) - ia) * 0.3
     if (Abs((idle ? 1 : 0) - ia) < 0.02)
         ia := idle ? 1 : 0
     else
         busy := true
-    HudRowT["idle"] := ia
+    h.rowT["idle"] := ia
     cy += 28 * ia
-    H := Max(56, Min(HudMaxH, Round(cy + 10)))
-    static lastScale := 0
-    if (H != HudH || HudScale != lastScale) {
-        HudH := H, lastScale := HudScale
-        if (!HudMoving) {
-            p := HudXY(H)
-            HudGui.Move(p.x, p.y, HudPx(HudW), HudPx(H))
+    cardH := Max(56, Min(HudMaxH, Round(cy + 10)))
+    if (cardH != h.h || HudScale != h.lastScale) {
+        h.h := cardH, h.lastScale := HudScale
+        if (!h.moving) {
+            p := HudXY(h)
+            h.gui.Move(p.x, p.y, HudPx(HudW), HudPx(cardH))
         } else
-            HudGui.Move(, , HudPx(HudW), HudPx(H))
+            h.gui.Move(, , HudPx(HudW), HudPx(cardH))
     }
 
     prevG := UG, prevA := UAlpha
-    UG := HudS.g
+    UG := h.s.g
     base := Max(0.15, HudOpacity / 255)
     UAlpha := base * ap
     DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
@@ -2160,38 +2308,41 @@ HudRenderInner() {
     DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", UG, "Float", sc, "Float", sc, "Int", 0)
     if (ap < 1) {
         k := 0.88 + 0.12 * ap
-        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", HudW / 2, "Float", H / 2, "Int", 0)
+        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", HudW / 2, "Float", cardH / 2, "Int", 0)
         DllCall("gdiplus\GdipScaleWorldTransform", "Ptr", UG, "Float", k, "Float", k, "Int", 0)
-        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", -HudW / 2, "Float", -H / 2, "Int", 0)
+        DllCall("gdiplus\GdipTranslateWorldTransform", "Ptr", UG, "Float", -HudW / 2, "Float", -cardH / 2, "Int", 0)
     }
     gst := GradStops(HudGrad)
-    URR(2, 5, HudW - 4, H - 6, 16, UC(0, 0, 0, 60))
-    URR(3, 3, HudW - 6, H - 7, 15, UCol("Card"))
-    URR(3, 3, HudW - 6, H - 7, 15, UCol("Win", 120))
+    URR(2, 5, HudW - 4, cardH - 6, 16, UC(0, 0, 0, 60))
+    URR(3, 3, HudW - 6, cardH - 7, 15, UCol("Card"))
+    URR(3, 3, HudW - 6, cardH - 7, 15, UCol("Win", 120))
     UGradFill(3, 3, HudW - 6, 40, 15, [UHexArr(AccentColor), UPal("Card")], 0, 0.12, (HudW - 6) * 2)
-    bs := HudMoving ? 4 : HudBorder
+    bs := h.moving ? 4 : HudBorder
     if (bs = 1)
-        URRLine(3, 3, HudW - 6, H - 7, 15, UCol("Border"))
+        URRLine(3, 3, HudW - 6, cardH - 7, 15, UCol("Border"))
     else if (bs = 2)
-        URRLine(3, 3, HudW - 6, H - 7, 15, UAcc(200))
+        URRLine(3, 3, HudW - 6, cardH - 7, 15, UAcc(200))
     else {
-        URRLine(3, 3, HudW - 6, H - 7, 15, UCol("Border", 120))
-        UGradBorder(3, 3, HudW - 6, H - 7, 15, bs = 4 ? GradStops(6) : gst, now / 1000 * 0.3, 1.8)
+        URRLine(3, 3, HudW - 6, cardH - 7, 15, UCol("Border", 120))
+        UGradBorder(3, 3, HudW - 6, cardH - 7, 15, bs = 4 ? GradStops(6) : gst, now / 1000 * 0.3, 1.8)
     }
-    ; header: brand + enabled count
-    st := gst, sh := now / 1000 * 0.22
+    ; header: the brand (or the category of a split HUD) + how many of its macros are enabled
+    title := "DESTINY"
+    for c in HudCatList
+        if (c[1] = h.key)
+            title := StrUpper(c[2])
+    st := gst, sh := now / 1000 * 0.22, n := StrLen(title)
     cx := 16
-    Loop 7 {
-        ch := SubStr("DESTINY", A_Index, 1)
-        c := GradSample(st, (A_Index - 1) / 7 * 0.85 - sh)
+    Loop n {
+        ch := SubStr(title, A_Index, 1)
+        c := GradSample(st, (A_Index - 1) / n * 0.85 - sh)
         UText(ch, cx, 12, UC(c[1], c[2], c[3]), F_B, 30, 22, 0, 1)
         cx += UTextW(ch ch, F_B) - UTextW(ch, F_B) + 1.5
     }
-    armed := UArmedCount()
-    cnt := armed "/" UMacroTotal()
+    cnt := onCount "/" total
     cw := UTextW(cnt, F_Sm) + 16
     URR(HudW - 14 - cw, 13, cw, 20, 10, UCol("Pill"))
-    UText(cnt, HudW - 14 - cw, 13, armed ? UAcc() : UCol("Muted"), F_Sm, cw, 20, 1, 1)
+    UText(cnt, HudW - 14 - cw, 13, onCount ? UAcc() : UCol("Muted"), F_Sm, cw, 20, 1, 1)
     ULine(14, 41, HudW - 14, 41, UCol("Border"))
     live := !isAppMinimized
     busy := busy || live
@@ -2203,10 +2354,9 @@ HudRenderInner() {
         if (e < 0.03)
             continue
         UAlpha := base * ap * e
-        t := HudRowT[id]
+        t := h.rowT[id]
         red := (id = "lock")
         rc := red ? UPal("Red") : GradSample(gst, now / 1000 * 0.12 + i * 0.11)
-        col := UC(rc[1], rc[2], rc[3])
         if (t > 0.01)
             URR(10, ry, HudW - 20, 24, 9, UC(rc[1], rc[2], rc[3], Round(34 * t)))
         fa := now - HudFlashAt.Get(id, -99999)
@@ -2237,48 +2387,88 @@ HudRenderInner() {
     }
     DllCall("gdiplus\GdipResetWorldTransform", "Ptr", UG)
     UG := prevG, UAlpha := prevA
-    HudBusy := busy
-    ULayered(HudGui.Hwnd, HudS.dc, HudPx(HudW), HudPx(H))
+    h.busy := busy
+    ULayered(h.gui.Hwnd, h.s.dc, HudPx(HudW), HudPx(cardH))
 }
 
-; the HUD can be picked up with the mouse while the menu is open; otherwise it is click-through
+; the HUDs can be picked up with the mouse while the menu is open; otherwise they are click-through
 HudDragTick() {
-    global HudGui, HudVisible, HudMoving, HudClickThru, HudDragOff, HudCX, HudCY, HudCustom, HudW, HudH, isAppMinimized
-    static wasDown := false
-    if (!HudVisible || !IsObject(HudGui))
+    global HudInst, HudPos, HudW, isAppMinimized
+    static wasDown := false, drag := 0
+    if (!HudAnyVisible()) {
+        SetTimer(HudDragTick, 0)
+        drag := 0, wasDown := false
         return
-    menuOpen := !isAppMinimized
-    if (menuOpen = HudClickThru) {
-        HudClickThru := !menuOpen
-        try WinSetExStyle(menuOpen ? "-0x20" : "+0x20", "ahk_id " HudGui.Hwnd)
     }
+    menuOpen := !isAppMinimized
+    for key, h in HudInst
+        if (h.visible && IsObject(h.gui) && menuOpen = h.clickThru) {
+            h.clickThru := !menuOpen
+            try WinSetExStyle(menuOpen ? "-0x20" : "+0x20", "ahk_id " h.gui.Hwnd)
+        }
     if (!menuOpen) {
-        HudMoving := false, wasDown := false
+        if (IsObject(drag))
+            drag.moving := false
+        drag := 0, wasDown := false
         return
     }
     pt := Buffer(8, 0)
     DllCall("GetCursorPos", "Ptr", pt)
     mx := NumGet(pt, 0, "Int"), my := NumGet(pt, 4, "Int")
     down := (DllCall("GetAsyncKeyState", "Int", 1, "Short") & 0x8000) != 0
-    if (HudMoving) {
+    if (IsObject(drag)) {
+        h := drag
         if (down) {
-            HudGui.Move(Max(0, Min(A_ScreenWidth - HudPx(HudW), mx - HudDragOff.x)), Max(0, Min(A_ScreenHeight - HudPx(HudH), my - HudDragOff.y)))
+            h.gui.Move(Max(0, Min(A_ScreenWidth - HudPx(HudW), mx - h.dragOff.x)), Max(0, Min(A_ScreenHeight - HudPx(h.h), my - h.dragOff.y)))
         } else {
-            HudMoving := false
-            HudGui.GetPos(&gx, &gy)
-            HudCX := gx, HudCY := gy, HudCustom := true
+            h.moving := false, drag := 0
+            h.gui.GetPos(&gx, &gy)
+            HudPos[h.key] := {x: gx, y: gy}
             USavePrefs()
         }
         HudRequest()
     } else if (down && !wasDown) {
-        HudGui.GetPos(&gx, &gy, &gw, &gh)
-        if (mx >= gx && mx < gx + gw && my >= gy && my < gy + gh && DllCall("WindowFromPoint", "Int64", (mx & 0xFFFFFFFF) | (my << 32), "Ptr") = HudGui.Hwnd) {
-            HudMoving := true
-            HudDragOff := {x: mx - gx, y: my - gy}
-            HudRequest()
-        }
+        under := DllCall("WindowFromPoint", "Int64", (mx & 0xFFFFFFFF) | (my << 32), "Ptr")
+        for key, h in HudInst
+            if (h.visible && IsObject(h.gui) && under = h.gui.Hwnd) {
+                h.gui.GetPos(&gx, &gy)
+                h.moving := true, h.dragOff := {x: mx - gx, y: my - gy}
+                drag := h
+                HudRequest()
+                break
+            }
     }
     wasDown := down
+}
+
+; Misc > Visuals: the categories on the HUD and the one / split choice
+HudCatToggle(id, *) {
+    global HudCats, ShowSidebarIndicators
+    HudCats[id] := !HudCats[id]
+    if (ShowSidebarIndicators)
+        HudOn()
+    HudRequest()
+}
+
+HudSplitToggle(*) {
+    global HudSplit, ShowSidebarIndicators
+    HudSplit := !HudSplit
+    if (ShowSidebarIndicators)
+        HudOn()
+}
+
+HudCatsTo() {
+    global HudCats
+    o := {}
+    for id, on in HudCats
+        o.%id% := on ? 1 : 0
+    return o
+}
+
+HudCatsFrom(o) {
+    global HudCats
+    for id, on in HudCats
+        HudCats[id] := (IsObject(o) && o.HasOwnProp(id)) ? (o.%id% ? true : false) : true
 }
 
 ToggleSidebarIndicators(*) {
@@ -2302,13 +2492,13 @@ ToggleStatusNotifs(*) {
 UpdateHudPosition(*) => UPickHudPos(HudPosDDL.Value)
 
 KeepHudOnTop() {
-    global HudGui, HudVisible
-    if (!HudVisible || !IsObject(HudGui))
-        return
-    try {
-        if (!(WinGetExStyle("ahk_id " HudGui.Hwnd) & 0x8))
-            WinSetAlwaysOnTop(1, "ahk_id " HudGui.Hwnd)
-    }
+    global HudInst
+    for key, h in HudInst
+        if (h.visible && IsObject(h.gui))
+            try {
+                if (!(WinGetExStyle("ahk_id " h.gui.Hwnd) & 0x8))
+                    WinSetAlwaysOnTop(1, "ahk_id " h.gui.Hwnd)
+            }
 }
 
 
@@ -2452,9 +2642,8 @@ QMs() {
     return c * 1000 / f
 }
 
-; how long a wait really took in the old AutoHotkey v1 script of Instant Lethal: v1 waits on Windows' coarse clock (15.625 ms ticks),
-; so a Sleep rounds up to the next tick (Sleep 1 = 15.6 ms, Sleep 130 = 140.6 ms). Its Send also waits 10 ms after
-; every key (no SendMode / SetKeyDelay in that script), which rounds up to 15.6 ms too: V1Sleep(10).
+; a wait on Windows' coarse clock (15.625 ms ticks): it rounds up to the next tick (1 = 15.6 ms, 130 = 140.6 ms);
+; a 10 ms key delay rounds up the same way: V1Sleep(10)
 V1Sleep(n) => Ceil(n / 15.625) * 15.625
 
 ; waits until t ms after base (sub-millisecond)
@@ -3010,7 +3199,7 @@ UGraphArea(pts, n, zy, x, w, stops, shift) {
 URecTick() {
     global URecLive, UShown, UTimerOn, RecState, CurrentTab, CurrentSubTab, MiscSub
     if (UShown && URecLive && !UTimerOn && RecState = "idle" && !WinActive(GAME_EXE)
-        && ((CurrentTab = 1 && CurrentSubTab = 4) || (CurrentTab = 4 && MiscSub = 2)))
+        && ((CurrentTab = 1 && CurrentSubTab = 5) || (CurrentTab = 4 && MiscSub = 2)))
         URender()
 }
 
@@ -3946,7 +4135,14 @@ DestinyOpen() {
         HudOn()
 }
 
-Global ChangeLog := [["Destiny v1.1 Beta", [
+Global ChangeLog := [["Destiny v1.2 Beta", [
+    "New Combos tab: Saitama, Garou (Kyoto), Blade Master (Backdash Slice)",
+    "New Extenders: XCZ, Supa with its own lagswitch",
+    "New Movement: Side Dash Cancel",
+    "Quick save config button, keybinds sorted by category",
+    "HUD: pick which categories it shows, one HUD or one per category",
+    "Fixed: input delay, FPS spikes and menu lag after playing a while"]]
+    , ["Destiny v1.1 Beta", [
     "New Extenders: Solitude, Twisted 2, Oreo",
     "Improved Instant Lethal",
     "Improved Instant Twisted",
@@ -4107,12 +4303,12 @@ ExecuteExtender1(*) {
     ShowStatus("INSTANT LETHAL", "0x082A13", 100)
     BlinkIndicator(1)
     
-    ; Sensitivity scaling (OREO Instant Lethal): the flick is 1360 x 0.8 / your sens (3022 at 0.36)
+    ; Sensitivity scaling: the flick is 1360 x 0.8 / your sens (3022 at 0.36)
     a2 := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
     b2 := (BaseSensitivity > 0) ? BaseSensitivity : 0.8
     l1 := Round(1360 * (b2 / a2))
 
-    ; Straight dash, timed like the v1 script ran it (see V1Sleep):
+    ; Straight dash, timed on the coarse clock (see V1Sleep):
     ; Sleep 16, Sleep 130, flick; each Send waits a key delay after it
     kd := V1Sleep(10)
     base := QMs()
@@ -4130,7 +4326,7 @@ ExecuteExtender1(*) {
     MacroFx()
 }
 
-; --- Macro 2: Instant Twisted (made on 0.2 sens)
+; --- Macro 2: Instant Twisted (counts at 0.2 sens)
 ExecuteExtender2(*) {
     global isExtender2Running, RobloxSensitivity
     if (!IsExtender2Checked || isExtender2Running || !WinActive(GAME_EXE))
@@ -4250,7 +4446,12 @@ BDSetKeysFrom(kb) {
 Global XMac := [
     {id: "sol", name: "Solitude", desc: "solitude extender", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
     {id: "tw2", name: "Twisted 2", desc: "twisted 2 dash", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
-    {id: "oreo", name: "Oreo", desc: "oreo tech", on: false, key: "", box: UVal("NONE"), running: false, saved: false}
+    {id: "oreo", name: "Oreo", desc: "oreo tech", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
+    {id: "xcz", name: "XCZ", desc: "xcz tech", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
+    {id: "supa", name: "Supa", desc: "supa tech", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
+    {id: "kyoto", name: "Kyoto", desc: "kyoto combo", cat: "garou", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
+    {id: "sdc", name: "Side Dash Cancel", desc: "side dashes and cancels it turning to a normal dash", cat: "move", on: false, key: "", box: UVal("NONE"), running: false, saved: false},
+    {id: "bdslice", name: "Backdash Slice", desc: "quick slice backdash", cat: "blade", on: false, key: "", box: UVal("NONE"), running: false, saved: false}
 ]
 Global XKeysOn := []
 
@@ -4258,6 +4459,8 @@ Global XKeysOn := []
 ; and when Q goes down / up (qd / qu, ms; Q right away and a 10 ms tap when not given)
 XSchedule(i) {
     global XMac
+    if (XMac[i].id = "xcz")                                   ; XCZ (counts at 0.8 sens): Q, 10 ms,
+        return {sens: 0.8, ev: [[10, 300], [160, -450]]}      ; right 300, 150 ms, left 450
     if (XMac[i].id = "tw2")
         return {sens: 0.5, qd: 31, qu: 111, ev: [[0, 277], [141, -360]]}
                                                               ; script: landed a bit too far left)
@@ -4335,12 +4538,153 @@ OreoRecording() {
     return OreoRec
 }
 
+; Backdash Slice (Blade Master combo): a side dash (D + Q held 20 ms), the camera turns 90 deg to the right (225 / sens counts,
+; the same 90 deg as Instant Twisted), then 1
+BackdashSliceRun() {
+    global RobloxSensitivity
+    sens := (RobloxSensitivity > 0) ? RobloxSensitivity : 0.36
+    t0 := QMs()
+    SendInput("{d down}{q down}")
+    QWaitUntil(t0, V1Sleep(20))                              ; (~31 ms)
+    SendInput("{d up}{q up}")
+    QWaitUntil(t0, 140)                                       ; (the side dash plays first, then the camera turns)
+    DllCall("mouse_event", "UInt", 0x01, "Int", Round(225 / sens), "Int", 0, "UInt", 0, "UPtr", 0)
+    SendInput("1")
+}
+
+; Kyoto (Garou combo): 1, D held, Shift, then 2 and a side dash (Q tap while D is held), then D is let go; times count
+; from the key press
+KyotoRun() {
+    steps := [[0, "{1 down}{1 up}"], [100, "{d down}"], [600, "{Shift}"], [2220, "{d down}{2 down}{2 up}{q down}"], [2230, "{q up}"]
+        , [2240, "{d up}"]]
+    t0 := QMs()
+    for st in steps {
+        QWaitUntil(t0, st[1])
+        SendInput(st[2])
+    }
+}
+
+; Supa: jump, M1 held 190 ms and the dash (Q), then the Supa lagswitch (start, length and bursts from its sliders);
+; times count from the key press
+SupaRun() {
+    global SupaLag, SupaLagAt, SupaLagMs, SupaBursts
+    steps := [[0, "{Space down}"], [20, "{LButton down}"], [210, "{LButton up}"], [400, "{Space up}{q down}{q up}"]]
+    if (SupaLag) {                                            ; (each freeze goes in at its time, before or after the others)
+        part := Max(10, Round(SupaLagMs / SupaBursts))
+        Loop SupaBursts {
+            at := SupaLagAt + (A_Index - 1) * (part + 15)
+            i := 1
+            while (i <= steps.Length && steps[i][1] <= at)
+                i++
+            steps.InsertAt(i, [at, "freeze", part])
+        }
+    }
+    t0 := QMs()
+    for st in steps {
+        QWaitUntil(t0, st[1])
+        if (st[2] = "freeze")
+            SupaFreeze(st[3])
+        else
+            SendInput(st[2])
+    }
+}
+
+; Supa lagswitch: Roblox freezes for ms; a Windows timer resumes it on time (Destiny keeps going meanwhile), and if
+; Destiny closes in the middle the game is resumed first. SupaLagAt: when it starts (ms after the key press, 420 = right
+; after the dash), SupaLagMs: how long, SupaBursts: split into that many short freezes, 15 ms apart
+Global SupaLag := false, SupaLagAt := 420, SupaLagMs := 250, SupaBursts := 1, SupaFz := 0
+
+SupaFreeze(ms) {
+    global SupaFz, TargetProcess
+    if (IsObject(SupaFz)) {
+        if (QMs() < SupaFz.until)                             ; (still frozen)
+            return
+        SupaFreezeDone(SupaFz)                                ; the last one has run out: tidy it up before the next
+    }
+    pid := ProcessExist(TargetProcess)
+    if (!pid)
+        return
+    h := 0
+    for acc in [0x0800, 0x1F0FFF] {
+        h := DllCall("OpenProcess", "UInt", acc, "Int", 0, "UInt", pid, "Ptr")
+        if (h)
+            break
+    }
+    if (!h)
+        return
+    if (DllCall("ntdll\NtSuspendProcess", "Ptr", h) != 0) {
+        DllCall("CloseHandle", "Ptr", h)
+        return
+    }
+    ntres := DllCall("GetProcAddress", "Ptr", DllCall("GetModuleHandle", "Str", "ntdll", "Ptr"), "AStr", "NtResumeProcess", "Ptr")
+    t := 0
+    if (!DllCall("CreateTimerQueueTimer", "Ptr*", &t, "Ptr", 0, "Ptr", ntres, "Ptr", h, "UInt", ms, "UInt", 0, "UInt", 0x20))
+        t := 0
+    fz := {h: h, t: t, until: QMs() + ms, done: false}
+    SupaFz := fz
+    SetTimer(SupaFreezeDone.Bind(fz), -(ms + (t ? 40 : 0)))
+}
+
+; ends one freeze: the Windows timer is removed first (so it can never resume a later freeze), then the game is resumed
+; (nothing changes when the timer already did) and the handle closed
+SupaFreezeDone(fz) {
+    global SupaFz
+    if (fz.done)
+        return
+    fz.done := true
+    if (fz.t)
+        DllCall("DeleteTimerQueueTimer", "Ptr", 0, "Ptr", fz.t, "Ptr", 0)
+    DllCall("ntdll\NtResumeProcess", "Ptr", fz.h)
+    DllCall("CloseHandle", "Ptr", fz.h)
+    if (SupaFz = fz)
+        SupaFz := 0
+}
+
+SupaUnfreezeOnExit(*) {
+    global SupaFz
+    if (IsObject(SupaFz) && !SupaFz.done)
+        DllCall("ntdll\NtResumeProcess", "Ptr", SupaFz.h)
+}
+OnExit(SupaUnfreezeOnExit)
+
 XRun(i, *) {
     global XMac, RobloxSensitivity
     m := XMac[i]
     if (!m.on || m.running || !WinActive(GAME_EXE))
         return
     m.running := true
+    if (m.id = "sdc") {                                       ; Side Dash Cancel: W + Q, then D + Q, all at once
+        SendInput("{w down}{q down}{w up}{q up}{d down}{q down}{d up}{q up}")
+        m.running := false
+        SetTimer(ShowStatus.Bind("SIDE DASH CANCEL", "0x082A13", 300), -1)
+        SetTimer(HudFlash.Bind(m.id), -1)
+        MacroFx()
+        return
+    }
+    if (m.id = "bdslice") {
+        BackdashSliceRun()
+        m.running := false
+        SetTimer(ShowStatus.Bind("BACKDASH SLICE", "0x082A13", 300), -1)
+        SetTimer(HudFlash.Bind(m.id), -1)
+        MacroFx()
+        return
+    }
+    if (m.id = "kyoto") {
+        KyotoRun()
+        m.running := false
+        SetTimer(ShowStatus.Bind("KYOTO", "0x082A13", 300), -1)
+        SetTimer(HudFlash.Bind(m.id), -1)
+        MacroFx()
+        return
+    }
+    if (m.id = "supa") {
+        SupaRun()
+        m.running := false
+        SetTimer(ShowStatus.Bind("SUPA", "0x082A13", 300), -1)
+        SetTimer(HudFlash.Bind(m.id), -1)
+        MacroFx()
+        return
+    }
     if (m.id = "oreo") {
         SolReplay(OreoRecording())
         m.running := false
@@ -4434,16 +4778,20 @@ XLock(lock) {
 
 ; configs: on / off and keys
 XSaveTo(cfg) {
-    global XMac
+    global XMac, SupaLag, SupaLagAt, SupaLagMs, SupaBursts
     for m in XMac {
         nm := m.id, kn := m.id "_key"
         cfg.macros.%nm% := m.on ? 1 : 0
         cfg.keybinds.%kn% := m.key
     }
+    cfg.macros.supa_lag := SupaLag ? 1 : 0
+    cfg.macros.supa_lag_at := SupaLagAt
+    cfg.macros.supa_lag_ms := SupaLagMs
+    cfg.macros.supa_bursts := SupaBursts
 }
 
 XLoadFrom(cfg) {
-    global XMac
+    global XMac, SupaLag, SupaLagAt, SupaLagMs, SupaBursts
     mc := cfg.HasOwnProp("macros") ? cfg.macros : {}
     kb := cfg.HasOwnProp("keybinds") ? cfg.keybinds : {}
     for m in XMac {
@@ -4452,6 +4800,10 @@ XLoadFrom(cfg) {
         m.key := kb.HasOwnProp(kn) ? kb.%kn% : ""
         m.box.Text := FormatKeyName(m.key)
     }
+    SupaLag := mc.HasOwnProp("supa_lag") ? (mc.supa_lag ? true : false) : false
+    SupaLagAt := mc.HasOwnProp("supa_lag_at") ? Max(0, Min(800, Integer(mc.supa_lag_at))) : 420
+    SupaLagMs := mc.HasOwnProp("supa_lag_ms") ? Max(10, Min(1000, Integer(mc.supa_lag_ms))) : 250
+    SupaBursts := mc.HasOwnProp("supa_bursts") ? Max(1, Min(10, Integer(mc.supa_bursts))) : 1
 }
 
 ExecuteExtender4(*) {
@@ -6176,6 +6528,20 @@ LoadProfileInner(configName) {
 }
 
 
+Global QuickSavedAt := -99999
+
+; the sidebar's Save config button: saves to the config in use (the name field; Default when it is empty)
+QuickSave(*) {
+    global EditProfileName, QuickSavedAt
+    name := Trim(EditProfileName.Value)
+    if (name = "")
+        name := "Default", EditProfileName.Value := name
+    SaveProfileInternal(name)
+    RefreshProfileList()
+    QuickSavedAt := A_TickCount
+    SetTimer(UReq, -1450)
+}
+
 SaveCustomProfile(*) {
     global EditProfileName
     name := Trim(EditProfileName.Value)
@@ -6188,13 +6554,14 @@ SaveCustomProfile(*) {
 }
 
 LoadCustomProfile(*) {
-    global ProfileDDL
+    global ProfileDDL, EditProfileName
     name := ProfileDDL.Text
     if (name = "") {
         ShowStatus("SELECT PROFILE", "0x2A0808", 500)
         return
     }
     LoadProfileInternal(name)
+    EditProfileName.Value := name
 }
 
 DeleteCustomProfile(*) {
