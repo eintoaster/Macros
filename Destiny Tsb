@@ -15,21 +15,54 @@ CoordMode("Menu", "Screen")
 Global DestinyVersion := "Destiny v1.2 Beta"
 Global GAME_EXE := "ahk_exe RobloxPlayerBeta.exe"
 Global TargetProcess := "RobloxPlayerBeta.exe"
-Global ConfigBase := RTrim(IsSet(M0MLoaderDir) ? M0MLoaderDir : A_ScriptDir, "\")
-Global ConfigDir := ConfigBase "\Destiny TSB\configs"
-if (!DirExist(ConfigDir)) {
-    if (DirExist(ConfigBase "\Destiny\configs")) {
-        try DirCopy(ConfigBase "\Destiny\configs", ConfigDir)
-    } else if (!IsSet(M0MLoaderDir) && DirExist(A_ScriptDir "\configs")) {
-        try DirCopy(A_ScriptDir "\configs", ConfigDir)
-    }
-    try DirCreate(ConfigDir)
-}
-if (!DirExist(ConfigDir)) {
-    ConfigDir := A_AppData "\Destiny TSB\configs"
-    try DirCreate(ConfigDir)
-}
+; the configs always live in a "Destiny TSB" folder next to this script (or next to the loader when it started us);
+; wherever the script or loader is moved, that folder is made again there. AppData is only used when Windows does not let us write there.
+Global ConfigBase := RTrim(IsSet(M0MLoaderDir) && M0MLoaderDir != "" ? M0MLoaderDir : A_ScriptDir, "\")
+Global ConfigHome := ConfigBase "\Destiny TSB\configs"
+Global ConfigSpare := A_AppData "\Destiny TSB\configs"
 Global ConfigExt := ".json"
+Global ConfigDir := ConfigSetup()
+
+; makes the Destiny TSB folder next to the script/loader and returns the configs folder to use
+ConfigSetup() {
+    global ConfigBase, ConfigHome, ConfigSpare, ConfigExt, M0MLoaderDir
+    isNew := !DirExist(ConfigHome)
+    try DirCreate(ConfigHome)
+    if (!CanWrite(ConfigHome)) {                              ; (a protected place: AppData instead, but only then)
+        try DirCreate(ConfigSpare)
+        return ConfigSpare
+    }
+    if (isNew) {                                              ; (a fresh folder: the configs from before come along, nothing is overwritten)
+        froms := [ConfigBase "\Destiny\configs", ConfigSpare]
+        if (!IsSet(M0MLoaderDir))
+            froms.InsertAt(1, A_ScriptDir "\configs")
+        for src in froms {
+            if (src = ConfigHome || !DirExist(src))
+                continue
+            Loop Files, src "\*" ConfigExt
+                if (!FileExist(ConfigHome "\" A_LoopFileName))
+                    try FileCopy(A_LoopFileFullPath, ConfigHome "\" A_LoopFileName)
+            ini := RegExReplace(src, "\\configs$") "\ui.ini", home := RegExReplace(ConfigHome, "\\configs$") "\ui.ini"
+            if (FileExist(ini) && !FileExist(home))
+                try FileCopy(ini, home)
+        }
+    }
+    return ConfigHome
+}
+
+; true when a file can really be written in that folder (a folder can exist and still be blocked)
+CanWrite(dir) {
+    if (!DirExist(dir))
+        return false
+    test := dir "\~write" A_TickCount ".tmp"
+    try {
+        FileAppend("ok", test)
+        FileDelete(test)
+        return true
+    }
+    try FileDelete(test)
+    return false
+}
 
 Global CurrentTab := 1
 Global CurrentSubTab := 1
@@ -6350,14 +6383,10 @@ MacroLockToggle(*) {
 
 
 EnsureConfigDir() {
-    global ConfigDir
-    if DirExist(ConfigDir)
+    global ConfigDir, ConfigHome
+    if (ConfigDir = ConfigHome && DirExist(ConfigDir))
         return
-    try DirCreate(ConfigDir)
-    catch {
-        ConfigDir := A_AppData "\Destiny TSB\configs"
-        try DirCreate(ConfigDir)
-    }
+    ConfigDir := ConfigSetup()                                ; (the folder was deleted, or we were on AppData: next to the script again if possible)
 }
 
 SaveProfileInternal(configName) {
