@@ -717,7 +717,7 @@ UHide() {
 }
 
 UHideNow() {
-    global UGui, UShown, UX, UY
+    global UGui, UShown, UX, UY, ExitBusy
     UGui.GetPos(&x, &y)
     UX := x, UY := y
     UShown := false
@@ -725,7 +725,7 @@ UHideNow() {
     UGui.Hide()
     ; hiding the menu would hand the focus to whatever window is behind it (e.g. the folder Destiny was started from):
     ; Roblox gets it instead
-    if (hadFocus && WinExist(GAME_EXE))
+    if (hadFocus && WinExist(GAME_EXE) && !ExitBusy)          ; (not when Destiny is closing / reloading)
         try WinActivate(GAME_EXE)
     USavePrefs()
 }
