@@ -5367,6 +5367,18 @@ ShowHitEffect() {
     }
 }
 
+; the hit screen effect is drawn ahead (once a second at most, only when its look changed and nothing is showing)
+HitPrewarm() {
+    global HitOn, HitVig, VigState, VigSig, VigStyle, VigAnim
+    if (!HitOn || !HitVig || IsObject(VigState) || VigAnim || VigRedrawGap(VigStyle) || VigStyle = 4)
+        return
+    if (VigSignature() != VigSig) {
+        VigEnsure()
+        VigRender()
+    }
+}
+SetTimer(HitPrewarm, 1000)
+
 HideHitEffect() {
     global VigState
     if (IsObject(VigState) && !VigState.hideAt)
@@ -5515,7 +5527,8 @@ HitShakeStart(len, amt := 40) {
         HitShk := {hw: hw, x: x, y: y}
     }
     HitShk.t0 := A_TickCount, HitShk.len := Max(80, len), HitShk.amt := amt, HitShk.ang := Random(0, 6283) / 1000
-    SetTimer(HitShakeTick, 10)
+    HitShk.lx := 0, HitShk.ly := 0
+    SetTimer(HitShakeTick, 16)
 }
 
 HitShakeTick() {
@@ -5545,14 +5558,19 @@ HitShakeTick() {
         case 6: dy := -a0 * 1.5 * Exp(-el / 75) + r() * a * 0.2, dx := r() * a * 0.3
         default: dx := r() * a, dy := r() * a
     }
-    DllCall("SetWindowPos", "Ptr", HitShk.hw, "Ptr", 0, "Int", HitShk.x + Round(dx), "Int", HitShk.y + Round(dy), "Int", 0, "Int", 0, "UInt", 0x15)
+    dx := Round(dx), dy := Round(dy)
+    if (dx = HitShk.lx && dy = HitShk.ly)
+        return
+    HitShk.lx := dx, HitShk.ly := dy
+    ; async (Destiny never waits for the game to answer), no repaint, no resize / z-order / activation
+    DllCall("SetWindowPos", "Ptr", HitShk.hw, "Ptr", 0, "Int", HitShk.x + dx, "Int", HitShk.y + dy, "Int", 0, "Int", 0, "UInt", 0x401D)
 }
 
 HitShakeRestore(*) {
     global HitShk
     SetTimer(HitShakeTick, 0)
     if (IsObject(HitShk)) {
-        try DllCall("SetWindowPos", "Ptr", HitShk.hw, "Ptr", 0, "Int", HitShk.x, "Int", HitShk.y, "Int", 0, "Int", 0, "UInt", 0x15)
+        try DllCall("SetWindowPos", "Ptr", HitShk.hw, "Ptr", 0, "Int", HitShk.x, "Int", HitShk.y, "Int", 0, "Int", 0, "UInt", 0x4015)
         HitShk := 0
     }
 }
